@@ -1,0 +1,860 @@
+from collections import defaultdict
+from functools import reduce
+from itertools import chain
+
+import casadi as cas
+import sympy
+from casadi import Function
+
+
+def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
+    if keys is None:
+        keys = [f"{prefix}{i + 1}" for i in range(len(lists_of_names))]
+    elif len(lists_of_names) > len(set(keys)):
+        raise ValueError("not enough unique keys")
+    names = [
+        f"{key}_{name}" for key, names in zip(keys, lists_of_names) for name in names
+    ]
+    if len(names) > len(set(names)):
+        raise ValueError("non-unique names")
+    return names
+
+
+def merge_param_dicts(list_of_dicts, keys=None, verbose_names=False, prefix="sys"):
+    """Merges a list of parameter dictionaries into one dictionary of
+    unique model variables. Note that the same symbolic variables
+    (dictionary values) may be used multiple times for different
+    model variables (dictionary keys). However, if different symbolic
+    variables are found with the same key, these keys are renamed
+    to make them unique.
+
+    Example:
+    >>> K = cas.SX.sym('K')
+    >>> T1_1 = cas.SX.sym('T1_1')
+    >>> T1_2 = cas.SX.sym('T1_2')
+    >>> T2_2 = cas.SX.sym('T2_2')
+    >>> params1 = {'K': K, 'T1': T1_1}
+    >>> params2 = {'K': K, 'T1': T1_2, 'T2': T2_2}
+    >>> merge_param_dicts([params1, params2], keys=['sys1', 'sys2'])
+    {'K': SX(K), 'T1_sys2': SX(T1_2), 'T1_sys1': SX(T1_1), 'T2': SX(T2_2)}
+    >>> merge_param_dicts([params1, params2], keys=['sys1', 'sys2'], verbose_names=True)
+    {'K_sys1_K_sys2': SX(K),
+    'T1_sys1': SX(T1_1),
+    'T1_sys2': SX(T1_2),
+    'T2_sys2': SX(T2_2)}
+    """
+    # TODO: This function is horrendous.  Surely there is a simpler way.
+
+    if keys is None:
+        keys = [f"{prefix}{i + 1}" for i in range(len(list_of_dicts))]
+    elif len(list_of_dicts) > len(set(keys)):
+        raise ValueError("not enough unique keys")
+
+    # Identify each unique parameter and where it is used
+    keys_for_each_param = defaultdict(list)
+    for i, d in enumerate(list_of_dicts):
+        for sub_key, param in d.items():
+            keys_for_each_param[param].append((i, sub_key))
+
+    # Check for keys which are used by more than one parameter
+    params_for_each_key = defaultdict(set)
+    for param, keys_by_group in keys_for_each_param.items():
+        unique_keys = set(v for k, v in keys_by_group)
+        if len(unique_keys) == 1:
+            if verbose_names:
+                # Create a composite parameter name
+                new_key = f"{'_'.join(sorted(keys[i] for i, _ in keys_by_group))}_{unique_keys.pop()}"
+            else:
+                # Create a generic parameter name
+                new_key = unique_keys.pop()
+        else:
+            # Create a composite parameter name
+            new_key = "_".join(
+                chain.from_iterable(sorted((keys[i], key) for i, key in keys_by_group))
+            )
+        params_for_each_key[new_key].add(
+            (tuple(keys[i] for i, _ in keys_by_group), param)
+        )
+
+    merged_params = {}
+    for key, params in params_for_each_key.items():
+        if len(params) > 1:
+            # Create composite parameter names if needed
+            # Note: params is a set of tuples so needs to be sorted
+            for groups, param in sorted(params):
+                new_key = f"{'_'.join(groups)}_{key}"
+                merged_params[new_key] = param
+        else:
+            _, param = params.pop()
+            merged_params[key] = param
+
+    # TODO: Is this needed?
+    assert len(merged_params) == len(keys_for_each_param)
+
+    return merged_params
+
+
+def nonlinear_state_space_model_from_linear(A, B, C, D, params=None, state_names=None):
+    """Creates functions, f, h, for simulating a linear, continous-time
+    state-space model with parameter matrices A, B, C, D.
+
+        dx/dt(t) = f(t, x(t), u(t), *args)
+            y(t) = h(t, x(t), u(t), *args)
+
+    """
+    n = A.shape[0]
+    assert A.shape[1] == n
+    nu = B.shape[1]
+    assert B.shape[0] == n
+    ny = C.shape[0]
+    assert C.shape[1] == n
+    assert D.shape == (ny, nu)
+    if params is None:
+        params = {}
+    if state_names is None:
+        state_names = [f"x_{i+1}" for i in range(n)]
+
+    # Construct ODE right-hand side
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+    rhs = A @ x + B @ u
+    f = Function(
+        "f",
+        [t, x, u, *params.values()],
+        [rhs],
+        ["t", "x", "u", *params.keys()],
+        ["rhs"],
+    )
+
+    # Construct output function
+    y = C @ x + D @ u
+    h = Function(
+        "h", [t, x, u, *params.values()], [y], ["t", "x", "u", *params.keys()], ["y"]
+    )
+
+    return {
+        "f": f,
+        "h": h,
+        "n": n,
+        "nu": nu,
+        "ny": ny,
+        "params": params,
+        "state_names": state_names,
+    }
+
+
+def make_symbolic_vars_from_kwargs(**kwargs):
+    out_vars = {}
+    for key, value in kwargs.items():
+        if value is None:
+            out_vars[key] = cas.SX.sym(key)
+        elif isinstance(value, str):
+            out_vars[key] = cas.SX.sym(value)
+        else:
+            out_vars[key] = value
+    return out_vars
+
+
+def state_space_model_linear_direct_transmission(nu=None, D=None, params=None):
+    """Parameters for a continuous time linear state-space model
+    that has no dynamics. Either D or nu must be specified.
+    If the D matrix is not provided, it is set to an identity
+    matrix of shape (nu, nu).
+    """
+    if D is None:
+        D = cas.SX.eye(nu)
+        ny = nu
+    else:
+        ny, nu = D.shape
+    if params is None:
+        params = {}
+    n = 0
+    A = cas.SX.zeros(n, n)
+    B = cas.SX.zeros(n, nu)
+    C = cas.SX.zeros(ny, n)
+    return {
+        "A": A,
+        "B": B,
+        "C": C,
+        "D": D,
+        "n": n,
+        "nu": nu,
+        "ny": ny,
+        "params": params,
+        "state_names": [],
+    }
+
+
+def state_space_model_linear_FO_no_gain(T1=None):
+    """Parameters for a continuous time state-space model.
+
+    These can be verified using sympy control module. However, note there seems
+    to be a bug in Sympy version 1.13.0:
+
+    >>> import sympy
+    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
+    >>> s, T1 = sympy.symbols("s, T1")
+    >>> G = TransferFunction(1, 1 + T1*s, s)
+    >>> sys = G.rewrite(StateSpace)
+    >>> print(sys)
+    StateSpace(Matrix([[-1/T1]]), Matrix([[1]]), Matrix([[1]]), Matrix([[0]]))
+
+    The answer should be:
+    StateSpace(Matrix([[-1/T1]]), Matrix([[1]]), Matrix([[1/T1]]), Matrix([[0]]))
+    """
+    kwargs = make_symbolic_vars_from_kwargs(T1=T1)
+    T1 = kwargs["T1"]
+    A = -1 / T1
+    B = cas.SX(1)
+    C = 1 / T1
+    D = cas.sparsify(cas.SX(0))
+    params = {"T1": T1}
+    return {"A": A, "B": B, "C": C, "D": D, "params": params, "state_names": ["x_1"]}
+
+
+def state_space_model_linear_FO(K=None, T1=None):
+    """Parameters for a continuous time state-space model.
+
+    These can be verified using sympy control module. However, note there seems
+    to be a bug in Sympy version 1.13.0:
+
+    >>> import sympy
+    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
+    >>> s, K, T1 = sympy.symbols("s, K, T1")
+    >>> G = TransferFunction(K, 1 + T1*s, s)
+    >>> sys = G.rewrite(StateSpace)
+    >>> print(sys)
+    StateSpace(Matrix([[-1/T1]]), Matrix([[1]]), Matrix([[K]]), Matrix([[0]]))
+
+    The answer should be:
+    StateSpace(Matrix([[-1/T1]]), Matrix([[1]]), Matrix([[K/T1]]), Matrix([[0]]))
+    """
+    kwargs = make_symbolic_vars_from_kwargs(K=K, T1=T1)
+    K = kwargs["K"]
+    T1 = kwargs["T1"]
+    A = -1 / T1
+    B = cas.SX(1)
+    C = K / T1
+    D = cas.sparsify(cas.SX(0))
+    params = {"K": K, "T1": T1}
+    return {"A": A, "B": B, "C": C, "D": D, "params": params, "state_names": ["x_1"]}
+
+
+def state_space_model_linear_FOPDT(K=None, T1=None, delay=None):
+    # Note: the delay is applied during discrete-time integration step
+    model = state_space_model_linear_FO(K, T1)
+    if delay is None:
+        model["params"]["delay"] = cas.SX.sym("delay")
+    return model
+
+
+def state_space_model_linear_O2(K=None, T1=None, T2=None):
+    """Parameters for a continuous time state-space model.
+
+    These can be verified using sympy control module. However, note there seems
+    to be a bug in Sympy version 1.13.0:
+
+    >>> import sympy
+    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
+    >>> s, K, T1, T2 = sympy.symbols("s, K, T1, T2")
+    >>> G = TransferFunction(K, (1 + T1*s) * (1 + T2*s), s)
+    >>> sys = G.rewrite(StateSpace)
+    >>> print(sys)
+    StateSpace(Matrix([
+    [         0,                  1],
+    [-1/(T1*T2), (-T1 - T2)/(T1*T2)]]), Matrix([
+    [0],
+    [1]]), Matrix([[K, 0]]), Matrix([[0]]))
+
+    The answer should be:
+    StateSpace(Matrix([
+    [         0,                  1],
+    [-1/(T1*T2), (-T1 - T2)/(T1*T2)]]), Matrix([
+    [0],
+    [1]]), Matrix([[K/(T1*T2), 0]]), Matrix([[0]]))
+    """
+    kwargs = make_symbolic_vars_from_kwargs(K=K, T1=T1, T2=T2)
+    K = kwargs["K"]
+    T1 = kwargs["T1"]
+    T2 = kwargs["T2"]
+    A = cas.sparsify(cas.blockcat([[0, 1], [-1 / (T1 * T2), (-T1 - T2) / (T1 * T2)]]))
+    B = cas.sparsify(cas.blockcat([[0], [1]]))
+    C = cas.sparsify(cas.blockcat([[K / (T1 * T2), 0]]))
+    D = cas.sparsify(cas.DM(0))
+    params = {"K": K, "T1": T1, "T2": T2}
+    return {
+        "A": A,
+        "B": B,
+        "C": C,
+        "D": D,
+        "params": params,
+        "state_names": ["x_1", "x_2"],
+    }
+
+
+def state_space_model_linear_O2_no_gain(T1=None, T2=None):
+    """Parameters for a continuous time state-space model.
+
+    These can be verified using sympy control module. However, note there seems
+    to be a bug in Sympy version 1.13.0:
+
+    >>> import sympy
+    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
+    >>> s, T1, T2 = sympy.symbols("s, T1, T2")
+    >>> G = TransferFunction(1, (1 + T1*s) * (1 + T2*s), s)
+    >>> sys = G.rewrite(StateSpace)
+    >>> print(sys)
+    StateSpace(Matrix([
+    [         0,                  1],
+    [-1/(T1*T2), (-T1 - T2)/(T1*T2)]]), Matrix([
+    [0],
+    [1]]), Matrix([[1, 0]]), Matrix([[0]]))
+
+        The answer should be:
+    StateSpace(Matrix([
+    [         0,                  1],
+    [-1/(T1*T2), (-T1 - T2)/(T1*T2)]]), Matrix([
+    [0],
+    [1]]), Matrix([[1/(T1*T2), 0]]), Matrix([[0]])))
+    """
+    kwargs = make_symbolic_vars_from_kwargs(T1=T1, T2=T2)
+    T1 = kwargs["T1"]
+    T2 = kwargs["T2"]
+    A = cas.sparsify(cas.blockcat([[0, 1], [-1 / (T1 * T2), (-T1 - T2) / (T1 * T2)]]))
+    B = cas.sparsify(cas.blockcat([[0], [1]]))
+    C = cas.sparsify(cas.blockcat([[1 / (T1 * T2), 0]]))
+    D = cas.sparsify(cas.DM(0))
+    params = {"T1": T1, "T2": T2}
+    return {
+        "A": A,
+        "B": B,
+        "C": C,
+        "D": D,
+        "params": params,
+        "state_names": ["x_1", "x_2"],
+    }
+
+
+def state_space_model_linear_O2_underdamped_no_gain(zeta=None, omega_n=None):
+    """Parameters for a continuous time state-space model of a possibly
+    underdamped second order system with the following transfer function:
+
+    G = 1 / (s**2 + 2 * zeta * omega_n * s + omega_n**2)
+
+    where
+        s : Laplace variable
+        zeta : damping coefficient
+        omega_n : natural frequency
+
+    These can be verified using sympy control module:
+
+    >>> import sympy
+    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
+    >>> s, zeta, omega_n = sympy.symbols("s, zeta, omega_n")
+    >>> G = TransferFunction(1, (s**2 + 2 * zeta*omega_n * s + omega_n**2), s)
+    >>> G.rewrite(StateSpace)
+    StateSpace(Matrix([
+    [          0,               1],
+    [-omega_n**2, -2*omega_n*zeta]]), Matrix([
+    [0],
+    [1]]), Matrix([[1, 0]]), Matrix([[0]]))
+    """
+    kwargs = make_symbolic_vars_from_kwargs(zeta=zeta, omega_n=omega_n)
+    zeta = kwargs["zeta"]
+    omega_n = kwargs["omega_n"]
+    A = cas.sparsify(cas.blockcat([[0, 1], [-(omega_n**2), -2 * omega_n * zeta]]))
+    B = cas.sparsify(cas.blockcat([[0], [1]]))
+    C = cas.sparsify(cas.blockcat([[1, 0]]))
+    D = cas.sparsify(cas.DM(0))
+    params = {"zeta": zeta, "omega_n": omega_n}
+    return {
+        "A": A,
+        "B": B,
+        "C": C,
+        "D": D,
+        "params": params,
+        "state_names": ["x_1", "x_2"],
+    }
+
+
+def block_diag(matrices, square=False):
+    col_sizes = [m.shape[1] for m in matrices]
+    rows = []
+    for i, matrix in enumerate(matrices):
+        row = []
+        n_rows = matrix.shape[0]
+        if square:
+            assert n_rows == col_sizes[i], "matrices not square"
+        for j in range(i):
+            row.append(cas.SX.zeros(n_rows, col_sizes[j]))
+        row.append(matrix)
+        for j in range(i + 1, len(col_sizes)):
+            row.append(cas.SX.zeros(n_rows, col_sizes[j]))
+        rows.append(row)
+    return cas.blockcat(rows)
+
+
+def linear_systems_in_parallel(systems, keys=None, verbose_names=False, prefix="sys"):
+    """Combine a collection of linear systems into one large parrallel system."""
+    A = cas.sparsify(block_diag(list(sys["A"] for sys in systems), square=True))
+    B = cas.sparsify(block_diag(list(sys["B"] for sys in systems)))
+    C = cas.sparsify(block_diag(list(sys["C"] for sys in systems)))
+    D = cas.sparsify(block_diag(list(sys["D"] for sys in systems)))
+    params = merge_param_dicts(
+        [sys["params"] for sys in systems],
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+    )
+    state_names = concatenate_lists_of_names(
+        [sys["state_names"] for sys in systems], keys=keys, prefix=prefix
+    )
+    return {
+        "A": A,
+        "B": B,
+        "C": C,
+        "D": D,
+        "params": params,
+        "state_names": state_names,
+    }
+
+
+def linear_systems_in_series(systems, keys=None, verbose_names=False, prefix="sys"):
+    """Combine a sequence of linear systems into one system by connecting their
+    outputs and inputs in series.
+    """
+    n_sys = len(systems)
+    col_sizes = [sys["A"].shape[1] for sys in systems]
+    A_rows = []
+    B_rows = []
+    C_row = []
+    for i, sys in enumerate(systems):
+        A = sys["A"]
+        B = sys["B"]
+        C = sys["C"]
+        D = sys["D"]
+
+        # Add rows to A matrix
+        n_rows = A.shape[0]
+        assert n_rows == col_sizes[i], "A matrix not square"
+        A_row = []
+        if i > 0:
+            for j in range(i - 1):
+                A_row.append(cas.SX.zeros(n_rows, col_sizes[j]))
+            A_row.append(B @ systems[i - 1]["C"])
+        A_row.append(A)
+        for j in range(i + 1, n_sys):
+            A_row.append(cas.SX.zeros(n_rows, col_sizes[j]))
+        A_rows.append(A_row)
+
+        # Add rows to B matrix
+        if i > 0:
+            B_rows.append(B @ systems[i - 1]["D"])
+        else:
+            B_rows.append(B)
+
+        # Add columns to C matrix
+        if i < n_sys - 1:
+            C_row.append(systems[i + 1]["D"] @ C)
+        else:
+            C_row.append(C)
+
+    A = cas.sparsify(cas.blockcat(A_rows))
+    B = cas.sparsify(cas.vcat(B_rows))
+    C = cas.sparsify(cas.hcat(C_row))
+    D = reduce(cas.SX.__matmul__, (sys["D"] for sys in systems))
+    params = merge_param_dicts(
+        [sys["params"] for sys in systems],
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+    )
+    state_names = concatenate_lists_of_names(
+        [sys["state_names"] for sys in systems], keys=keys, prefix=prefix
+    )
+    return {
+        "A": A,
+        "B": B,
+        "C": C,
+        "D": D,
+        "params": params,
+        "state_names": state_names,
+    }
+
+
+def nonlinear_systems_in_parallel(
+    systems, keys=None, verbose_names=False, prefix="sys"
+):
+    """Combine a collection of nonlinear systems into one large parrallel system."""
+
+    params = merge_param_dicts(
+        [sys["params"] for sys in systems],
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+    )
+
+    t = cas.SX.sym("t")
+
+    u_signals = []
+    x_states = []
+    rhs_expressions = []
+    y_signals = []
+    for sys in systems:
+
+        x = cas.SX.sym("x", sys["n"])
+        x_states.append(x)
+
+        u = cas.SX.sym("u", sys["nu"])
+        u_signals.append(u)
+
+        # f(t, x, u, *params.values())
+        rhs = sys["f"](t, x, u, *sys["params"].values())
+        rhs_expressions.append(rhs)
+
+        # h(t, x, u, *params.values())
+        y = sys["h"](t, x, u, *sys["params"].values())
+        y_signals.append(y)
+
+    x = cas.vcat(x_states)
+    n = x.shape[0]
+
+    u = cas.vcat(u_signals)
+    nu = u.shape[0]
+
+    rhs = cas.vcat(rhs_expressions)
+    assert rhs.shape == x.shape
+    f = cas.Function(
+        "f",
+        [t, x, u, *params.values()],
+        [rhs],
+        ["t", "x", "u", *params.keys()],
+        ["rhs"],
+    )
+
+    y = cas.vcat(y_signals)
+    ny = y.shape[0]
+    h = cas.Function(
+        "h", [t, x, u, *params.values()], [y], ["t", "x", "u", *params.keys()], ["y"]
+    )
+
+    state_names = concatenate_lists_of_names(
+        [sys["state_names"] for sys in systems],
+        keys=keys,
+        prefix=prefix,
+    )
+    assert len(state_names) == n
+
+    return {
+        "f": f,
+        "h": h,
+        "n": n,
+        "nu": nu,
+        "ny": ny,
+        "params": params,
+        "state_names": state_names,
+    }
+
+
+def connect_two_systems_in_series(
+    sys1, sys2, keys=None, verbose_names=False, prefix="sys"
+):
+    """Combine two non-linear systems into one by connecting the input
+    to sys2 to the output of sys1.
+    """
+
+    if keys is None:
+        keys = [f"{prefix}{i + 1}" for i in range(2)]
+
+    assert sys2["nu"] == sys1["ny"], "incompatible dimensions"
+
+    t = cas.SX.sym("t")
+
+    # System 1
+    n1 = sys1["n"]
+    nu1 = sys1["nu"]
+    u1 = cas.SX.sym("u", nu1)
+    x1 = cas.SX.sym("x", n1)
+    f1 = sys1["f"]
+    params1 = sys1["params"]
+    rhs1 = f1(t, x1, u1, *params1.values())
+    h1 = sys1["h"]
+    y1 = h1(t, x1, u1, *params1.values())
+
+    # System 2
+    n2 = sys2["n"]
+    ny2 = sys2["ny"]
+    u2 = y1
+    x2 = cas.SX.sym("x", n2)
+    f2 = sys2["f"]
+    params2 = sys2["params"]
+    rhs2 = f2(t, x2, u2, *params2.values())
+    h2 = sys2["h"]
+    y2 = h2(t, x2, u2, *params2.values())
+
+    # Variables of combined system
+    x = cas.vcat([x2, x1])  # stack with sys2 states at top
+    state_names = concatenate_lists_of_names(
+        [sys2["state_names"], sys1["state_names"]], keys=list(reversed(keys))
+    )
+    u = u1
+    nu = n1
+
+    # Combined ODE rhs function
+    rhs = cas.vcat([rhs2, rhs1])
+    n = n1 + n2
+    assert rhs.shape[0] == n
+    params = merge_param_dicts(
+        [params1, params2], keys=keys, verbose_names=verbose_names
+    )
+    f = cas.Function(
+        "f",
+        [t, x, u, *params.values()],
+        [rhs],
+        ["t", "x", "u", *params.keys()],
+        ["rhs"],
+    )
+
+    # Combined output function
+    y = y2
+    ny = ny2
+    assert y.shape[0] == ny
+    h = cas.Function(
+        "h", [t, x, u, *params.values()], [y], ["t", "x", "u", *params.keys()], ["y"]
+    )
+
+    return {
+        "f": f,
+        "h": h,
+        "n": n,
+        "nu": nu,
+        "ny": ny,
+        "params": params,
+        "state_names": state_names,
+    }
+
+
+def nonlinear_systems_in_series(systems, keys=None, verbose_names=False, prefix="sys"):
+    """Combine a sequence of non-linear systems into one by connecting
+    their inputs and outputs in series.
+    """
+
+    if keys is None:
+        keys = [f"{prefix}{i + 1}" for i in range(len(systems))]
+
+    t = cas.SX.sym("t")
+
+    param_dicts = [sys["params"] for sys in systems]
+    state_name_lists = [sys["state_names"] for sys in systems]
+
+    combined_system = systems[0]
+    for i, sys2 in enumerate(systems[1:], start=1):
+        sys1 = combined_system
+        assert sys2["nu"] == sys1["ny"], "incompatible dimensions"
+
+        # System 1
+        n1 = sys1["n"]
+        nu1 = sys1["nu"]
+        u1 = cas.SX.sym("u", nu1)
+        x1 = cas.SX.sym("x", n1)
+        f1 = sys1["f"]
+        params1 = merge_param_dicts(
+            param_dicts[:i], keys=keys[:i], verbose_names=verbose_names
+        )
+        rhs1 = f1(t, x1, u1, *params1.values())
+        h1 = sys1["h"]
+        y1 = h1(t, x1, u1, *params1.values())
+
+        # System 2
+        n2 = sys2["n"]
+        ny2 = sys2["ny"]
+        u2 = y1
+        x2 = cas.SX.sym("x", n2)
+        f2 = sys2["f"]
+        params2 = sys2["params"]
+        rhs2 = f2(t, x2, u2, *params2.values())
+        h2 = sys2["h"]
+        y2 = h2(t, x2, u2, *params2.values())
+
+        # Variables of combined system
+        x = cas.vcat([x2, x1])  # stack with sys2 states at top
+        u = u1
+        nu = nu1
+
+        # Combined ODE rhs function
+        rhs = cas.vcat([rhs2, rhs1])
+        n = n1 + n2
+        assert rhs.shape[0] == n
+        params = merge_param_dicts(
+            param_dicts[: i + 1], keys=keys[: i + 1], verbose_names=verbose_names
+        )
+        f = cas.Function(
+            "f",
+            [t, x, u, *params.values()],
+            [rhs],
+            ["t", "x", "u", *params.keys()],
+            ["rhs"],
+        )
+
+        # Combined output function
+        y = y2
+        ny = ny2
+        assert y.shape[0] == ny
+        h = cas.Function(
+            "h",
+            [t, x, u, *params.values()],
+            [y],
+            ["t", "x", "u", *params.keys()],
+            ["y"],
+        )
+        combined_system = {
+            "f": f,
+            "h": h,
+            "n": n,
+            "nu": nu,
+            "ny": ny,
+            "params": params,
+        }
+
+    combined_system["state_names"] = concatenate_lists_of_names(
+        list(reversed(state_name_lists)), keys=list(reversed(keys))
+    )
+
+    return combined_system
+
+
+def make_step_function(mag=1.0, t_step=0.0):
+    u0 = cas.DM(0.0)
+    u_step = cas.DM(mag)
+    t_step = cas.DM(t_step)
+    t = cas.SX.sym("t")
+    before_step = Function("before_step", [], [u0])
+    after_step = Function("after_step", [], [u_step])
+    f_cond = Function.if_else("f_cond", after_step, before_step)
+    y = f_cond(t >= t_step)
+    return Function("step", [t], [y], ["t"], ["y"])
+
+
+def make_sim_step_function_RK4(f, h, n, nu, params=None, name="F"):
+
+    if params is None:
+        params = {}
+
+    # Symbolic variables
+    t = cas.SX.sym("t")
+    dt = cas.SX.sym("dt")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+
+    # RK4 approximation
+    k1 = f(t, x, u, *params.values())
+    k2 = f(t, x + dt / 2 * k1, u, *params.values())
+    k3 = f(t, x + dt / 2 * k2, u, *params.values())
+    k4 = f(t, x + dt * k3, u, *params.values())
+    xf = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+    y = h(t, x, u, *params.values())
+
+    return Function(
+        name,
+        [t, x, u, dt, *params.values()],
+        [xf, y],
+        ["t", "x", "u", "dt", *params.keys()],
+        ["xf", "y"],
+    )
+
+
+def make_n_step_simulation_function(F, n, nu, nT, params=None, name=None):
+    if params is None:
+        params = {}
+    if name is None:
+        name = f"{F.name()}_sim_{nT}_steps"
+    t_eval = cas.SX.sym("t_eval", nT + 1)
+    U = cas.SX.sym("U", nT, nu)
+    x0 = cas.SX.sym("x0", n)
+    X = [x0.T]
+    Y = []
+    xk = x0
+    tk = t_eval[0]
+    for k in range(nT):
+        tkp1 = t_eval[k + 1]
+        dt = tkp1 - tk
+        uk = U[k, :].T
+        xkp1, yk = F(tk, xk, uk, dt, *params.values())
+        X.append(xkp1.T)
+        Y.append(yk.T)
+        tk = tkp1
+        xk = xkp1
+
+    _, yk = F(tk, xk, uk, dt, *params.values())
+    Y.append(yk.T)
+    X = cas.vcat(X)
+    Y = cas.vcat(Y)
+
+    return cas.Function(
+        name,
+        [t_eval, U, x0, *params.values()],
+        [X, Y],
+        ["t_eval", "U", "x0", *params.keys()],
+        ["X", "Y"],
+    )
+
+
+def sympy2casadi(sympy_expr, sympy_vars, casadi_vars, sparsify=True):
+    """Convert Sympy expression to CasADi symbolic expression.
+
+    Warning: This function uses Python's exec function, and thus should not
+    be used on unsanitized input.
+
+    Also note there is a bug in Sympy version 1.13.0 so it is better to wait
+    until this is fixed before relying on the StateSpace model.
+
+    See:
+      - https://github.com/sympy/sympy/issues/26827
+
+    """
+
+    mapping = {
+        "ImmutableDenseMatrix": cas.blockcat,
+        "MutableDenseMatrix": cas.blockcat,
+        "Abs": cas.fabs,
+    }
+    f = sympy.lambdify(sympy_vars, sympy_expr, modules=[mapping, cas])
+
+    result = f(*casadi_vars)
+    if sparsify:
+        return cas.sparsify(result)
+    else:
+        return result
+
+
+def make_casadi_and_sympy_vars(var_names):
+    """Makes two dictionaries containing matching symbolic variables with
+    the names defined in var_names.
+    """
+    sympy_vars = {}
+    casadi_vars = {}
+    for k, shape in var_names.items():
+        if shape == ():
+            sympy_vars[k] = sympy.Symbol(k, *shape)
+            casadi_vars[k] = cas.SX.sym(k)
+        else:
+            sympy_vars[k] = sympy.MatrixSymbol(k, *shape)
+            casadi_vars[k] = cas.SX.sym(k, *shape)
+    return sympy_vars, casadi_vars
+
+
+def convert_sympy_state_space_to_casadi_SX(sys, sympy_vars, casadi_vars, sparsify=True):
+    """Warning: The sympy2casadi function uses Python's exec function,
+    and is thus a potential security threat.
+    """
+    A, B, C, D = [
+        sympy2casadi(item, sympy_vars, casadi_vars, sparsify=sparsify)
+        for item in [
+            sys.state_matrix,
+            sys.input_matrix,
+            sys.output_matrix,
+            sys.feedforward_matrix,
+        ]
+    ]
+    return A, B, C, D
