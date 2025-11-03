@@ -1,10 +1,26 @@
+import casadi as cas
 from collections import defaultdict
 from itertools import chain
 
 
+def make_list_of_enumerated_names(prefix, n, sep=""):
+    """Convenience function to create default names of vector elements.
+    
+    Example:
+    >>> make_list_of_enumerated_names('x', 3)
+    ['x1', 'x2', 'x3']
+
+    """
+    if n > 1:
+        names = [f"{prefix}{sep}{i + 1}" for i in range(n)]
+    else:
+        names = [prefix]
+    return names
+
+
 def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
     if keys is None:
-        keys = [f"{prefix}{i + 1}" for i in range(len(lists_of_names))]
+        keys = make_list_of_enumerated_names(prefix, len(lists_of_names))
     elif len(lists_of_names) > len(set(keys)):
         raise ValueError("not enough unique keys")
     names = [
@@ -45,7 +61,7 @@ def merge_param_dicts(
     # TODO: This function is horrendous.  Surely there is a simpler way.
 
     if keys is None:
-        keys = [f"{prefix}{i + 1}" for i in range(len(list_of_dicts))]
+        keys = make_list_of_enumerated_names(prefix, len(list_of_dicts))
     elif len(list_of_dicts) > len(set(keys)):
         raise ValueError("not enough unique keys")
 
@@ -97,6 +113,15 @@ def merge_param_dicts(
 
 
 def make_symbolic_vars_from_kwargs(**kwargs):
+    """Parses the arguments and replaces any None values or tuples with
+    symbolic CasADi variables (SX).  If a value is None, this signifies
+    a scalar symbolic variable is to be substitured.  If a value is a
+    tuple, the tuple signifies the shape of the array.
+
+    This is useful when defining arbitrary models with parameters that
+    the user may assign explicit values, e.g. T1=1.0, or leave as 
+    arbitrary values, e.g. T1=cas.SX.sym('T1').
+    """
     out_vars = {}
     for key, value in kwargs.items():
         if value is None:

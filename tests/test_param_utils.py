@@ -1,9 +1,19 @@
 import casadi as cas
 from cas_models.param_utils import (
+    make_list_of_enumerated_names,
     concatenate_lists_of_names,
     merge_param_dicts,
+    make_symbolic_vars_from_kwargs
 )
 from casadi import SX
+
+
+def test_make_list_of_enumerated_names():
+    names = make_list_of_enumerated_names("x", 3)
+    assert names == ["x1", "x2", "x3"]
+
+    names = make_list_of_enumerated_names("sys", 2, sep="_")
+    assert names == ["sys_1", "sys_2"]
 
 
 def test_concatenate_lists_of_names():
@@ -45,10 +55,26 @@ def test_merge_param_dicts():
     result = merge_param_dicts(
         [params1, params2], keys=["sys1", "sys2"], verbose_names=True
     )
-    breakpoint()
     assert result == {
         "sys1_sys2_K": K,
         "sys1_T1": T1_1,
         "sys2_T1": T1_2,
         "sys2_T2": T2_2,
     }
+
+
+def test_make_symbolic_vars_from_kwargs():
+    params = make_symbolic_vars_from_kwargs(K=2.0, T1=0.8)
+    assert params == {'K': 2.0, 'T1': 0.8}
+
+    params = make_symbolic_vars_from_kwargs(K=2.0, T1=None, T2=None)
+    assert params['K'] == 2.0
+    assert isinstance(params['T1'], cas.SX)
+    assert params['T1'].name() == 'T1'
+    assert isinstance(params['T2'], cas.SX)
+    assert params['T2'].name() == 'T2'
+
+    K = cas.SX.sym('K')
+    T1 = cas.SX.sym('T1')
+    params = make_symbolic_vars_from_kwargs(K=K, T1=T1)
+    assert params == {'K': K, 'T1': T1}

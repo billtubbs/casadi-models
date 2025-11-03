@@ -3,68 +3,141 @@ from functools import reduce
 import casadi as cas
 import sympy
 from casadi import Function
-
+from dataclasses import dataclass
 from cas_models.param_utils import (
+    make_list_of_enumerated_names,
     concatenate_lists_of_names,
     merge_param_dicts,
     make_symbolic_vars_from_kwargs,
 )
 
 
-def nonlinear_state_space_model_from_linear(
-    A, B, C, D, params=None, state_names=None
-):
-    """Creates functions, f, h, for simulating a linear, continous-time
-    state-space model with parameter matrices A, B, C, D.
+@dataclass
+class StateSpaceModelCT:
+    f: cas.Function
+    h: cas.Function
+    n: int
+    nu: int
+    ny: int
+    params: dict
+    input_names: list[str]
+    state_names: list[str]
+    output_names: list[str]
+
+    def __init__(
+        self,
+        f,
+        h,
+        n,
+        nu=1,
+        ny=1,
+        params=None,
+        input_names=None,
+        state_names=None,
+        output_names=None,
+    ):
+        """Creates a continous-time state-space model of the following form.
 
         dx/dt(t) = f(t, x(t), u(t), *args)
             y(t) = h(t, x(t), u(t), *args)
 
-    """
-    n = A.shape[0]
-    assert A.shape[1] == n
-    nu = B.shape[1]
-    assert B.shape[0] == n
-    ny = C.shape[0]
-    assert C.shape[1] == n
-    assert D.shape == (ny, nu)
-    if params is None:
-        params = {}
-    if state_names is None:
-        state_names = [f"x_{i + 1}" for i in range(n)]
+        """
+        self.f = f
+        self.h = h
+        self.n = n
+        self.nu = nu
+        self.ny = ny
+        if params is None:
+            params = {}  # TODO: Check all params are symbolic?
+        self.params = params
+        if input_names is None:
+            input_names = make_list_of_enumerated_names("u", nu)
+        self.input_names = input_names
+        if state_names is None:
+            state_names = make_list_of_enumerated_names("x", n)
+        self.state_names = state_names
+        if output_names is None:
+            output_names = make_list_of_enumerated_names("y", ny)
+        self.output_names = output_names
 
-    # Construct ODE right-hand side
-    t = cas.SX.sym("t")
-    x = cas.SX.sym("x", n)
-    u = cas.SX.sym("u", nu)
-    rhs = A @ x + B @ u
-    f = Function(
-        "f",
-        [t, x, u, *params.values()],
-        [rhs],
-        ["t", "x", "u", *params.keys()],
-        ["rhs"],
-    )
 
-    # Construct output function
-    y = C @ x + D @ u
-    h = Function(
-        "h",
-        [t, x, u, *params.values()],
-        [y],
-        ["t", "x", "u", *params.keys()],
-        ["y"],
-    )
+class StateSpaceModelCTFromABCD(StateSpaceModelCT):
+    def __init__(
+        self,
+        A,
+        B,
+        C,
+        D,
+        params=None,
+        input_names=None,
+        state_names=None,
+        output_names=None,
+    ):
+        """Creates a continous-time linear state-space model of the following form.
 
-    return {
-        "f": f,
-        "h": h,
-        "n": n,
-        "nu": nu,
-        "ny": ny,
-        "params": params,
-        "state_names": state_names,
-    }
+        dx/dt(t) = Ax(t) + Bu(t)
+            y(t) = Cx(t) + Du(t)
+
+        """
+
+        # Convert to CasADi sparse arrays (could be DM, SX, or MX)
+        A = cas.sparsify(A)
+        B = cas.sparsify(B)
+        C = cas.sparsify(C)
+        D = cas.sparsify(D)
+  
+        n = A.shape[0]
+        assert A.shape[1] == n
+        nu = B.shape[1]
+        assert B.shape[0] == n
+        ny = C.shape[0]
+        assert C.shape[1] == n
+        assert D.shape == (ny, nu)
+        if params is None:
+            params = {}
+
+        # TODO: Need to drop non-symbolic params
+
+        # Construct ODE right-hand side
+        t = cas.SX.sym("t")
+        x = cas.SX.sym("x", n)
+        u = cas.SX.sym("u", nu)
+        rhs = A @ x + B @ u
+        f = Function(
+            "f",
+            [t, x, u, *params.values()],
+            [rhs],
+            ["t", "x", "u", *params.keys()],
+            ["rhs"],
+        )
+
+        # Construct output function
+        y = C @ x + D @ u
+        h = Function(
+            "h",
+            [t, x, u, *params.values()],
+            [y],
+            ["t", "x", "u", *params.keys()],
+            ["y"],
+        )
+
+        # Save for future reference
+        self.A = A
+        self.B = B
+        self.C = C
+        self.D = D
+
+        super().__init__(
+            f,
+            h,
+            n,
+            nu=1,
+            ny=1,
+            params=params,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
 
 
 def state_space_model_linear_direct_transmission(nu=None, D=None, params=None):
