@@ -1,0 +1,11 @@
+casadi==3.7.2
+ipykernel==7.1.0
+ipython==9.6.0
+matplotlib==3.10.7
+numpy==2.3.4
+pandas==2.3.3
+pytest==8.4.2
+PyYAML==6.0.3
+scipy==1.16.3
+sympy==1.14.0
+tqdm==4.67.1
