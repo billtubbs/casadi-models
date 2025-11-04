@@ -1,10 +1,10 @@
 import casadi as cas
 from cas_models.param_utils import (
-    make_list_of_enumerated_names,
+    make_list_of_
+    enumerated_names,
     concatenate_lists_of_names,
     merge_param_dicts,
     make_symbolic_vars_from_kwargs,
-    extract_symbolic_params,
 )
 from casadi import SX
 
@@ -39,6 +39,7 @@ def test_concatenate_lists_of_names():
 
 
 def test_merge_param_dicts():
+    # Example 1 - with minimal param names
     K = SX.sym("K")
     T1_1 = SX.sym("T1_1")
     T1_2 = SX.sym("T1_2")
@@ -53,6 +54,7 @@ def test_merge_param_dicts():
         "T2": T2_2,
     }
 
+    # With verbose param names
     result = merge_param_dicts(
         [params1, params2], keys=["sys1", "sys2"], verbose_names=True
     )
@@ -79,22 +81,3 @@ def test_make_symbolic_vars_from_kwargs():
     T1 = cas.SX.sym("T1")
     params = make_symbolic_vars_from_kwargs(K=K, T1=T1)
     assert params == {"K": K, "T1": T1}
-
-
-def test_extract_symbolic_params():
-    a = cas.SX.sym("a")
-    b = cas.SX.sym("b")
-    x = cas.MX.sym("x", 2)
-
-    # Contains no symbolic params
-    assert extract_symbolic_params({"K": 1.0, "T1": 2}) == {}
-
-    params = {"a": a}
-    symbolic_params = extract_symbolic_params(params)
-    assert cas.is_equal(symbolic_params["a"], a)
-
-    params = {"T1": 1.0, "a": a, "b": b, "expression": a * b + b**2}
-    symbolic_params = extract_symbolic_params(params)
-    assert list(symbolic_params.keys()) == ["a", "b"]
-    assert cas.is_equal(symbolic_params["a"], a)
-    assert cas.is_equal(symbolic_params["b"], b)

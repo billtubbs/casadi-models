@@ -1,4 +1,5 @@
 from functools import reduce
+from collections import OrderedDict
 
 import casadi as cas
 import sympy
@@ -9,8 +10,49 @@ from cas_models.param_utils import (
     concatenate_lists_of_names,
     merge_param_dicts,
     make_symbolic_vars_from_kwargs,
-    extract_symbolic_params
 )
+
+
+def validate_casadi_function_dims(
+    f: cas.Function,
+    arg_shapes: dict = None,
+    return_shapes: dict = None,
+):
+    """Use this to check a CasADi function has the expected
+    arguments and return variable dimensions.
+    """
+    for i, (name, shape) in enumerate(arg_shapes.items()):
+        assert f.index_in(name) == i
+        assert f.size_in(name) == shape
+    for i, (name, shape) in enumerate(return_shapes.items()):
+        assert f.index_out(name) == i
+        assert f.size_out(name) == shape
+
+
+def validate_f_function(f: cas.Function, n: int, nu: int):
+    """Use this to check a state transition function has the correct
+    arguments (excluding any parameters) and return dimensions.
+    """
+    arg_shapes = {"t": (1, 1), "x": (n, 1), "u": (nu, 1)}
+    return_shapes = {"rhs": (n, 1)}
+    return validate_casadi_function_dims(
+        f,
+        arg_shapes=arg_shapes,
+        return_shapes=return_shapes,
+    )
+
+
+def validate_h_function(h: cas.Function, n: int, nu: int, ny: int):
+    """Use this to check an output function has the corret arguments
+    (excluding any parameters) and return dimensions.
+    """
+    arg_shapes = {"t": (1, 1), "x": (n, 1), "u": (nu, 1)}
+    return_shapes = {"y": (ny, 1)}
+    return validate_casadi_function_dims(
+        h,
+        arg_shapes=arg_shapes,
+        return_shapes=return_shapes,
+    )
 
 
 @dataclass
@@ -20,10 +62,9 @@ class StateSpaceModelCT:
     n: int
     nu: int
     ny: int
-    params: dict
-    input_names: list[str]
-    state_names: list[str]
-    output_names: list[str]
+    input_names: list[str] = None
+    state_names: list[str] = None
+    output_names: list[str] = None
 
     def __init__(
         self,
@@ -32,7 +73,6 @@ class StateSpaceModelCT:
         n,
         nu=1,
         ny=1,
-        params=None,
         input_names=None,
         state_names=None,
         output_names=None,
@@ -48,9 +88,8 @@ class StateSpaceModelCT:
         self.n = n
         self.nu = nu
         self.ny = ny
-        if params is None:
-            params = {}  # TODO: Check all params are symbolic?
-        self.params = params
+        validate_f_function(f, n, nu)
+        validate_h_function(h, n, nu, ny)
         if input_names is None:
             input_names = make_list_of_enumerated_names("u", nu)
         self.input_names = input_names
@@ -63,18 +102,12 @@ class StateSpaceModelCT:
 
 
 class StateSpaceModelCTFromABCD(StateSpaceModelCT):
-    A: cas.DM | cas.SX | cas.MX
-    B: cas.DM | cas.SX | cas.MX
-    C: cas.DM | cas.SX | cas.MX
-    D: cas.DM | cas.SX | cas.MX
-
     def __init__(
         self,
         A,
         B,
         C,
         D,
-        params=None,
         input_names=None,
         state_names=None,
         output_names=None,
@@ -99,10 +132,12 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         ny = C.shape[0]
         assert C.shape[1] == n
         assert D.shape == (ny, nu)
-        if params is None:
-            params = {}
-
-        # TODO: Need to drop non-symbolic params?
+        symbolic_params = {}
+        for m in [A, B, C, D]:
+            params = cas.symvar(cas.SX(m))
+            for p in params:
+                symbolic_params.update({p.name(): p})
+        symbolic_params = OrderedDict(sorted(symbolic_params.items()))
 
         # Construct ODE right-hand side
         t = cas.SX.sym("t")
@@ -111,9 +146,9 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         rhs = A @ x + B @ u
         f = Function(
             "f",
-            [t, x, u, *params.values()],
+            [t, x, u, *symbolic_params.values()],
             [rhs],
-            ["t", "x", "u", *params.keys()],
+            ["t", "x", "u", *symbolic_params.keys()],
             ["rhs"],
         )
 
@@ -121,25 +156,18 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         y = C @ x + D @ u
         h = Function(
             "h",
-            [t, x, u, *params.values()],
+            [t, x, u, *symbolic_params.values()],
             [y],
-            ["t", "x", "u", *params.keys()],
+            ["t", "x", "u", *symbolic_params.keys()],
             ["y"],
         )
-
-        # Save for future reference
-        self.A = A
-        self.B = B
-        self.C = C
-        self.D = D
 
         super().__init__(
             f,
             h,
             n,
-            nu=1,
-            ny=1,
-            params=params,
+            nu=nu,
+            ny=ny,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -151,7 +179,6 @@ class SSModelCTDirectTransmission(StateSpaceModelCTFromABCD):
         self,
         nu=None,
         D=None,
-        params=None,
         input_names=None,
         output_names=None,
     ):
@@ -175,7 +202,6 @@ class SSModelCTDirectTransmission(StateSpaceModelCTFromABCD):
             B,
             C,
             D,
-            params=params,
             input_names=input_names,
             state_names=None,
             output_names=output_names,
@@ -208,7 +234,6 @@ class SSModelCTFromABCDSISO(StateSpaceModelCTFromABCD):
             B,
             C,
             D,
-            params=params,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -230,14 +255,12 @@ class SSModelCTLinearFONoGainSISO(SSModelCTFromABCDSISO):
         B = cas.SX(1)
         C = 1 / T1
         D = cas.sparsify(cas.SX(0))
-        params = extract_symbolic_params({"T1": T1})
 
         super().__init__(
             A,
             B,
             C,
             D,
-            params=params,
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,

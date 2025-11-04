@@ -5,7 +5,7 @@ from itertools import chain
 
 def make_list_of_enumerated_names(prefix, n, sep=""):
     """Convenience function to create default names of vector elements.
-    
+
     Example:
     >>> make_list_of_enumerated_names('x', 3)
     ['x1', 'x2', 'x3']
@@ -54,57 +54,43 @@ def merge_param_dicts(
     {'K': SX(K), 'sys1_T1': SX(T1_1), 'sys2_T1': SX(T1_2), 'T2': SX(T2_2)}
     >>> merge_param_dicts([params1, params2], keys=['sys1', 'sys2'], verbose_names=True)
     {'sys1_sys2_K': SX(K),
-     'sys1_T1': SX(T1_1),
-     'sys2_T1': SX(T1_2),
-     'sys2_T2': SX(T2_2)}
+    'sys1_T1': SX(T1_1),
+    'sys2_T1': SX(T1_2),
+    'sys2_T2': SX(T2_2)}
     """
-    # TODO: This function is horrendous.  Surely there is a simpler way.
-
     if keys is None:
         keys = make_list_of_enumerated_names(prefix, len(list_of_dicts))
     elif len(list_of_dicts) > len(set(keys)):
         raise ValueError("not enough unique keys")
 
-    # Identify each unique parameter and where it is used
-    keys_for_each_param = defaultdict(list)
-    for i, d in enumerate(list_of_dicts):
-        for sub_key, param in d.items():
-            keys_for_each_param[param].append((i, sub_key))
-
-    # Check for keys which are used by more than one parameter
-    params_for_each_key = defaultdict(set)
-    for param, keys_by_group in keys_for_each_param.items():
-        unique_keys = set(v for k, v in keys_by_group)
-        if len(unique_keys) == 1:
-            if verbose_names:
-                # Create a composite parameter name
-                comp_names = '_'.join(sorted(keys[i] for i, _ in keys_by_group))
-                new_key = f"{comp_names}_{unique_keys.pop()}"
-            else:
-                # Create a generic parameter name
-                new_key = unique_keys.pop()
-        else:
-            # Create a composite parameter name
-            new_key = "_".join(
-                chain.from_iterable(
-                    sorted((keys[i], key) for i, key in keys_by_group)
-                )
-            )
-        params_for_each_key[new_key].add(
-            (tuple(keys[i] for i, _ in keys_by_group), param)
-        )
+    # Group all parameters by their original key name
+    key_groups = defaultdict(list)
+    for sys_key, d in zip(keys, list_of_dicts):
+        for orig_key, param in d.items():
+            key_groups[orig_key].append((sys_key, param))
 
     merged_params = {}
-    for key, params in params_for_each_key.items():
-        if len(params) > 1:
-            # Create composite parameter names if needed
-            # Note: params is a set of tuples so needs to be sorted
-            for groups, param in sorted(params):
-                new_key = f"{'_'.join(groups)}_{key}"
-                merged_params[new_key] = param
+    for orig_key, sys_params in key_groups.items():
+        # Check if all parameters with this key are identical
+        unique_params = set(param for _, param in sys_params)
+
+        if len(unique_params) == 1:
+            # All parameters are the same - can use simple name
+            param = unique_params.pop()
+            if verbose_names:
+                # Include all systems that use this parameter
+                systems = "_".join(
+                    sorted(sys_key for sys_key, _ in sys_params)
+                )
+                new_key = f"{systems}_{orig_key}"
+            else:
+                new_key = orig_key
+            merged_params[new_key] = param
         else:
-            _, param = params.pop()
-            merged_params[key] = param
+            # Different parameters share the same key - must disambiguate
+            for sys_key, param in sys_params:
+                new_key = f"{sys_key}_{orig_key}"
+                merged_params[new_key] = param
 
     return merged_params
 
@@ -116,7 +102,7 @@ def make_symbolic_vars_from_kwargs(**kwargs):
     tuple, the tuple signifies the shape of the array.
 
     This is useful when defining arbitrary models with parameters that
-    the user may assign explicit values, e.g. T1=1.0, or leave as 
+    the user may assign explicit values, e.g. T1=1.0, or leave as
     arbitrary values, e.g. T1=cas.SX.sym('T1').
     """
     out_vars = {}
@@ -128,14 +114,3 @@ def make_symbolic_vars_from_kwargs(**kwargs):
         else:
             out_vars[key] = value
     return out_vars
-
-
-def extract_symbolic_params(params):
-    """Convert the parameter dictionary into a new dictionary containing 
-    only the symbolic variables found in the original.
-    """
-    symbolic_params = set()
-    for param_value in params.values():
-        for var in cas.symvar(cas.SX(param_value)):
-            symbolic_params.add(var)
-    return {param.name(): param for param in symbolic_params}
