@@ -9,6 +9,7 @@ from cas_models.param_utils import (
     concatenate_lists_of_names,
     merge_param_dicts,
     make_symbolic_vars_from_kwargs,
+    extract_symbolic_params
 )
 
 
@@ -62,6 +63,11 @@ class StateSpaceModelCT:
 
 
 class StateSpaceModelCTFromABCD(StateSpaceModelCT):
+    A: cas.DM | cas.SX | cas.MX
+    B: cas.DM | cas.SX | cas.MX
+    C: cas.DM | cas.SX | cas.MX
+    D: cas.DM | cas.SX | cas.MX
+
     def __init__(
         self,
         A,
@@ -85,7 +91,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         B = cas.sparsify(B)
         C = cas.sparsify(C)
         D = cas.sparsify(D)
-  
+
         n = A.shape[0]
         assert A.shape[1] == n
         nu = B.shape[1]
@@ -96,7 +102,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         if params is None:
             params = {}
 
-        # TODO: Need to drop non-symbolic params
+        # TODO: Need to drop non-symbolic params?
 
         # Construct ODE right-hand side
         t = cas.SX.sym("t")
@@ -140,34 +146,102 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         )
 
 
-def state_space_model_linear_direct_transmission(nu=None, D=None, params=None):
-    """Parameters for a continuous time linear state-space model
-    that has no dynamics. Either D or nu must be specified.
-    If the D matrix is not provided, it is set to an identity
-    matrix of shape (nu, nu).
-    """
-    if D is None:
-        D = cas.SX.eye(nu)
-        ny = nu
-    else:
-        ny, nu = D.shape
-    if params is None:
-        params = {}
-    n = 0
-    A = cas.SX.zeros(n, n)
-    B = cas.SX.zeros(n, nu)
-    C = cas.SX.zeros(ny, n)
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "n": n,
-        "nu": nu,
-        "ny": ny,
-        "params": params,
-        "state_names": [],
-    }
+class SSModelCTDirectTransmission(StateSpaceModelCTFromABCD):
+    def __init__(
+        self,
+        nu=None,
+        D=None,
+        params=None,
+        input_names=None,
+        output_names=None,
+    ):
+        """Parameters for a continuous time linear state-space model
+        with no dynamics. Either D or nu must be specified. If the D
+        matrix is not provided, it is set to an identity matrix of
+        shape (nu, nu).
+        """
+        if D is None:
+            D = cas.SX.eye(nu)
+            ny = nu
+        else:
+            ny, nu = D.shape
+        n = 0  # no dynamics
+        A = cas.SX.zeros(n, n)
+        B = cas.SX.zeros(n, nu)
+        C = cas.SX.zeros(ny, n)
+
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            params=params,
+            input_names=input_names,
+            state_names=None,
+            output_names=output_names,
+        )
+
+
+class SSModelCTFromABCDSISO(StateSpaceModelCTFromABCD):
+    def __init__(
+        self,
+        A,
+        B,
+        C,
+        D,
+        params=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        # Convert to CasADi sparse arrays (could be DM, SX, or MX)
+        B = cas.sparsify(B)
+        C = cas.sparsify(C)
+        D = cas.sparsify(D)
+        assert B.shape[1] == 1
+        assert C.shape[0] == 1
+        assert D.shape == (1, 1)
+        input_names = None if input_name is None else [input_name]
+        output_names = None if output_name is None else [output_name]
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            params=params,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
+
+
+class SSModelCTLinearFONoGainSISO(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        T1=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        """Parameters for a continuous time state-space model."""
+        kwargs = make_symbolic_vars_from_kwargs(T1=T1)
+        T1 = kwargs["T1"]
+        A = -1 / T1
+        B = cas.SX(1)
+        C = 1 / T1
+        D = cas.sparsify(cas.SX(0))
+        params = extract_symbolic_params({"T1": T1})
+
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            params=params,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )
 
 
 def state_space_model_linear_FO_no_gain(T1=None):

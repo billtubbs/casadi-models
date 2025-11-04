@@ -106,9 +106,6 @@ def merge_param_dicts(
             _, param = params.pop()
             merged_params[key] = param
 
-    # TODO: Is this needed?
-    assert len(merged_params) == len(keys_for_each_param)
-
     return merged_params
 
 
@@ -131,3 +128,14 @@ def make_symbolic_vars_from_kwargs(**kwargs):
         else:
             out_vars[key] = value
     return out_vars
+
+
+def extract_symbolic_params(params):
+    """Convert the parameter dictionary into a new dictionary containing 
+    only the symbolic variables found in the original.
+    """
+    symbolic_params = set()
+    for param_value in params.values():
+        for var in cas.symvar(cas.SX(param_value)):
+            symbolic_params.add(var)
+    return {param.name(): param for param in symbolic_params}
