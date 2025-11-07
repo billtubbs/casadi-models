@@ -1,33 +1,31 @@
+"""Unit tests for src/cas_models/continuous_time/models.py module"""
+
+import pytest
 import numpy as np
 import casadi as cas
 from cas_models.continuous_time.models import (
-    validate_casadi_function_dims,
     StateSpaceModelCT,
     StateSpaceModelCTFromABCD,
+    SSModelCTFromABCDSISO,
     SSModelCTDirectTransmission,
     SSModelCTLinearFONoGainSISO,
+    block_diag,
 )
 
 
-def test_validate_casadi_function_dims():
-    args = {
-        "t": cas.SX.sym("t"),
-        "x": cas.SX.sym("x", 2),
-        "u": cas.SX.sym("u", 1),
-    }
-    arg_shapes = {name: var.shape for name, var in args.items()}
-    rhs = args["x"]
-    return_vars = {"rhs": rhs}
-    return_shapes = {name: var.shape for name, var in return_vars.items()}
-    f = cas.Function(
-        "f",
-        args.values(),
-        return_vars.values(),
-        args.keys(),
-        return_vars.keys(),
-    )
+@pytest.fixture
+def symbolic_FO_SISO_ABCD():
+    # Example 1: SISO 1st order system
+    K = cas.SX.sym("K")
+    T1 = cas.SX.sym("T1")
 
-    validate_casadi_function_dims(f, arg_shapes, return_shapes)
+    # State space model matrices
+    A = -1 / T1
+    B = 1
+    C = K / T1
+    D = 0
+
+    return A, B, C, D
 
 
 def test_StateSpaceModelCT():
@@ -76,21 +74,34 @@ def test_StateSpaceModelCT():
     assert float(model.h(0.0, 1.0, 0.0, 1.0, 2.0)) == 0.5
 
 
-def test_StateSpaceModelCTFromABCD():
-    # Example 1: SISO 1st order system
-    K = cas.SX.sym("K")
-    T1 = cas.SX.sym("T1")
-
-    # State space model matrices
-    A = -1 / T1
-    B = 1
-    C = K / T1
-    D = 0
+def test_StateSpaceModelCTFromABCD(symbolic_FO_SISO_ABCD):
+    A, B, C, D = symbolic_FO_SISO_ABCD
 
     model = StateSpaceModelCTFromABCD(A, B, C, D)
 
     assert str(model) == (
         "StateSpaceModelCTFromABCD("
+        "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
+        "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
+        "n=1, nu=1, ny=1, "
+        "input_names=['u'], state_names=['x'], output_names=['y']"
+        ")"
+    )
+
+    # Test function calls - with scalars
+    assert np.array_equal(model.f(0.0, 0.0, 0.0, 1.0, 2.0), np.array([[0.0]]))
+    assert np.array_equal(model.h(0.0, 0.0, 0.0, 1.0, 2.0), np.array([[0.0]]))
+    assert np.array_equal(model.f(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[-0.5]]))
+    assert np.array_equal(model.h(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[0.5]]))
+
+
+def test_SSModelCTFromABCDSISO(symbolic_FO_SISO_ABCD):
+    A, B, C, D = symbolic_FO_SISO_ABCD
+
+    model = SSModelCTFromABCDSISO(A, B, C, D)
+
+    assert str(model) == (
+        "SSModelCTFromABCDSISO("
         "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
@@ -177,4 +188,27 @@ def test_SSModelCTLinearFONoGainSISO():
         "n=1, nu=1, ny=1, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
+    )
+
+
+def test_block_diag():
+    matrices = [
+        cas.DM.ones(2, 2),
+        2 * cas.DM.ones(1, 1),
+        cas.DM.zeros(0, 0),  # empty matrix
+        3 * cas.DM.ones(3, 2),
+    ]
+    result = block_diag(matrices)
+    assert np.array_equal(
+        cas.DM(result),
+        np.array(
+            [
+                [1.0, 1.0, 0.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 2.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 3.0, 3.0],
+                [0.0, 0.0, 0.0, 3.0, 3.0],
+                [0.0, 0.0, 0.0, 3.0, 3.0],
+            ]
+        ),
     )

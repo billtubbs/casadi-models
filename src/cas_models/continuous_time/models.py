@@ -11,38 +11,35 @@ from cas_models.param_utils import (
     merge_param_dicts,
     make_symbolic_vars_from_kwargs,
 )
+from cas_models.validation import validate_casadi_function_dims
 
 
-def validate_casadi_function_dims(
-    f: cas.Function,
-    arg_shapes: dict = None,
-    return_shapes: dict = None,
+def validate_f_function(
+    f: cas.Function, n: int, nu: int, kwargs=None, ignore_params=True
 ):
-    """Use this to check a CasADi function has the expected
-    arguments and return variable dimensions.
-    """
-    for i, (name, shape) in enumerate(arg_shapes.items()):
-        assert f.index_in(name) == i
-        assert f.size_in(name) == shape
-    for i, (name, shape) in enumerate(return_shapes.items()):
-        assert f.index_out(name) == i
-        assert f.size_out(name) == shape
-
-
-def validate_f_function(f: cas.Function, n: int, nu: int):
     """Use this to check a state transition function has the correct
     arguments (excluding any parameters) and return dimensions.
     """
     arg_shapes = {"t": (1, 1), "x": (n, 1), "u": (nu, 1)}
+    if kwargs is not None:
+        arg_shapes.update(kwargs)
     return_shapes = {"rhs": (n, 1)}
     return validate_casadi_function_dims(
         f,
         arg_shapes=arg_shapes,
         return_shapes=return_shapes,
+        ignore_remaining=ignore_params,
     )
 
 
-def validate_h_function(h: cas.Function, n: int, nu: int, ny: int):
+def validate_h_function(
+    h: cas.Function,
+    n: int,
+    nu: int,
+    ny: int,
+    kwargs=None,
+    ignore_params=True,
+):
     """Use this to check an output function has the corret arguments
     (excluding any parameters) and return dimensions.
     """
@@ -52,6 +49,7 @@ def validate_h_function(h: cas.Function, n: int, nu: int, ny: int):
         h,
         arg_shapes=arg_shapes,
         return_shapes=return_shapes,
+        ignore_remaining=ignore_params,
     )
 
 
@@ -88,8 +86,8 @@ class StateSpaceModelCT:
         self.n = n
         self.nu = nu
         self.ny = ny
-        validate_f_function(f, n, nu)
-        validate_h_function(h, n, nu, ny)
+        validate_f_function(f, n, nu, ignore_params=True)
+        validate_h_function(h, n, nu, ny, ignore_params=True)
         if input_names is None:
             input_names = make_list_of_enumerated_names("u", nu)
         self.input_names = input_names

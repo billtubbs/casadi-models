@@ -1,11 +1,13 @@
+"""Unit tests for src/cas_models/param_utils.py module"""
+
 import casadi as cas
+from casadi import SX
 from cas_models.param_utils import (
     make_list_of_enumerated_names,
     concatenate_lists_of_names,
     merge_param_dicts,
     make_symbolic_vars_from_kwargs,
 )
-from casadi import SX
 
 
 def test_make_list_of_enumerated_names():
