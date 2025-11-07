@@ -1,7 +1,6 @@
 import casadi as cas
 from cas_models.param_utils import (
-    make_list_of_
-    enumerated_names,
+    make_list_of_enumerated_names,
     concatenate_lists_of_names,
     merge_param_dicts,
     make_symbolic_vars_from_kwargs,
@@ -74,10 +73,18 @@ def test_make_symbolic_vars_from_kwargs():
     assert params["K"] == 2.0
     assert isinstance(params["T1"], cas.SX)
     assert params["T1"].name() == "T1"
+    assert params["T1"].shape == (1, 1)
     assert isinstance(params["T2"], cas.SX)
     assert params["T2"].name() == "T2"
+    assert params["T2"].shape == (1, 1)
 
     K = cas.SX.sym("K")
     T1 = cas.SX.sym("T1")
     params = make_symbolic_vars_from_kwargs(K=K, T1=T1)
     assert params == {"K": K, "T1": T1}
+
+    params = make_symbolic_vars_from_kwargs(A=(3, 2), B=(3, 1))
+    assert isinstance(params["A"], cas.SX)
+    assert params["A"].shape == (3, 2)
+    assert isinstance(params["B"], cas.SX)
+    assert params["B"].shape == (3, 1)

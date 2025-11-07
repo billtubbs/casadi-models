@@ -48,11 +48,11 @@ def merge_param_dicts(
     >>> T1_1 = cas.SX.sym('T1_1')
     >>> T1_2 = cas.SX.sym('T1_2')
     >>> T2_2 = cas.SX.sym('T2_2')
-    >>> params1 = {'K': K, 'T1': T1_1}
-    >>> params2 = {'K': K, 'T1': T1_2, 'T2': T2_2}
-    >>> merge_param_dicts([params1, params2], keys=['sys1', 'sys2'])
+    >>> p1 = {'K': K, 'T1': T1_1}
+    >>> p2 = {'K': K, 'T1': T1_2, 'T2': T2_2}
+    >>> merge_param_dicts([p1, p2], keys=['sys1', 'sys2'])
     {'K': SX(K), 'sys1_T1': SX(T1_1), 'sys2_T1': SX(T1_2), 'T2': SX(T2_2)}
-    >>> merge_param_dicts([params1, params2], keys=['sys1', 'sys2'], verbose_names=True)
+    >>> merge_param_dicts([p1, p2], keys=['sys1', 'sys2'], verbose_names=True)
     {'sys1_sys2_K': SX(K),
     'sys1_T1': SX(T1_1),
     'sys2_T1': SX(T1_2),
@@ -98,19 +98,30 @@ def merge_param_dicts(
 def make_symbolic_vars_from_kwargs(**kwargs):
     """Parses the arguments and replaces any None values or tuples with
     symbolic CasADi variables (SX).  If a value is None, this signifies
-    a scalar symbolic variable is to be substitured.  If a value is a
-    tuple, the tuple signifies the shape of the array.
+    a scalar symbolic variable to be substituted.  If a value is a
+    tuple, the tuple signifies the shape of the symbolic array.
 
     This is useful when defining arbitrary models with parameters that
     the user may assign explicit values, e.g. T1=1.0, or leave as
     arbitrary values, e.g. T1=cas.SX.sym('T1').
+
+    Examples:
+    >>> make_symbolic_vars_from_kwargs(T1=None)
+    {'T1': SX(T1)}
+    >>> make_symbolic_vars_from_kwargs(K=None, T1=3)
+    {'K': SX(K), 'T1': 3}
+    >>> make_symbolic_vars_from_kwargs(p=(3, 1))
+    {'p': SX([p_0, p_1, p_2])}
+
     """
     out_vars = {}
     for key, value in kwargs.items():
         if value is None:
+            # Create a scalar symbolic variable
             out_vars[key] = cas.SX.sym(key)
-        elif isinstance(value, str):
-            out_vars[key] = cas.SX.sym(value)
+        elif isinstance(value, tuple):
+            # Value indicates shape of symbolic variable
+            out_vars[key] = cas.SX.sym(key, value)
         else:
             out_vars[key] = value
     return out_vars

@@ -112,7 +112,8 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         state_names=None,
         output_names=None,
     ):
-        """Creates a continous-time linear state-space model of the following form.
+        """Creates a continous-time linear state-space model of the following
+        form.
 
         dx/dt(t) = Ax(t) + Bu(t)
             y(t) = Cx(t) + Du(t)
