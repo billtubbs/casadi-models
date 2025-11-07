@@ -55,6 +55,7 @@ class StateSpaceModelCT:
         y = h(t, x, u)
 
     """
+
     f: cas.Function
     h: cas.Function
     n: int
@@ -520,13 +521,19 @@ def linear_systems_in_parallel(
     C = cas.sparsify(block_diag(list(sys["C"] for sys in systems)))
     D = cas.sparsify(block_diag(list(sys["D"] for sys in systems)))
     params = merge_param_dicts(
-        [sys["params"] for sys in systems],
+        [sys.params for sys in systems],
         keys=keys,
         verbose_names=verbose_names,
         prefix=prefix,
     )
+    input_names = concatenate_lists_of_names(
+        [sys.input_names for sys in systems], keys=keys, prefix=prefix
+    )
     state_names = concatenate_lists_of_names(
-        [sys["state_names"] for sys in systems], keys=keys, prefix=prefix
+        [sys.state_names for sys in systems], keys=keys, prefix=prefix
+    )
+    output_names = concatenate_lists_of_names(
+        [sys.output_names for sys in systems], keys=keys, prefix=prefix
     )
     return {
         "A": A,
@@ -534,7 +541,9 @@ def linear_systems_in_parallel(
         "C": C,
         "D": D,
         "params": params,
+        "input_names": input_names,
         "state_names": state_names,
+        "output_names": output_names,
     }
 
 
@@ -585,13 +594,13 @@ def linear_systems_in_series(
     C = cas.sparsify(cas.hcat(C_row))
     D = reduce(cas.SX.__matmul__, (sys["D"] for sys in systems))
     params = merge_param_dicts(
-        [sys["params"] for sys in systems],
+        [sys.params for sys in systems],
         keys=keys,
         verbose_names=verbose_names,
         prefix=prefix,
     )
     state_names = concatenate_lists_of_names(
-        [sys["state_names"] for sys in systems], keys=keys, prefix=prefix
+        [sys.state_names for sys in systems], keys=keys, prefix=prefix
     )
     return {
         "A": A,
@@ -603,7 +612,7 @@ def linear_systems_in_series(
     }
 
 
-def nonlinear_systems_in_parallel(
+def connect_nonlinear_systems_in_parallel(
     systems, keys=None, verbose_names=False, prefix="sys"
 ):
     """Combine a collection of nonlinear systems into one large
@@ -611,7 +620,7 @@ def nonlinear_systems_in_parallel(
     """
 
     params = merge_param_dicts(
-        [sys["params"] for sys in systems],
+        [sys.params for sys in systems],
         keys=keys,
         verbose_names=verbose_names,
         prefix=prefix,
@@ -624,18 +633,18 @@ def nonlinear_systems_in_parallel(
     rhs_expressions = []
     y_signals = []
     for sys in systems:
-        x = cas.SX.sym("x", sys["n"])
+        x = cas.SX.sym("x", sys.n)
         x_states.append(x)
 
-        u = cas.SX.sym("u", sys["nu"])
+        u = cas.SX.sym("u", sys.nu)
         u_signals.append(u)
 
         # f(t, x, u, *params.values())
-        rhs = sys["f"](t, x, u, *sys["params"].values())
+        rhs = sys.f(t, x, u, *sys.params.values())
         rhs_expressions.append(rhs)
 
         # h(t, x, u, *params.values())
-        y = sys["h"](t, x, u, *sys["params"].values())
+        y = sys.h(t, x, u, *sys.params.values())
         y_signals.append(y)
 
     x = cas.vcat(x_states)
@@ -665,21 +674,33 @@ def nonlinear_systems_in_parallel(
     )
 
     state_names = concatenate_lists_of_names(
-        [sys["state_names"] for sys in systems],
+        [sys.state_names for sys in systems],
         keys=keys,
         prefix=prefix,
     )
     assert len(state_names) == n
+    input_names = concatenate_lists_of_names(
+        [sys.input_names for sys in systems], keys=keys, prefix=prefix
+    )
+    assert len(input_names) == nu
+    output_names = concatenate_lists_of_names(
+        [sys.output_names for sys in systems], keys=keys, prefix=prefix
+    )
+    assert len(output_names) == ny
 
-    return {
-        "f": f,
-        "h": h,
-        "n": n,
-        "nu": nu,
-        "ny": ny,
-        "params": params,
-        "state_names": state_names,
-    }
+    combined_system = StateSpaceModelCT(
+        f,
+        h,
+        n,
+        nu,
+        ny,
+        params=params,
+        input_names=input_names,
+        state_names=state_names,
+        output_names=output_names,
+    )
+
+    return combined_system
 
 
 def connect_nonlinear_systems_in_series(
@@ -764,7 +785,7 @@ def connect_nonlinear_systems_in_series(
         list(reversed(state_name_lists)), keys=list(reversed(keys))
     )
 
-    # TODO: What about input_names, output_names, etc? 
+    # TODO: What about input_names, output_names, etc?
 
     return combined_system
 
