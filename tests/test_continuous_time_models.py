@@ -106,7 +106,7 @@ def symbolic_O2_SISO():
     return n, nu, ny, A, B, C, D, t, f, h, params
 
 
-def test_StateSpaceModelCT(symbolic_FO_SISO):
+def test_StateSpaceModelCT_FO_SISO(symbolic_FO_SISO):
 
     n, _, _, _, _, _, _, _, f, h, params = symbolic_FO_SISO
 
@@ -127,7 +127,38 @@ def test_StateSpaceModelCT(symbolic_FO_SISO):
     assert float(model.h(0.0, 1.0, 0.0, 1.0, 2.0)) == 0.5
 
 
-def test_StateSpaceModelCTFromABCD(symbolic_FO_SISO):
+def test_StateSpaceModelCT_O2_SISO(symbolic_O2_SISO):
+
+    n, _, _, _, _, _, _, _, f, h, params = symbolic_O2_SISO
+
+    model = StateSpaceModelCT(f, h, n, params=params)  # nu and ny should be 1 by default
+
+    assert str(model) == (
+        "StateSpaceModelCT("
+        "f=Function(f:(t,x[2],u,K,T1,T2)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,K,T1,T2)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, "
+        "input_names=['u'], state_names=['x1', 'x2'], output_names=['y'])"
+    )
+
+    # Test function calls
+    t = cas.DM(0)
+    x = cas.DM([0.0, 1.0])
+    u = cas.DM([-0.5])
+    K = cas.DM(0.8)
+    T1 = cas.DM(0.6)
+    T2 = cas.DM(3.0)
+    assert np.allclose(model.f(t, x, u, K, T1, T2), cas.DM([1, -2.5]))
+    assert np.allclose(model.h(t, x, u, K, T1, T2), cas.DM(0))
+
+    T1 = T2
+    x = cas.DM([3.0, 1.0])
+    assert np.allclose(model.f(t, x, u, K, T1, T2), cas.DM([1, -1.5]))
+    assert np.allclose(model.h(t, x, u, K, T1, T2), cas.DM(0.26666666666666666))
+
+
+def test_StateSpaceModelCTFromABCD_FO_SISO(symbolic_FO_SISO):
 
     _, _, _, A, B, C, D, _, _, _, _ = symbolic_FO_SISO
 
@@ -148,6 +179,37 @@ def test_StateSpaceModelCTFromABCD(symbolic_FO_SISO):
     assert np.array_equal(model.h(0.0, 0.0, 0.0, 1.0, 2.0), np.array([[0.0]]))
     assert np.array_equal(model.f(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[-0.5]]))
     assert np.array_equal(model.h(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[0.5]]))
+
+
+def test_StateSpaceModelCTFromABCD_O2_SISO(symbolic_O2_SISO):
+
+    _, _, _, A, B, C, D, _, _, _, _ = symbolic_O2_SISO
+
+    model = StateSpaceModelCTFromABCD(A, B, C, D)
+
+    assert str(model) == (
+        "StateSpaceModelCTFromABCD("
+        "f=Function(f:(t,x[2],u,K,T1,T2)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,K,T1,T2)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, "
+        "input_names=['u'], state_names=['x1', 'x2'], output_names=['y'])"
+    )
+
+    # Test function calls
+    t = cas.DM(0)
+    x = cas.DM([0.0, 1.0])
+    u = cas.DM([-0.5])
+    K = cas.DM(0.8)
+    T1 = cas.DM(0.6)
+    T2 = cas.DM(3.0)
+    assert np.allclose(model.f(t, x, u, K, T1, T2), cas.DM([1, -2.5]))
+    assert np.allclose(model.h(t, x, u, K, T1, T2), cas.DM(0))
+
+    T1 = T2
+    x = cas.DM([3.0, 1.0])
+    assert np.allclose(model.f(t, x, u, K, T1, T2), cas.DM([1, -1.5]))
+    assert np.allclose(model.h(t, x, u, K, T1, T2), cas.DM(0.26666666666666666))
 
 
 def test_SSModelCTFromABCDSISO(symbolic_FO_SISO):
