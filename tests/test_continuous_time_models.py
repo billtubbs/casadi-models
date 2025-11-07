@@ -9,7 +9,9 @@ from cas_models.continuous_time.models import (
     SSModelCTFromABCDSISO,
     SSModelCTDirectTransmission,
     SSModelCTLinearFONoGainSISO,
+    SSModelCTLinearFOSISO,
     block_diag,
+    connect_nonlinear_systems_in_series
 )
 
 
@@ -333,4 +335,66 @@ def test_block_diag():
                 [0.0, 0.0, 0.0, 3.0, 3.0],
             ]
         ),
+    )
+
+
+def test_connect_nonlinear_systems_in_series():
+
+    sys1 = SSModelCTLinearFOSISO()
+    sys2 = SSModelCTLinearFONoGainSISO()
+
+    # With defaults
+    sys_combined = connect_nonlinear_systems_in_series([sys1, sys2])
+    assert str(sys_combined) == (
+        "StateSpaceModelCT("
+        "f=Function(f:(t,x[2],u,K,sys1_T1,sys2_T1)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,K,sys1_T1,sys2_T1)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1)}, "
+        "input_names=['u'], state_names=['sys2_x', 'sys1_x'], "
+        "output_names=['y'])"
+    )
+
+    # With custom keys
+    sys_combined = connect_nonlinear_systems_in_series(
+        [sys1, sys2], keys=["in", "out"]
+    )
+    assert str(sys_combined) == (
+        "StateSpaceModelCT("
+        "f=Function(f:(t,x[2],u,K,in_T1,out_T1)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,K,in_T1,out_T1)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'K': SX(K), 'in_T1': SX(T1), 'out_T1': SX(T1)}, "
+        "input_names=['u'], state_names=['out_x', 'in_x'], "
+        "output_names=['y'])"
+    )
+
+    # With verbose names
+    sys_combined = connect_nonlinear_systems_in_series(
+        [sys1, sys2], keys=["in", "out"], verbose_names=True
+    )
+    assert str(sys_combined) == (
+        "StateSpaceModelCT("
+        "f=Function(f:(t,x[2],u,in_K,in_T1,out_T1)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,in_K,in_T1,out_T1)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'in_K': SX(K), 'in_T1': SX(T1), 'out_T1': SX(T1)}, "
+        "input_names=['u'], state_names=['out_x', 'in_x'], "
+        "output_names=['y'])"
+    )
+
+    # With one constant and a shared parameter
+    sys1 = SSModelCTLinearFOSISO(K=2)
+    sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
+    sys_combined = connect_nonlinear_systems_in_series(
+        [sys1, sys2], keys=["in", "out"], verbose_names=True
+    )
+    assert str(sys_combined) == (
+        "StateSpaceModelCT("
+        "f=Function(f:(t,x[2],u,in_out_T1)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,in_out_T1)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'in_out_T1': SX(T1)}, "
+        "input_names=['u'], state_names=['out_x', 'in_x'], "
+        "output_names=['y'])"
     )

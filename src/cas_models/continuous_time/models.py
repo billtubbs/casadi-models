@@ -682,130 +682,47 @@ def nonlinear_systems_in_parallel(
     }
 
 
-def connect_two_systems_in_series(
-    sys1, sys2, keys=None, verbose_names=False, prefix="sys"
-):
-    """Combine two non-linear systems into one by connecting the input
-    to sys2 to the output of sys1.
-    """
-
-    if keys is None:
-        keys = [f"{prefix}{i + 1}" for i in range(2)]
-
-    assert sys2["nu"] == sys1["ny"], "incompatible dimensions"
-
-    t = cas.SX.sym("t")
-
-    # System 1
-    n1 = sys1["n"]
-    nu1 = sys1["nu"]
-    u1 = cas.SX.sym("u", nu1)
-    x1 = cas.SX.sym("x", n1)
-    f1 = sys1["f"]
-    params1 = sys1["params"]
-    rhs1 = f1(t, x1, u1, *params1.values())
-    h1 = sys1["h"]
-    y1 = h1(t, x1, u1, *params1.values())
-
-    # System 2
-    n2 = sys2["n"]
-    ny2 = sys2["ny"]
-    u2 = y1
-    x2 = cas.SX.sym("x", n2)
-    f2 = sys2["f"]
-    params2 = sys2["params"]
-    rhs2 = f2(t, x2, u2, *params2.values())
-    h2 = sys2["h"]
-    y2 = h2(t, x2, u2, *params2.values())
-
-    # Variables of combined system
-    x = cas.vcat([x2, x1])  # stack with sys2 states at top
-    state_names = concatenate_lists_of_names(
-        [sys2["state_names"], sys1["state_names"]], keys=list(reversed(keys))
-    )
-    u = u1
-    nu = n1
-
-    # Combined ODE rhs function
-    rhs = cas.vcat([rhs2, rhs1])
-    n = n1 + n2
-    assert rhs.shape[0] == n
-    params = merge_param_dicts(
-        [params1, params2], keys=keys, verbose_names=verbose_names
-    )
-    f = cas.Function(
-        "f",
-        [t, x, u, *params.values()],
-        [rhs],
-        ["t", "x", "u", *params.keys()],
-        ["rhs"],
-    )
-
-    # Combined output function
-    y = y2
-    ny = ny2
-    assert y.shape[0] == ny
-    h = cas.Function(
-        "h",
-        [t, x, u, *params.values()],
-        [y],
-        ["t", "x", "u", *params.keys()],
-        ["y"],
-    )
-
-    return {
-        "f": f,
-        "h": h,
-        "n": n,
-        "nu": nu,
-        "ny": ny,
-        "params": params,
-        "state_names": state_names,
-    }
-
-
-def nonlinear_systems_in_series(
+def connect_nonlinear_systems_in_series(
     systems, keys=None, verbose_names=False, prefix="sys"
 ):
-    """Combine a sequence of non-linear systems into one by connecting
+    """Combine a series of non-linear systems by connecting
     their inputs and outputs in series.
     """
 
     if keys is None:
         keys = [f"{prefix}{i + 1}" for i in range(len(systems))]
 
+    param_dicts = [sys.params for sys in systems]
+    state_name_lists = [sys.state_names for sys in systems]
+
     t = cas.SX.sym("t")
-
-    param_dicts = [sys["params"] for sys in systems]
-    state_name_lists = [sys["state_names"] for sys in systems]
-
     combined_system = systems[0]
     for i, sys2 in enumerate(systems[1:], start=1):
         sys1 = combined_system
-        assert sys2["nu"] == sys1["ny"], "incompatible dimensions"
+        assert sys2.nu == sys1.ny, "incompatible dimensions"
 
         # System 1
-        n1 = sys1["n"]
-        nu1 = sys1["nu"]
+        n1 = sys1.n
+        nu1 = sys1.nu
         u1 = cas.SX.sym("u", nu1)
         x1 = cas.SX.sym("x", n1)
-        f1 = sys1["f"]
+        f1 = sys1.f
         params1 = merge_param_dicts(
             param_dicts[:i], keys=keys[:i], verbose_names=verbose_names
         )
         rhs1 = f1(t, x1, u1, *params1.values())
-        h1 = sys1["h"]
+        h1 = sys1.h
         y1 = h1(t, x1, u1, *params1.values())
 
         # System 2
-        n2 = sys2["n"]
-        ny2 = sys2["ny"]
+        n2 = sys2.n
+        ny2 = sys2.ny
         u2 = y1
         x2 = cas.SX.sym("x", n2)
-        f2 = sys2["f"]
-        params2 = sys2["params"]
+        f2 = sys2.f
+        params2 = sys2.params
         rhs2 = f2(t, x2, u2, *params2.values())
-        h2 = sys2["h"]
+        h2 = sys2.h
         y2 = h2(t, x2, u2, *params2.values())
 
         # Variables of combined system
@@ -841,18 +758,13 @@ def nonlinear_systems_in_series(
             ["t", "x", "u", *params.keys()],
             ["y"],
         )
-        combined_system = {
-            "f": f,
-            "h": h,
-            "n": n,
-            "nu": nu,
-            "ny": ny,
-            "params": params,
-        }
+        combined_system = StateSpaceModelCT(f, h, n, nu, ny, params=params)
 
-    combined_system["state_names"] = concatenate_lists_of_names(
+    combined_system.state_names = concatenate_lists_of_names(
         list(reversed(state_name_lists)), keys=list(reversed(keys))
     )
+
+    # TODO: What about input_names, output_names, etc? 
 
     return combined_system
 
