@@ -14,26 +14,23 @@ from cas_models.continuous_time.models import (
 
 
 @pytest.fixture
-def symbolic_FO_SISO_ABCD():
-    # Example 1: SISO 1st order system
+def symbolic_FO_SISO():
+    """Example SISO system 1: 1st order"""
+    # Dimensions
+    n = 1
+    nu = 1
+    ny = 1
+
+    # Parameters (symbolic)
     K = cas.SX.sym("K")
     T1 = cas.SX.sym("T1")
+    params = {"K": K, "T1": T1}
 
     # State space model matrices
     A = -1 / T1
     B = 1
     C = K / T1
     D = 0
-
-    return A, B, C, D
-
-
-def test_StateSpaceModelCT():
-    # Example 1: SISO 1st order system
-    n = 1
-    K = cas.SX.sym("K")
-    T1 = cas.SX.sym("T1")
-    params = {"K": K, "T1": T1}
 
     # Construct ODE right-hand side
     t = cas.SX.sym("t")
@@ -58,13 +55,69 @@ def test_StateSpaceModelCT():
         ["y"],
     )
 
-    model = StateSpaceModelCT(f, h, n)  # nu and ny should be 1 by default
+    return n, nu, ny, A, B, C, D, t, f, h, params
+
+
+@pytest.fixture
+def symbolic_O2_SISO():
+    """Example SISO system 2: 1st order"""
+    # Dimensions
+    n = 2
+    nu = 1
+    ny = 1
+
+    # Parameters (symbolic)
+    K = cas.SX.sym("K")
+    T1 = cas.SX.sym("T1")
+    T2 = cas.SX.sym("T2")
+    params = {"K": K, "T1": T1, "T2": T2}
+
+    # State space model matrices
+    A = cas.sparsify(
+        cas.blockcat([[0, 1], [-1 / (T1 * T2), (-T1 - T2) / (T1 * T2)]])
+    )
+    B = cas.sparsify(cas.blockcat([[0], [1]]))
+    C = cas.sparsify(cas.blockcat([[K / (T1 * T2), 0]]))
+    D = cas.sparsify(cas.DM(0))
+
+    # Construct ODE right-hand side
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u")
+    rhs = A @ x + B @ u
+
+    f = cas.Function(
+        "f",
+        [t, x, u, *params.values()],
+        [rhs],
+        ["t", "x", "u", *params.keys()],
+        ["rhs"],
+    )
+
+    y = C @ x + D @ u
+    h = cas.Function(
+        "h",
+        [t, x, u, *params.values()],
+        [y],
+        ["t", "x", "u", *params.keys()],
+        ["y"],
+    )
+
+    return n, nu, ny, A, B, C, D, t, f, h, params
+
+
+def test_StateSpaceModelCT(symbolic_FO_SISO):
+
+    n, _, _, _, _, _, _, _, f, h, params = symbolic_FO_SISO
+
+    model = StateSpaceModelCT(f, h, n, params=params)  # nu and ny should be 1 by default
 
     assert str(model) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
+        "params={'K': SX(K), 'T1': SX(T1)}, "
         "input_names=['u'], state_names=['x'], output_names=['y'])"
     )
 
@@ -74,8 +127,9 @@ def test_StateSpaceModelCT():
     assert float(model.h(0.0, 1.0, 0.0, 1.0, 2.0)) == 0.5
 
 
-def test_StateSpaceModelCTFromABCD(symbolic_FO_SISO_ABCD):
-    A, B, C, D = symbolic_FO_SISO_ABCD
+def test_StateSpaceModelCTFromABCD(symbolic_FO_SISO):
+
+    _, _, _, A, B, C, D, _, _, _, _ = symbolic_FO_SISO
 
     model = StateSpaceModelCTFromABCD(A, B, C, D)
 
@@ -84,6 +138,7 @@ def test_StateSpaceModelCTFromABCD(symbolic_FO_SISO_ABCD):
         "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
+        "params={'K': SX(K), 'T1': SX(T1)}, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -95,8 +150,9 @@ def test_StateSpaceModelCTFromABCD(symbolic_FO_SISO_ABCD):
     assert np.array_equal(model.h(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[0.5]]))
 
 
-def test_SSModelCTFromABCDSISO(symbolic_FO_SISO_ABCD):
-    A, B, C, D = symbolic_FO_SISO_ABCD
+def test_SSModelCTFromABCDSISO(symbolic_FO_SISO):
+
+    _, _, _, A, B, C, D, _, _, _, _ = symbolic_FO_SISO
 
     model = SSModelCTFromABCDSISO(A, B, C, D)
 
@@ -105,6 +161,7 @@ def test_SSModelCTFromABCDSISO(symbolic_FO_SISO_ABCD):
         "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
+        "params={'K': SX(K), 'T1': SX(T1)}, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -124,7 +181,7 @@ def test_SSModelCTDirectTransmission():
         "SSModelCTDirectTransmission("
         "f=Function(f:(t,x[0],u)->(rhs[0]) SXFunction), "
         "h=Function(h:(t,x[0],u)->(y) SXFunction), "
-        "n=0, nu=1, ny=1, "
+        "n=0, nu=1, ny=1, params={}, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -141,7 +198,7 @@ def test_SSModelCTDirectTransmission():
         "SSModelCTDirectTransmission("
         "f=Function(f:(t,x[0],u[2])->(rhs[0]) SXFunction), "
         "h=Function(h:(t,x[0],u[2])->(y[2]) SXFunction), "
-        "n=0, nu=2, ny=2, "
+        "n=0, nu=2, ny=2, params={}, "
         "input_names=['u1', 'u2'], state_names=['x'], output_names=['y1', 'y2']"
         ")"
     )
@@ -157,38 +214,41 @@ def test_SSModelCTLinearFONoGainSISO():
     # Example 1: Symbolic time constant
     model = SSModelCTLinearFONoGainSISO(T1=None)
 
-    # TODO: Need to modify this and all tests below.
-    # assert cas.is_equal(cas.simplify(model.A - (-1 / model.params["T1"])), 0)
-    # assert cas.is_equal(model.B, 1)
-    # assert cas.is_equal(cas.simplify(model.C - 1 / model.params["T1"]), 0)
-    # assert cas.is_equal(model.D, 0)
-
     assert str(model) == (
         "SSModelCTLinearFONoGainSISO("
         "f=Function(f:(t,x,u,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
+        "params={'T1': SX(T1)}, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
 
+    # Test function calls - with numpy arrays
+    u = np.array([-1.0]).reshape((-1, 1))
+    x = np.array([2.0]).reshape((-1, 1))
+    assert np.array_equal(model.f(0.0, x, u, 0.5), [[-5]])
+    assert np.array_equal(model.h(0.0, x, u, 0.5), [[4]])
+
     # Example 2: Fixed time constant
     T1 = 0.5
     model = SSModelCTLinearFONoGainSISO(T1=T1)
-
-    # assert np.allclose(model.A, -1 / T1)
-    # assert cas.is_equal(model.B, 1)
-    # assert np.allclose(model.C, 1 / T1)
-    # assert cas.is_equal(model.D, 0)
 
     assert str(model) == (
         "SSModelCTLinearFONoGainSISO("
         "f=Function(f:(t,x,u)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
+        "params={}, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
+
+    # Test function calls - with numpy arrays
+    u = np.array([-1.0]).reshape((-1, 1))
+    x = np.array([2.0]).reshape((-1, 1))
+    assert np.array_equal(model.f(0.0, x, u), [[-5]])
+    assert np.array_equal(model.h(0.0, x, u), [[4]])
 
 
 def test_block_diag():

@@ -14,52 +14,53 @@ from cas_models.param_utils import (
 from cas_models.validation import validate_casadi_function_dims
 
 
-def validate_f_function(
-    f: cas.Function, n: int, nu: int, kwargs=None, ignore_params=True
-):
+def validate_f_function(f: cas.Function, n: int, nu: int, params=None):
     """Use this to check a state transition function has the correct
     arguments (excluding any parameters) and return dimensions.
     """
-    arg_shapes = {"t": (1, 1), "x": (n, 1), "u": (nu, 1)}
-    if kwargs is not None:
-        arg_shapes.update(kwargs)
+    arg_shapes = OrderedDict({"t": (1, 1), "x": (n, 1), "u": (nu, 1)})
+    if params is not None:
+        param_shapes = {name: param.shape for name, param in params.items()}
+        arg_shapes.update(param_shapes)
     return_shapes = {"rhs": (n, 1)}
     return validate_casadi_function_dims(
         f,
         arg_shapes=arg_shapes,
         return_shapes=return_shapes,
-        ignore_remaining=ignore_params,
     )
 
 
 def validate_h_function(
-    h: cas.Function,
-    n: int,
-    nu: int,
-    ny: int,
-    kwargs=None,
-    ignore_params=True,
+    h: cas.Function, n: int, nu: int, ny: int, params=None
 ):
     """Use this to check an output function has the corret arguments
     (excluding any parameters) and return dimensions.
     """
-    arg_shapes = {"t": (1, 1), "x": (n, 1), "u": (nu, 1)}
+    arg_shapes = OrderedDict({"t": (1, 1), "x": (n, 1), "u": (nu, 1)})
+    if params is not None:
+        param_shapes = {name: param.shape for name, param in params.items()}
+        arg_shapes.update(param_shapes)
     return_shapes = {"y": (ny, 1)}
     return validate_casadi_function_dims(
-        h,
-        arg_shapes=arg_shapes,
-        return_shapes=return_shapes,
-        ignore_remaining=ignore_params,
+        h, arg_shapes=arg_shapes, return_shapes=return_shapes
     )
 
 
 @dataclass
 class StateSpaceModelCT:
+    """A continuous-time state-space model of a dynamical system
+    of the form:
+
+        dx/dt = f(t, x, u)
+        y = h(t, x, u)
+
+    """
     f: cas.Function
     h: cas.Function
     n: int
     nu: int
     ny: int
+    params: dict
     input_names: list[str] = None
     state_names: list[str] = None
     output_names: list[str] = None
@@ -71,23 +72,62 @@ class StateSpaceModelCT:
         n,
         nu=1,
         ny=1,
+        params=None,
         input_names=None,
         state_names=None,
         output_names=None,
     ):
-        """Creates a continous-time state-space model of the following form.
+        """Initialize a continuous-time state-space model.
 
-        dx/dt(t) = f(t, x(t), u(t), *args)
-            y(t) = h(t, x(t), u(t), *args)
+        dx/dt(t) = f(t, x(t), u(t), *params.values())
+            y(t) = h(t, x(t), u(t), *params.values())
 
+        Args:
+            f (cas.Function): State transition function with signature
+                (t, x, u, *params.values()) -> rhs where rhs has shape (n, 1).
+                Must have named inputs ["t", "x", "u", ...] and output ["rhs"].
+            h (cas.Function): Output function with signature
+                (t, x, u, *params.values()) -> y where y has shape (ny, 1).
+                Must have named inputs ["t", "x", "u", ...] and output ["y"].
+            n (int): Number of states (dimension of x).
+            nu (int, optional): Number of inputs (dimension of u). Default: 1.
+            ny (int, optional): Number of outputs (dimension of y). Default: 1.
+            params (dict, optional): Dictionary of symbolic parameters used by
+                f and h functions. If None, defaults to empty dict.
+            input_names (list[str], optional): Names for input variables.
+                If None, defaults to ["u"] or ["u1", "u2", ...] for nu > 1.
+            state_names (list[str], optional): Names for state variables.
+                If None, defaults to ["x"] or ["x1", "x2", ...] for n > 1.
+            output_names (list[str], optional): Names for output variables.
+                If None, defaults to ["y"] or ["y1", "y2", ...] for ny > 1.
+
+        Note:
+            The functions f and h are validated during initialization to ensure
+            they have the correct argument names and dimensional consistency.
+
+        Example:
+            >>> t = cas.SX.sym("t")
+            >>> x = cas.SX.sym("x", 2)
+            >>> u = cas.SX.sym("u")
+            >>> a = cas.SX.sym("a")
+            >>> rhs = cas.vertcat(-a * x[0], x[1])
+            >>> f = cas.Function("f", [t, x, u, a], [rhs],
+            ...     ["t", "x", "u", "a"], ["rhs"])
+            >>> h = cas.Function("h", [t, x, u, a], [x[0]],
+            ...     ["t", "x", "u", "a"], ["y"])
+            >>> model = StateSpaceModelCT(f, h, n=2, nu=1, ny=1,
+            ...     params={'a': a})
         """
         self.f = f
         self.h = h
         self.n = n
         self.nu = nu
         self.ny = ny
-        validate_f_function(f, n, nu, ignore_params=True)
-        validate_h_function(h, n, nu, ny, ignore_params=True)
+        if params is None:
+            params = {}
+        self.params = params
+        validate_f_function(f, n, nu, params=params)
+        validate_h_function(h, n, nu, ny, params=params)
         if input_names is None:
             input_names = make_list_of_enumerated_names("u", nu)
         self.input_names = input_names
@@ -136,7 +176,9 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
             params = cas.symvar(cas.SX(m))
             for p in params:
                 symbolic_params.update({p.name(): p})
-        symbolic_params = OrderedDict(sorted(symbolic_params.items()))
+        symbolic_params = {
+            name: symbolic_params[name] for name in sorted(symbolic_params)
+        }
 
         # Construct ODE right-hand side
         t = cas.SX.sym("t")
@@ -165,6 +207,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
             f,
             h,
             n,
+            params=symbolic_params,
             nu=nu,
             ny=ny,
             input_names=input_names,
@@ -214,7 +257,6 @@ class SSModelCTFromABCDSISO(StateSpaceModelCTFromABCD):
         B,
         C,
         D,
-        params=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -247,9 +289,15 @@ class SSModelCTLinearFONoGainSISO(SSModelCTFromABCDSISO):
         state_names=None,
         output_name=None,
     ):
-        """Parameters for a continuous time state-space model."""
-        kwargs = make_symbolic_vars_from_kwargs(T1=T1)
-        T1 = kwargs["T1"]
+        """Parameters for a continuous time state-space model
+        of a first order system with a static gain of 1 and time
+        constant T1.
+
+            G(s) = 1 / (T1 * s + 1)
+
+        """
+        params = make_symbolic_vars_from_kwargs(T1=T1)
+        T1 = params["T1"]
         A = -1 / T1
         B = cas.SX(1)
         C = 1 / T1
@@ -266,73 +314,37 @@ class SSModelCTLinearFONoGainSISO(SSModelCTFromABCDSISO):
         )
 
 
-def state_space_model_linear_FO_no_gain(T1=None):
-    """Parameters for a continuous time state-space model.
+class SSModelCTLinearFOSISO(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        K=None,
+        T1=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        """Parameters for a continuous time state-space model
+        of a first order system with gain K and time constant T1.
 
-    These can be verified using sympy control module. However, note there seems
-    to be a bug in Sympy version 1.13.0:
+            G(s) = K / (T1 * s + 1)
 
-    >>> import sympy
-    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
-    >>> s, T1 = sympy.symbols("s, T1")
-    >>> G = TransferFunction(1, 1 + T1*s, s)
-    >>> sys = G.rewrite(StateSpace)
-    >>> print(sys)
-    StateSpace(Matrix([[-1/T1]]), Matrix([[1]]), Matrix([[1]]), Matrix([[0]]))
-
-    The answer should be:
-        Matrix([[-1/T1]]), Matrix([[1]]), Matrix([[1/T1]]), Matrix([[0]])
-    """
-    kwargs = make_symbolic_vars_from_kwargs(T1=T1)
-    T1 = kwargs["T1"]
-    A = -1 / T1
-    B = cas.SX(1)
-    C = 1 / T1
-    D = cas.sparsify(cas.SX(0))
-    params = {"T1": T1}
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "state_names": ["x_1"],
-    }
-
-
-def state_space_model_linear_FO(K=None, T1=None):
-    """Parameters for a continuous time state-space model.
-
-    These can be verified using sympy control module. However, note there seems
-    to be a bug in Sympy version 1.13.0:
-
-    >>> import sympy
-    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
-    >>> s, K, T1 = sympy.symbols("s, K, T1")
-    >>> G = TransferFunction(K, 1 + T1*s, s)
-    >>> sys = G.rewrite(StateSpace)
-    >>> print(sys)
-    StateSpace(Matrix([[-1/T1]]), Matrix([[1]]), Matrix([[K]]), Matrix([[0]]))
-
-    The answer should be:
-        Matrix([[-1/T1]]), Matrix([[1]]), Matrix([[K/T1]]), Matrix([[0]])
-    """
-    kwargs = make_symbolic_vars_from_kwargs(K=K, T1=T1)
-    K = kwargs["K"]
-    T1 = kwargs["T1"]
-    A = -1 / T1
-    B = cas.SX(1)
-    C = K / T1
-    D = cas.sparsify(cas.SX(0))
-    params = {"K": K, "T1": T1}
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "state_names": ["x_1"],
-    }
+        """
+        params = make_symbolic_vars_from_kwargs(K=K, T1=T1)
+        K = params["K"]
+        T1 = params["T1"]
+        A = -1 / T1
+        B = cas.SX(1)
+        C = K / T1
+        D = cas.sparsify(cas.SX(0))
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )
 
 
 def state_space_model_linear_FOPDT(K=None, T1=None, delay=None):
