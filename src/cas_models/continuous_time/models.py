@@ -3,7 +3,6 @@ from collections import OrderedDict
 
 import casadi as cas
 import sympy
-from casadi import Function
 from dataclasses import dataclass
 from cas_models.param_utils import (
     make_list_of_enumerated_names,
@@ -186,7 +185,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         x = cas.SX.sym("x", n)
         u = cas.SX.sym("u", nu)
         rhs = A @ x + B @ u
-        f = Function(
+        f = cas.Function(
             "f",
             [t, x, u, *symbolic_params.values()],
             [rhs],
@@ -196,7 +195,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
 
         # Construct output function
         y = C @ x + D @ u
-        h = Function(
+        h = cas.Function(
             "h",
             [t, x, u, *symbolic_params.values()],
             [y],
@@ -348,147 +347,122 @@ class SSModelCTLinearFOSISO(SSModelCTFromABCDSISO):
         )
 
 
-def state_space_model_linear_FOPDT(K=None, T1=None, delay=None):
-    # Note: the delay is applied during discrete-time integration step
-    model = state_space_model_linear_FO(K, T1)
-    if delay is None:
-        model["params"]["delay"] = cas.SX.sym("delay")
-    return model
+class SSModelCTLinearO2SISO(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        K=None,
+        T1=None,
+        T2=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        """Parameters for a continuous time state-space model
+        of a first order system with gain K and time constant T1.
+
+            G(s) = K / ((T1 * s + 1) * (T2 * s + 1))
+
+        """
+        params = make_symbolic_vars_from_kwargs(K=K, T1=T1, T2=T2)
+        K = params["K"]
+        T1 = params["T1"]
+        T2 = params["T2"]
+        A = cas.sparsify(
+            cas.blockcat([[0, 1], [-1 / (T1 * T2), (-T1 - T2) / (T1 * T2)]])
+        )
+        B = cas.sparsify(cas.blockcat([[0], [1]]))
+        C = cas.sparsify(cas.blockcat([[K / (T1 * T2), 0]]))
+        D = cas.sparsify(cas.DM(0))
+        params = {"K": K, "T1": T1, "T2": T2}
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )
 
 
-def state_space_model_linear_O2(K=None, T1=None, T2=None):
-    """Parameters for a continuous time state-space model.
+class SSModelCTLinearO2NoGainSISO(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        T1=None,
+        T2=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        """Parameters for a continuous time state-space model
+        of a first order system with gain K and time constant T1.
 
-    These can be verified using sympy control module. However, note there seems
-    to be a bug in Sympy version 1.13.0:
+            G(s) = 1 / ((T1 * s + 1) * (T2 * s + 1))
 
-    >>> import sympy
-    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
-    >>> s, K, T1, T2 = sympy.symbols("s, K, T1, T2")
-    >>> G = TransferFunction(K, (1 + T1*s) * (1 + T2*s), s)
-    >>> sys = G.rewrite(StateSpace)
-    >>> print(sys)
-    StateSpace(Matrix([
-    [         0,                  1],
-    [-1/(T1*T2), (-T1 - T2)/(T1*T2)]]), Matrix([
-    [0],
-    [1]]), Matrix([[K, 0]]), Matrix([[0]]))
-
-    The answer should be:
-    StateSpace(Matrix([
-    [         0,                  1],
-    [-1/(T1*T2), (-T1 - T2)/(T1*T2)]]), Matrix([
-    [0],
-    [1]]), Matrix([[K/(T1*T2), 0]]), Matrix([[0]]))
-    """
-    kwargs = make_symbolic_vars_from_kwargs(K=K, T1=T1, T2=T2)
-    K = kwargs["K"]
-    T1 = kwargs["T1"]
-    T2 = kwargs["T2"]
-    A = cas.sparsify(
-        cas.blockcat([[0, 1], [-1 / (T1 * T2), (-T1 - T2) / (T1 * T2)]])
-    )
-    B = cas.sparsify(cas.blockcat([[0], [1]]))
-    C = cas.sparsify(cas.blockcat([[K / (T1 * T2), 0]]))
-    D = cas.sparsify(cas.DM(0))
-    params = {"K": K, "T1": T1, "T2": T2}
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "state_names": ["x_1", "x_2"],
-    }
+        """
+        params = make_symbolic_vars_from_kwargs(T1=T1, T2=T2)
+        T1 = params["T1"]
+        T2 = params["T2"]
+        A = cas.sparsify(
+            cas.blockcat([[0, 1], [-1 / (T1 * T2), (-T1 - T2) / (T1 * T2)]])
+        )
+        B = cas.sparsify(cas.blockcat([[0], [1]]))
+        C = cas.sparsify(cas.blockcat([[1 / (T1 * T2), 0]]))
+        D = cas.sparsify(cas.DM(0))
+        params = {"T1": T1, "T2": T2}
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )
 
 
-def state_space_model_linear_O2_no_gain(T1=None, T2=None):
-    """Parameters for a continuous time state-space model.
+class SSModelCTLinearO2UnderdampedSISO(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        K=None,
+        zeta=None,
+        omega_n=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        """Parameters for a continuous time state-space model
+        of a first order system with gain K and time constant T1.
 
-    These can be verified using sympy control module. However, note there seems
-    to be a bug in Sympy version 1.13.0:
+            G(s) = K / (s**2 + 2 * zeta * omega_n * s + omega_n**2)
 
-    >>> import sympy
-    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
-    >>> s, T1, T2 = sympy.symbols("s, T1, T2")
-    >>> G = TransferFunction(1, (1 + T1*s) * (1 + T2*s), s)
-    >>> sys = G.rewrite(StateSpace)
-    >>> print(sys)
-    StateSpace(Matrix([
-    [         0,                  1],
-    [-1/(T1*T2), (-T1 - T2)/(T1*T2)]]), Matrix([
-    [0],
-    [1]]), Matrix([[1, 0]]), Matrix([[0]]))
+        where
+            s : Laplace variable
+            zeta : damping coefficient
+            omega_n : natural frequency
 
-        The answer should be:
-    StateSpace(Matrix([
-    [         0,                  1],
-    [-1/(T1*T2), (-T1 - T2)/(T1*T2)]]), Matrix([
-    [0],
-    [1]]), Matrix([[1/(T1*T2), 0]]), Matrix([[0]])))
-    """
-    kwargs = make_symbolic_vars_from_kwargs(T1=T1, T2=T2)
-    T1 = kwargs["T1"]
-    T2 = kwargs["T2"]
-    A = cas.sparsify(
-        cas.blockcat([[0, 1], [-1 / (T1 * T2), (-T1 - T2) / (T1 * T2)]])
-    )
-    B = cas.sparsify(cas.blockcat([[0], [1]]))
-    C = cas.sparsify(cas.blockcat([[1 / (T1 * T2), 0]]))
-    D = cas.sparsify(cas.DM(0))
-    params = {"T1": T1, "T2": T2}
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "state_names": ["x_1", "x_2"],
-    }
-
-
-def state_space_model_linear_O2_underdamped_no_gain(zeta=None, omega_n=None):
-    """Parameters for a continuous time state-space model of a possibly
-    underdamped second order system with the following transfer function:
-
-    G = 1 / (s**2 + 2 * zeta * omega_n * s + omega_n**2)
-
-    where
-        s : Laplace variable
-        zeta : damping coefficient
-        omega_n : natural frequency
-
-    These can be verified using sympy control module:
-
-    >>> import sympy
-    >>> from sympy.physics.control.lti import TransferFunction, StateSpace
-    >>> s, zeta, omega_n = sympy.symbols("s, zeta, omega_n")
-    >>> G = TransferFunction(1, (s**2 + 2 * zeta*omega_n * s + omega_n**2), s)
-    >>> G.rewrite(StateSpace)
-    StateSpace(Matrix([
-    [          0,               1],
-    [-omega_n**2, -2*omega_n*zeta]]), Matrix([
-    [0],
-    [1]]), Matrix([[1, 0]]), Matrix([[0]]))
-    """
-    kwargs = make_symbolic_vars_from_kwargs(zeta=zeta, omega_n=omega_n)
-    zeta = kwargs["zeta"]
-    omega_n = kwargs["omega_n"]
-    A = cas.sparsify(
-        cas.blockcat([[0, 1], [-(omega_n**2), -2 * omega_n * zeta]])
-    )
-    B = cas.sparsify(cas.blockcat([[0], [1]]))
-    C = cas.sparsify(cas.blockcat([[1, 0]]))
-    D = cas.sparsify(cas.DM(0))
-    params = {"zeta": zeta, "omega_n": omega_n}
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "state_names": ["x_1", "x_2"],
-    }
+        """
+        params = make_symbolic_vars_from_kwargs(
+            K=K, zeta=zeta, omega_n=omega_n
+        )
+        K = params["K"]
+        zeta = params["zeta"]
+        omega_n = params["omega_n"]
+        A = cas.sparsify(
+            cas.blockcat([[0, 1], [-(omega_n**2), -2 * omega_n * zeta]])
+        )
+        B = cas.sparsify(cas.blockcat([[0], [1]]))
+        C = cas.sparsify(cas.blockcat([[K, 0]]))
+        D = cas.sparsify(cas.DM(0))
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )
 
 
 def block_diag(matrices, square=False):
@@ -785,8 +759,6 @@ def connect_nonlinear_systems_in_series(
         list(reversed(state_name_lists)), keys=list(reversed(keys))
     )
 
-    # TODO: What about input_names, output_names, etc?
-
     return combined_system
 
 
@@ -795,11 +767,11 @@ def make_step_function(mag=1.0, t_step=0.0):
     u_step = cas.DM(mag)
     t_step = cas.DM(t_step)
     t = cas.SX.sym("t")
-    before_step = Function("before_step", [], [u0])
-    after_step = Function("after_step", [], [u_step])
-    f_cond = Function.if_else("f_cond", after_step, before_step)
+    before_step = cas.Function("before_step", [], [u0])
+    after_step = cas.Function("after_step", [], [u_step])
+    f_cond = cas.Function.if_else("f_cond", after_step, before_step)
     y = f_cond(t >= t_step)
-    return Function("step", [t], [y], ["t"], ["y"])
+    return cas.Function("step", [t], [y], ["t"], ["y"])
 
 
 def make_sim_step_function_RK4(f, h, n, nu, params=None, name="F"):
@@ -818,14 +790,13 @@ def make_sim_step_function_RK4(f, h, n, nu, params=None, name="F"):
     k3 = f(t, x + dt / 2 * k2, u, *params.values())
     k4 = f(t, x + dt * k3, u, *params.values())
     xf = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-    y = h(t, x, u, *params.values())
 
-    return Function(
+    return cas.Function(
         name,
         [t, x, u, dt, *params.values()],
-        [xf, y],
+        [xf],
         ["t", "x", "u", "dt", *params.keys()],
-        ["xf", "y"],
+        ["xf"],
     )
 
 

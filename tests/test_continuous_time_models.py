@@ -10,6 +10,9 @@ from cas_models.continuous_time.models import (
     SSModelCTDirectTransmission,
     SSModelCTLinearFONoGainSISO,
     SSModelCTLinearFOSISO,
+    SSModelCTLinearO2SISO,
+    SSModelCTLinearO2NoGainSISO,
+    SSModelCTLinearO2UnderdampedSISO,
     block_diag,
     connect_nonlinear_systems_in_parallel,
     connect_nonlinear_systems_in_series,
@@ -279,7 +282,7 @@ def test_SSModelCTDirectTransmission():
 
 def test_SSModelCTLinearFONoGainSISO():
     # Example 1: Symbolic time constant
-    model = SSModelCTLinearFONoGainSISO(T1=None)
+    model = SSModelCTLinearFONoGainSISO()
 
     assert str(model) == (
         "SSModelCTLinearFONoGainSISO("
@@ -316,6 +319,127 @@ def test_SSModelCTLinearFONoGainSISO():
     x = np.array([2.0]).reshape((-1, 1))
     assert np.array_equal(model.f(0.0, x, u), [[-5]])
     assert np.array_equal(model.h(0.0, x, u), [[4]])
+
+
+def test_SSModelCTLinearO2SISO():
+    # Example 1: Symbolic time constant
+    model = SSModelCTLinearO2SISO()
+
+    assert str(model) == (
+        "SSModelCTLinearO2SISO("
+        "f=Function(f:(t,x[2],u,K,T1,T2)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,K,T1,T2)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, "
+        "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
+        ")"
+    )
+
+    # Test function calls - with numpy arrays
+    u = np.array([-1.0]).reshape((-1, 1))
+    x = np.array([2.0, -1.0]).reshape((-1, 1))
+    assert np.allclose(model.f(0.0, x, u, 2.0, 0.5, 2.5), [[-1], [-0.2]])
+    assert np.allclose(model.h(0.0, x, u, 2.0, 0.5, 2.5), [[3.2]])
+
+    # Example 2: Fixed parameters
+    K = 2.0
+    T1 = 0.5
+    model = SSModelCTLinearO2SISO(K=K, T1=T1)
+    assert str(model) == (
+        "SSModelCTLinearO2SISO("
+        "f=Function(f:(t,x[2],u,T2)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,T2)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'T2': SX(T2)}, "
+        "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
+        ")"
+    )
+
+    # Test function calls - with numpy arrays
+    u = np.array([-1.0]).reshape((-1, 1))
+    x = np.array([2.0, -1.0]).reshape((-1, 1))
+    assert np.allclose(model.f(0.0, x, u, 2.5), [[-1], [-0.2]])
+    assert np.allclose(model.h(0.0, x, u, 2.5), [[3.2]])
+
+
+def test_SSModelCTLinearO2NoGainSISO():
+    # Example 1: Symbolic time constant
+    model = SSModelCTLinearO2NoGainSISO()
+
+    assert str(model) == (
+        "SSModelCTLinearO2NoGainSISO("
+        "f=Function(f:(t,x[2],u,T1,T2)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,T1,T2)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'T1': SX(T1), 'T2': SX(T2)}, "
+        "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
+        ")"
+    )
+
+    # Test function calls - with numpy arrays
+    u = np.array([-1.0]).reshape((-1, 1))
+    x = np.array([2.0, -1.0]).reshape((-1, 1))
+    assert np.allclose(model.f(0.0, x, u, 0.5, 2.5), [[-1], [-0.2]])
+    assert np.allclose(model.h(0.0, x, u, 0.5, 2.5), [[1.6]])
+
+    # Example 2: Fixed parameters
+    T1 = 0.5
+    model = SSModelCTLinearO2NoGainSISO(T1=T1)
+    assert str(model) == (
+        "SSModelCTLinearO2NoGainSISO("
+        "f=Function(f:(t,x[2],u,T2)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,T2)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'T2': SX(T2)}, "
+        "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
+        ")"
+    )
+
+    # Test function calls - with numpy arrays
+    u = np.array([-1.0]).reshape((-1, 1))
+    x = np.array([2.0, -1.0]).reshape((-1, 1))
+    assert np.allclose(model.f(0.0, x, u, 2.5), [[-1], [-0.2]])
+    assert np.allclose(model.h(0.0, x, u, 2.5), [[1.6]])
+
+
+def test_SSModelCTLinearO2UnderdampedSISO():
+    # Example 1: Symbolic time constant
+    model = SSModelCTLinearO2UnderdampedSISO()
+
+    assert str(model) == (
+        "SSModelCTLinearO2UnderdampedSISO("
+        "f=Function(f:(t,x[2],u,K,omega_n,zeta)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,K,omega_n,zeta)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'K': SX(K), 'omega_n': SX(omega_n), 'zeta': SX(zeta)}, "
+        "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
+        ")"
+    )
+
+    # Test function calls - with numpy arrays
+    u = np.array([-1.0]).reshape((-1, 1))
+    x = np.array([2.0, -1.0]).reshape((-1, 1))
+    assert np.allclose(model.f(0.0, x, u, 2.0, 1.0, 0.5), [[-1], [-2]])
+    assert np.allclose(model.h(0.0, x, u, 2.0, 1.0, 0.5), [[4.0]])
+
+    # Example 2: Fixed parameters
+    zeta = 0.5
+    omega_n = 1.0
+    model = SSModelCTLinearO2UnderdampedSISO(zeta=zeta, omega_n=omega_n)
+    assert str(model) == (
+        "SSModelCTLinearO2UnderdampedSISO("
+        "f=Function(f:(t,x[2],u,K)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,K)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'K': SX(K)}, "
+        "input_names=['u'], state_names=['x1', 'x2'], output_names=['y'])"
+    )
+
+    # Test function calls - with numpy arrays
+    u = np.array([-1.0]).reshape((-1, 1))
+    x = np.array([2.0, -1.0]).reshape((-1, 1))
+    assert np.allclose(model.f(0.0, x, u, 2.0), [[-1], [-2]])
+    assert np.allclose(model.h(0.0, x, u, 2.0), [[4.0]])
 
 
 def test_block_diag():
@@ -451,3 +575,11 @@ def test_connect_nonlinear_systems_in_series():
         "input_names=['u'], state_names=['out_x', 'in_x'], "
         "output_names=['y'])"
     )
+
+
+def test_tf_models():
+
+    sys1 = SSModelCTLinearFONoGainSISO(T1=1)
+    sys2 = SSModelCTLinearFOSISO(K=2, T1=2.5)
+
+    # TODO: Test discrete time integration and simulation
