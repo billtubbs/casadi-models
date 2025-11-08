@@ -5,6 +5,7 @@ import numpy as np
 import casadi as cas
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
+    StateSpaceModelDTARXSISO
 )
 
 
@@ -115,7 +116,7 @@ def symbolic_AR211_SISO():
     return n, nu, ny, A, B, C, D, t, F, H, params
 
 
-def test_StateSpaceModelCT_FO_SISO(symbolic_FO_SISO):
+def test_StateSpaceModelDT_FO_SISO(symbolic_FO_SISO):
     n, nu, ny, A, B, C, D, t, F, H, params = symbolic_FO_SISO
 
     # nu and ny should be 1 by default - TODO: Use SISO version
@@ -161,6 +162,26 @@ def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
     Bq = cas.DM([0.8, 0.2])
     assert np.allclose(model.F(t, xk, uk, Aq, Bq), cas.DM([0, 0, 0, -0.5]))
     assert np.allclose(model.H(t, xk, uk, Aq, Bq), cas.DM([0]))
+
+
+def test_StateSpaceModelDTARXSISO():
+    na = 2
+    nb = 1
+    nk = 1
+    model = StateSpaceModelDTARXSISO(na, nb, nk)
+
+    assert str(model) == (
+        "StateSpaceModelDTARXSISO("
+        "F=Function(F:(t,xk[4],uk,a[2],b)->(xkp1[4]) SXFunction), "
+        "H=Function(H:(t,xk[4],uk,a[2],b)->(yk) SXFunction), "
+        "n=4, nu=1, ny=1, "
+        "params={'a': SX([a_0, a_1]), 'b': SX(b)}, "
+        "input_names=['u'], state_names=['x1', 'x2', 'x3', 'x4'], "
+        "output_names=['y']"
+        ")"
+    )
+
+    breakpoint()
 
 
 # def test_StateSpaceModelCTFromABCD_FO_SISO(symbolic_FO_SISO):

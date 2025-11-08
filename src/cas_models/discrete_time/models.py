@@ -45,8 +45,8 @@ class StateSpaceModelDT:
     """A discrete-time state-space model of a dynamical system
     of the form:
 
-          x(k+1) = F(t, x(k), u(K), *params.values())
-            y(k) = H(t, x(k), u(K), *params.values())
+          x(k+1) = F(t, x(k), u(k), *params.values())
+            y(k) = H(t, x(k), u(k), *params.values())
 
     """
 
@@ -74,8 +74,8 @@ class StateSpaceModelDT:
     ):
         """Initialize a discrete-time state-space model.
 
-          x(k+1) = F(t, x(k), u(K), *params.values())
-            y(k) = H(t, x(k), u(K), *params.values())
+          x(k+1) = F(t, x(k), u(k), *params.values())
+            y(k) = H(t, x(k), u(k), *params.values())
 
         Args:
             F (cas.Function): State transition function with signature
@@ -134,3 +134,122 @@ class StateSpaceModelDT:
         if output_names is None:
             output_names = make_list_of_enumerated_names("y", ny)
         self.output_names = output_names
+
+
+class StateSpaceModelDTSISO(StateSpaceModelDT):
+    """A discrete-time state-space model of a single-input,
+    single output (SISO) dynamical system of the form:
+
+          x(k+1) = F(t, x(k), u(k), *params.values())
+            y(k) = H(t, x(k), u(k), *params.values())
+
+    """
+
+    def __init__(
+        self,
+        F,
+        H,
+        n,
+        params=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        input_names = None if input_name is None else [input_name]
+        output_names = None if output_name is None else [output_name]
+        super().__init__(
+            F,
+            H,
+            n,
+            nu=1,
+            ny=1,
+            params=params,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
+
+
+class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
+    """A discrete-time ARX model of a dynamical system:
+
+        A(q^-1) y(k) = B(q^-1) q^{-nk} u(k) + e(k)
+
+    where
+
+        A(q^-1) = 1 + a_1 q^-1 + ... + a_na q^{-na}
+        B(q^-1) = b_1  + b_2 q^-1 + ... + b_nb q^{-nb+1}
+        and q^-1 is the backward-in-time shift operator
+
+    This translates into the following difference equation:
+
+        y(k) = -a_1 y(k-1) - a_2 y(k-2) - ... - a_na y(k-na)
+               + b_1 u(k-nk) + b_2 u(k-nk-1) + ... + b_nb u(k-nk-nb+1)
+               + e(k)
+
+    """
+
+    def __init__(
+        self,
+        na,
+        nb,
+        nk,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        a = cas.SX.sym("a", na)
+        b = cas.SX.sym("b", nb)
+
+        # Construct state-space model
+        t = cas.SX.sym("t")
+        uk = cas.SX.sym("uk")
+
+        # States needed: na outputs + (nb+nk) inputs
+        n = na + nb + nk
+        xk = cas.SX.sym("xk", n)
+
+        # State: [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb)]
+        # Compute y(k) from difference equation:
+        # y(k) = -a_1*y(k-1) - ... - a_na*y(k-na)
+        #        + b_1*u(k-nk) + ... + b_nb*u(k-nk-nb+1)
+        yk = -cas.sum1(a * xk[0:na]) + cas.sum1(
+            b * xk[na + nk - 1:na + nk + nb - 1]
+        )
+
+        # Next state: shift and insert new values
+        xkp1 = cas.vertcat(
+            yk,  # y(k)
+            xk[0:na - 1],  # [y(k-1), ..., y(k-na+1)]
+            uk,  # u(k)
+            xk[na:na + nk + nb - 1],  # [u(k-1), ..., u(k-nk-nb+1)]
+        )
+
+        # Define parameters dictionary
+        params = {"a": a, "b": b}
+
+        F = cas.Function(
+            "F",
+            [t, xk, uk, *params.values()],
+            [xkp1],
+            ["t", "xk", "uk", *params.keys()],
+            ["xkp1"],
+        )
+
+        H = cas.Function(
+            "H",
+            [t, xk, uk, *params.values()],
+            [yk],
+            ["t", "xk", "uk", *params.keys()],
+            ["yk"],
+        )
+
+        super().__init__(
+            F,
+            H,
+            n,
+            params=params,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )

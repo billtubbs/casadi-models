@@ -139,6 +139,40 @@ class StateSpaceModelCT:
         self.output_names = output_names
 
 
+class StateSpaceModelCTSISO(StateSpaceModelCT):
+    """A continuous-time state-space model of a single-input,
+    single output (SISO) dynamical system of the form:
+
+        dx/dt = f(t, x, u)
+        y = h(t, x, u)
+
+    """
+
+    def __init__(
+        self,
+        f,
+        h,
+        n,
+        params=None,
+        input_name=None,
+        state_names=None,
+        output_name=None
+    ):
+        input_names = None if input_name is None else [input_name]
+        output_names = None if output_name is None else [output_name]
+        super().__init__(
+            f,
+            h,
+            n,
+            nu=1,
+            ny=1,
+            params=params,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
+
+
 class StateSpaceModelCTFromABCD(StateSpaceModelCT):
     def __init__(
         self,
