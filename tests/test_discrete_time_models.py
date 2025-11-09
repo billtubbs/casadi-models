@@ -183,7 +183,8 @@ def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
 
 
 def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
-    # ARX(2, 2, 1) model
+
+    # ARX(2, 2, 1) model with fixed coefficients
     A = [-1.40429502, 0.69767633]
     B = [0.18669536, 0.16536220]
     model = StateSpaceModelDTARXSISO(A=A, B=B)
@@ -210,6 +211,7 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
     u = cas.DM(data_TP04_Q1a_ss["u_data"].to_numpy())
     y_m = cas.DM(data_TP04_Q1a_ss["y_data"].to_numpy())
 
+    # Simulate model
     xk = cas.DM.zeros(n)
     X = []
     y = []
@@ -234,8 +236,88 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
     assert np.allclose(np.array(y), y_octave, atol=1e-6), \
         "Outputs don't match Octave output"
 
+    # ARX(2, 2, 1) model with symbolic coefficients
+    na = 2
+    nb = 2
+    model = StateSpaceModelDTARXSISO(na=na, nb=nb)
 
-# def test_StateSpaceModelCTFromABCD_FO_SISO(symbolic_FO_SISO):
+    assert str(model) == (
+        "StateSpaceModelDTARXSISO("
+        "F=Function(F:(t,xk[3],uk,a_0,a_1,b_0,b_1)->(xkp1[3]) SXFunction), "
+        "H=Function(H:(t,xk[3],uk,a_0,a_1,b_0,b_1)->(yk) SXFunction), "
+        "n=3, nu=1, ny=1, "
+        "params={'a_0': SX(a_0), 'a_1': SX(a_1), 'b_0': SX(b_0), 'b_1': SX(b_1)}, "
+        "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
+        "output_names=['y']"
+        ")"
+    )
+
+    # Simulate model
+    xk = cas.DM.zeros(n)
+    X = []
+    y = []
+    for k in range(nT + 1):
+        yk = model.H(t[k], xk, u[k], *A, *B)
+        y.append(yk)
+        X.append(xk.T)
+        xk = model.F(t[k], xk, u[k], *A, *B)
+
+    X = cas.vcat(X)
+    y = cas.vcat(y)
+
+    # Verify states match
+    assert np.allclose(np.array(X), X_octave, atol=1e-6), \
+        "States don't match Octave output"
+
+    # Verify outputs match
+    assert np.allclose(np.array(y), y_octave, atol=1e-6), \
+        "Outputs don't match Octave output"
+
+    # Simulate symbolically
+    xk = cas.DM.zeros(n)
+    X = []
+    y = []
+    for k in range(nT + 1):
+        yk = model.H(t[k], xk, u[k], *model.params.values())
+        y.append(yk)
+        X.append(xk.T)
+        xk = model.F(t[k], xk, u[k], *model.params.values())
+
+    X = cas.vcat(X)
+    y = cas.vcat(y)
+
+    # Construct CasADi function to compute prediction error
+    calculate_sumsq_error = cas.Function(
+        "calculate_sumsq_error",
+        model.params.values(),
+        [cas.sumsqr(y - y_m) / (nT + 1)],
+        model.params.keys(),
+        ['sumsq_error']
+    )
+
+    opti = cas.Opti()
+    params = {}
+    for name, param in model.params.items():
+        params[name] = opti.variable(param.shape[0])
+    
+    prediction_error = calculate_sumsq_error(*params.values())
+    opti.minimize(prediction_error)
+
+    # Solve with nonlinear solver (suppress verbose output)
+    opti.solver('ipopt', {'ipopt.print_level': 0, 'print_time': 0})
+    sol = opti.solve()
+
+    assert sol.stats()['return_status'] == 'Solve_Succeeded'
+    assert sol.value(prediction_error) < 1e-10
+
+    params_sol = [sol.value(v) for v in params.values()]
+    assert np.allclose(
+        params_sol,
+        [-1.40429502, 0.69767633, 0.18669536, 0.16536220]
+    )
+
+    
+# def test_StateSpaceModelDTFromABCD_FO_SISO(symbolic_FO_SISO):
 #     _, _, _, A, B, C, D, _, _, _, _ = symbolic_FO_SISO
 
 #     model = StateSpaceModelDTFromABCD(A, B, C, D)
@@ -257,10 +339,10 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
 #     assert np.array_equal(model.H(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[0.5]]))
 
 
-# def test_StateSpaceModelCTFromABCD_O2_SISO(symbolic_O2_SISO):
+# def test_StateSpaceModelDTFromABCD_O2_SISO(symbolic_O2_SISO):
 #     _, _, _, A, B, C, D, _, _, _, _ = symbolic_O2_SISO
 
-#     model = StateSpaceModelCTFromABCD(A, B, C, D)
+#     model = StateSpaceModelDTFromABCD(A, B, C, D)
 
 #     assert str(model) == (
 #         "StateSpaceModelCTFromABCD("
