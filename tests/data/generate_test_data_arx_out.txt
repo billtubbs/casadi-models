@@ -1,3 +1,4 @@
+
 Transfer function 'sys' from input 'u1' to output ...
 
        0.1867 z^-2 + 0.1654 z^-3
@@ -13,6 +14,12 @@ Transfer function 'sys' from input 'u2' to output ...
 Sampling time: 2 s
 Discrete-time model.
 
+Transfer Function Parameters
+Numerator:
+  0.00000000   0.00000000   0.18669536   0.16536220
+Denomenator:
+  1.00000000  -1.40429502   0.69767633   0.00000000
+Initial state: [0.010539 -0.134087 -0.000000]
 sys_ss.a =
                x1          x2          x3
    x1  -3.608e-16  -1.002e-16  -3.608e-16
@@ -35,3 +42,17 @@ sys_ss.d =
 
 Sampling time: 2 s
 Discrete-time model.
+
+State Space Model Matrices
+A:
+ -0.00000000   1.00000000   0.00000000
+ -0.00000000   0.00000000  -1.00000000
+ -0.00000000   0.69767633   1.40429502
+B:
+  0.16536220
+  0.18669536
+  0.00000000
+C:
+  0.00000000   0.00000000  -1.00000000
+D:
+  0.00000000
