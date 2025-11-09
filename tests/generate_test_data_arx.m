@@ -80,7 +80,7 @@ dlmwrite('data/TP04_Q1a_ss.csv', [t data.u x y data.y], '-append');
 % Print with more decimal places
 fprintf("\nState Space Model Matrices\n")
 fprintf("A:\n")
-fprintf("%12.8f %12.8f %12.8f\n", sys_ss.a)
+fprintf("%12.8f %12.8f %12.8f\n", sys_ss.a')
 fprintf("B:\n")
 fprintf("%12.8f\n", sys_ss.b)
 fprintf("C:\n")

@@ -2,11 +2,16 @@
 
 import pytest
 import numpy as np
+import pandas as pd
 import casadi as cas
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
-    StateSpaceModelDTARXSISO
+    StateSpaceModelDTARXSISO,
 )
+from pathlib import Path
+
+
+DATA_DIR = Path("tests/data")
 
 
 @pytest.fixture
@@ -116,6 +121,18 @@ def symbolic_AR211_SISO():
     return n, nu, ny, A, B, C, D, t, F, H, params
 
 
+@pytest.fixture
+def data_TP04_Q1a():
+    data = pd.read_csv(DATA_DIR / "TP04_Q1a.csv")
+    return data
+
+
+@pytest.fixture
+def data_TP04_Q1a_ss():
+    data = pd.read_csv(DATA_DIR / "TP04_Q1a_ss.csv")
+    return data
+
+
 def test_StateSpaceModelDT_FO_SISO(symbolic_FO_SISO):
     n, nu, ny, A, B, C, D, t, F, H, params = symbolic_FO_SISO
 
@@ -150,7 +167,8 @@ def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
         "H=Function(H:(t,xk[4],uk,Aq[2],Bq[2])->(yk) SXFunction), "
         "n=4, nu=1, ny=1, "
         "params={'Aq': SX([Aq_0, Aq_1]), 'Bq': SX([Bq_0, Bq_1])}, "
-        "input_names=['u'], state_names=['x1', 'x2', 'x3', 'x4'], output_names=['y']"
+        "input_names=['u'], state_names=['x1', 'x2', 'x3', 'x4'], "
+        "output_names=['y']"
         ")"
     )
 
@@ -164,24 +182,57 @@ def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
     assert np.allclose(model.H(t, xk, uk, Aq, Bq), cas.DM([0]))
 
 
-def test_StateSpaceModelDTARXSISO():
-    na = 2
-    nb = 1
-    nk = 1
-    model = StateSpaceModelDTARXSISO(na, nb, nk)
+def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
+    # ARX(2, 2, 1) model
+    A = [-1.40429502, 0.69767633]
+    B = [0.18669536, 0.16536220]
+    model = StateSpaceModelDTARXSISO(A=A, B=B)
 
     assert str(model) == (
         "StateSpaceModelDTARXSISO("
-        "F=Function(F:(t,xk[4],uk,a[2],b)->(xkp1[4]) SXFunction), "
-        "H=Function(H:(t,xk[4],uk,a[2],b)->(yk) SXFunction), "
-        "n=4, nu=1, ny=1, "
-        "params={'a': SX([a_0, a_1]), 'b': SX(b)}, "
-        "input_names=['u'], state_names=['x1', 'x2', 'x3', 'x4'], "
+        "F=Function(F:(t,xk[3],uk)->(xkp1[3]) SXFunction), "
+        "H=Function(H:(t,xk[3],uk)->(yk) SXFunction), "
+        "n=3, nu=1, ny=1, "
+        "params={}, "
+        "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
         "output_names=['y']"
         ")"
     )
 
-    breakpoint()
+    # Model dimensions
+    n = model.n
+    assert model.nu == 1
+    assert model.ny == 1
+
+    # Load test data
+    t = cas.DM(data_TP04_Q1a_ss["t"].to_numpy())
+    nT = t.shape[0] - 1
+    u = cas.DM(data_TP04_Q1a_ss["u_data"].to_numpy())
+    y_m = cas.DM(data_TP04_Q1a_ss["y_data"].to_numpy())
+
+    xk = cas.DM.zeros(n)
+    X = []
+    y = []
+    for k in range(nT + 1):
+        yk = model.H(t[k], xk, u[k])
+        y.append(yk)
+        X.append(xk.T)
+        xk = model.F(t[k], xk, u[k])
+
+    X = cas.vcat(X)
+    y = cas.vcat(y)
+
+    # Compare with Octave simulation results
+    X_octave = data_TP04_Q1a_ss[['x1', 'x2', 'x3']].to_numpy()
+    y_octave = data_TP04_Q1a_ss['y'].to_numpy().reshape(-1, 1)
+
+    # Verify states match
+    assert np.allclose(np.array(X), X_octave, atol=1e-6), \
+        "States don't match Octave output"
+
+    # Verify outputs match
+    assert np.allclose(np.array(y), y_octave, atol=1e-6), \
+        "Outputs don't match Octave output"
 
 
 # def test_StateSpaceModelCTFromABCD_FO_SISO(symbolic_FO_SISO):
