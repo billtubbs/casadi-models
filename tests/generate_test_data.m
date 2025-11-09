@@ -1,7 +1,11 @@
+%% Generates input-output data for unit tests
+
 pkg load control
 
-G1 = tf(1, [1 1]);
-G2 = tf(2, [2.5 1]);
+% Results will be saved to file
+if ~exist('data', 'dir')
+    mkdir('data');
+end
 
 % Simulation time
 nT = 12;
@@ -11,6 +15,9 @@ t = Ts * (0:nT)';
 % Input signal
 u = zeros(nT+1, 1);
 u(t >= 1) = 1;
+
+G1 = tf(1, [1 1]);
+G2 = tf(2, [2.5 1]);
 
 % Underdamped second order system
 zeta = 0.5;
@@ -32,6 +39,7 @@ systems = {
     G1 * G2 + G3,
     feedback(Gc * G2, 1)
 };
+
 results = zeros(nT+1, numel(systems));
 for i = 1:numel(systems)
     [y, t, x] = lsim(systems{i}, u, t);
@@ -39,9 +47,6 @@ for i = 1:numel(systems)
 end
 
 % Save results to CSV file
-if ~exist('data', 'dir')
-    mkdir('data');
-end
 headers = {'t', 'u', 'y_G1', 'y_G2', 'y_G3', 'y_G1 * G2', 'G1 * G2 + G3', 'y_H2'};
 fid = fopen('data/results_ct.csv', 'w');
 fprintf(fid, '%s,%s,%s,%s,%s,%s,%s,%s\n', headers{:});
