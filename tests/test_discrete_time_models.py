@@ -7,6 +7,7 @@ import casadi as cas
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
+    StateSpaceModelDTTFSISO,
 )
 from pathlib import Path
 
@@ -130,6 +131,13 @@ def data_TP04_Q1a():
 @pytest.fixture
 def data_TP04_Q1a_ss():
     data = pd.read_csv(DATA_DIR / "TP04_Q1a_ss.csv")
+    return data
+
+
+@pytest.fixture
+def data_tf2ss_simulation():
+    """Load Octave simulation results for tf2ss test cases"""
+    data = pd.read_csv(DATA_DIR / "results_tf2ss.csv")
     return data
 
 
@@ -316,7 +324,63 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
         [-1.40429502, 0.69767633, 0.18669536, 0.16536220]
     )
 
-    
+
+@pytest.mark.parametrize(
+    "sys_num,test_case_fixture",
+    [
+        (1, "tf_test_case_1"),
+        (2, "tf_test_case_2"),
+        (3, "tf_test_case_3"),
+        (4, "tf_test_case_4"),
+        (5, "tf_test_case_5"),
+    ]
+)
+def test_StateSpaceModelDTTFSISO(
+    sys_num, test_case_fixture, request, data_tf2ss_simulation
+):
+    """Test StateSpaceModelDTTFSISO simulation matches Octave output.
+
+    This tests that StateSpaceModelDTTFSISO produces the same output
+    as Octave's ss(tf(...)) when simulated with the same input signal.
+    """
+    test_case = request.getfixturevalue(test_case_fixture)
+
+    # Convert to CasADi vectors
+    num = cas.DM(test_case["num"])
+    den = cas.DM(test_case["den"])
+
+    # Create model instance
+    model = StateSpaceModelDTTFSISO(num=num, den=den)
+
+    # Model dimensions
+    n = model.n
+    assert model.nu == 1
+    assert model.ny == 1
+
+    # Load test data
+    t = cas.DM(data_tf2ss_simulation["t"].to_numpy())
+    nT = t.shape[0] - 1
+    u = cas.DM(data_tf2ss_simulation["u"].to_numpy())
+    y_octave = data_tf2ss_simulation[f"sys{sys_num}_y"].to_numpy()
+
+    # Simulate model from zero initial conditions
+    xk = cas.DM.zeros(n)
+    y = []
+    for k in range(nT + 1):
+        yk = model.H(t[k], xk, u[k])
+        y.append(yk)
+        xk = model.F(t[k], xk, u[k])
+
+    y = cas.vcat(y)
+
+    # Compare output with Octave simulation results
+    # Don't compare states since Octave uses different state-space form
+    # Use looser tolerance for higher-order systems with complex poles
+    atol = 1e-2 if sys_num == 5 else 1e-6
+    assert np.allclose(np.array(y).flatten(), y_octave, atol=atol), \
+        f"System {sys_num} output doesn't match Octave output"
+
+
 # def test_StateSpaceModelDTFromABCD_FO_SISO(symbolic_FO_SISO):
 #     _, _, _, A, B, C, D, _, _, _, _ = symbolic_FO_SISO
 

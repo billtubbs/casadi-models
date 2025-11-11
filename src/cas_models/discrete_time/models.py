@@ -183,13 +183,13 @@ def tf_to_ss_oct_np(num, den):
         y(k) = C*x(k) + D*u(k)
 
     where A has the form:
-        A = [0   0   ...  0   a_n    ]
-            [1   0   ...  0   a_{n-1}]
-            [0   1   ...  0   a_{n-2}]
-            [...            ...       ]
-            [0   0   ...  1   a_1    ]
+        A = [0   0   ...  0   -a_n    ]
+            [1   0   ...  0   -a_{n-1}]
+            [0   1   ...  0   -a_{n-2}]
+            [...            ...        ]
+            [0   0   ...  1   -a_1    ]
 
-    B = [b_n, b_{n-1}, ..., b_1]^T, C = [0, 0, ..., 0, 1], D = 0
+    B = [b_n, b_{n-1}, ..., b_1]^T, C = [0, 0, ..., 0, 1], D = b_0
 
     Args:
         num: Numerator polynomial coefficients in descending degree order
@@ -226,8 +226,8 @@ def tf_to_ss_oct_np(num, den):
     # Subdiagonal of ones
     for i in range(n - 1):
         A[i + 1, i] = 1.0
-    # Last column contains denominator coefficients in reverse order
-    A[:, n - 1] = a_coeffs[::-1]
+    # Last column contains NEGATIVE denominator coefficients in reverse order
+    A[:, n - 1] = -a_coeffs[::-1]
 
     # Construct B matrix - numerator coefficients in reverse order
     B = b_coeffs[::-1].reshape(n, 1)
@@ -328,13 +328,13 @@ def tf_to_ss_oct_cas(num, den):
         y(k) = C*x(k) + D*u(k)
 
     where A has the form:
-        A = [0   0   ...  0   a_n    ]
-            [1   0   ...  0   a_{n-1}]
-            [0   1   ...  0   a_{n-2}]
-            [...            ...       ]
-            [0   0   ...  1   a_1    ]
+        A = [0   0   ...  0   -a_n    ]
+            [1   0   ...  0   -a_{n-1}]
+            [0   1   ...  0   -a_{n-2}]
+            [...            ...        ]
+            [0   0   ...  1   -a_1    ]
 
-    B = [b_n, b_{n-1}, ..., b_1]^T, C = [0, 0, ..., 0, 1], D = 0
+    B = [b_n, b_{n-1}, ..., b_1]^T, C = [0, 0, ..., 0, 1], D = b_0
 
     Args:
         num: Numerator polynomial coefficients in descending degree order
@@ -371,9 +371,9 @@ def tf_to_ss_oct_cas(num, den):
     # Subdiagonal of ones
     for i in range(n - 1):
         A[i + 1, i] = 1.0
-    # Last column contains denominator coefficients in reverse order
+    # Last column contains NEGATIVE denominator coefficients in reverse order
     for i in range(n):
-        A[i, n - 1] = a_coeffs[n - 1 - i]
+        A[i, n - 1] = -a_coeffs[n - 1 - i]
 
     # Construct B matrix - numerator coefficients in reverse order
     B = cas.SX.zeros(n, 1)
@@ -388,6 +388,158 @@ def tf_to_ss_oct_cas(num, den):
     D = cas.reshape(num_padded[0], 1, 1)
 
     return A, B, C, D
+
+
+class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
+    """A discrete-time model of a dynamical system defined by
+    a transfer function of the following form:
+
+        y(k) = G(z) u(k)
+
+    where
+
+                b_0*z^m + b_1*z^(m-1) + ... + b_m
+        G(z) = -------------------------------------
+                a_0*z^n + a_1*z^(n-1) + ... + a_n
+
+    and z is the z-transform operator.
+
+    The model is internally converted to state-space form using the
+    observable canonical form representation:
+
+        x(k+1) = A*x(k) + B*u(k)
+          y(k) = C*x(k) + D*u(k)
+
+    where A, B, C, D matrices are computed using the tf_to_ss_oct_cas
+    function.
+
+    """
+
+    def __init__(
+        self,
+        num,
+        den,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        """Initialize a discrete-time model from a transfer function:
+
+                    b_0*z^m + b_1*z^(m-1) + ... + b_m
+            G(z) = -------------------------------------
+                    a_0*z^n + a_1*z^(n-1) + ... + a_n
+
+        where y(k) = G(z) u(k) and z is the z-transform operator.
+
+        The transfer function is internally converted to state-space form
+        using the observable canonical form representation.
+
+        Args:
+            num: Numerator polynomial coefficients in descending degree order
+                [b_0, b_1, ..., b_m]. Can be a CasADi SX/MX/DM expression,
+                numpy array, or Python list. May contain symbolic parameters.
+            den: Denominator polynomial coefficients in descending degree order
+                [a_0, a_1, ..., a_n]. Can be a CasADi SX/MX/DM expression,
+                numpy array, or Python list. May contain symbolic parameters.
+            input_name (str, optional): Name for the input variable. If None,
+                defaults to "u".
+            state_names (list[str], optional): Names for state variables. If
+                None, defaults to ["x1", "x2", ...].
+            output_name (str, optional): Name for the output variable. If None,
+                defaults to "y".
+
+        Note:
+            The number of states n equals len(den) - 1 (the order of the
+            denominator polynomial).
+
+        Example:
+            >>> # Create model with numeric coefficients
+            >>> num = cas.DM([0.2, 0.1])
+            >>> den = cas.DM([1, -1.4, 0.49])
+            >>> model = StateSpaceModelDTTFSISO(num=num, den=den)
+            >>>
+            >>> # Create model with symbolic parameters
+            >>> b0, b1 = cas.SX.sym('b0'), cas.SX.sym('b1')
+            >>> a1, a2 = cas.SX.sym('a1'), cas.SX.sym('a2')
+            >>> num = cas.vertcat(b0, b1)
+            >>> den = cas.vertcat(1, a1, a2)
+            >>> model = StateSpaceModelDTTFSISO(num=num, den=den)
+
+        """
+        # Convert num and den to CasADi SX format if needed
+        if not isinstance(num, (cas.SX, cas.MX, cas.DM)):
+            num = cas.SX(num)
+        else:
+            num = cas.SX(num)
+
+        if not isinstance(den, (cas.SX, cas.MX, cas.DM)):
+            den = cas.SX(den)
+        else:
+            den = cas.SX(den)
+
+        # Ensure column vectors
+        if num.shape[1] != 1:
+            num = num.T
+        if den.shape[1] != 1:
+            den = den.T
+
+        assert num.shape[1] == 1, "num must be a column vector"
+        assert den.shape[1] == 1, "den must be a column vector"
+
+        # Use the CasADi conversion function to get state-space matrices
+        A_mat, B_mat, C_mat, D_mat = tf_to_ss_oct_cas(num, den)
+
+        # Get the state dimension from the A matrix
+        n = A_mat.shape[0]
+
+        # Create symbolic variables for the state-space equations
+        t = cas.SX.sym("t")
+        xk = cas.SX.sym("xk", n)
+        uk = cas.SX.sym("uk")
+
+        # State-space equations:
+        # x(k+1) = A_mat * x(k) + B_mat * u(k)
+        # y(k) = C_mat * x(k) + D_mat * u(k)
+        xkp1 = cas.mtimes(A_mat, xk) + cas.mtimes(B_mat, uk)
+        yk = cas.mtimes(C_mat, xk) + cas.mtimes(D_mat, uk)
+
+        # Extract any symbolic variables from num and den as params
+        params = {}
+        for v in cas.symvar(num):
+            params[v.name()] = v
+        for v in cas.symvar(den):
+            params[v.name()] = v
+
+        # Create CasADi Functions for F and H
+        F = cas.Function(
+            "F",
+            [t, xk, uk, *params.values()],
+            [xkp1],
+            ["t", "xk", "uk", *params.keys()],
+            ["xkp1"],
+        )
+
+        H = cas.Function(
+            "H",
+            [t, xk, uk, *params.values()],
+            [yk],
+            ["t", "xk", "uk", *params.keys()],
+            ["yk"],
+        )
+
+        # Store the numerator and denominator
+        self.num = num
+        self.den = den
+
+        super().__init__(
+            F,
+            H,
+            n,
+            params=params,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )
 
 
 class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
