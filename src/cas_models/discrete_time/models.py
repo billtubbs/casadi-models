@@ -614,7 +614,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
                 defaults to "y".
 
         Note:
-            The total number of states is n = na + nb + nk.
+            The total number of states is n = max(na, nb + nk).
 
         Example:
             >>> # Create ARX model with symbolic parameters
