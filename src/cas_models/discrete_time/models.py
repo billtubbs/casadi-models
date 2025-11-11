@@ -1,5 +1,6 @@
 import casadi as cas
 import sympy
+import numpy as np
 from collections import OrderedDict
 from dataclasses import dataclass
 from cas_models.param_utils import (
@@ -170,6 +171,225 @@ class StateSpaceModelDTSISO(StateSpaceModelDT):
         )
 
 
+def tf_to_ss_oct_np(num, den):
+    """Convert transfer function to observable canonical form (NumPy version).
+
+    This function constructs the observable canonical form state-space matrices
+    using NumPy arrays. The observable canonical form has a companion matrix
+    structure that makes the states directly related to output derivatives.
+
+    State-space form:
+        x(k+1) = A*x(k) + B*u(k)
+        y(k) = C*x(k) + D*u(k)
+
+    where A has the form:
+        A = [0   0   ...  0   a_n    ]
+            [1   0   ...  0   a_{n-1}]
+            [0   1   ...  0   a_{n-2}]
+            [...            ...       ]
+            [0   0   ...  1   a_1    ]
+
+    B = [b_n, b_{n-1}, ..., b_1]^T, C = [0, 0, ..., 0, 1], D = 0
+
+    Args:
+        num: Numerator polynomial coefficients in descending degree order
+             [b_0, b_1, ..., b_m] (numpy array)
+        den: Denominator polynomial coefficients in descending degree order
+             [a_0, a_1, ..., a_n] where a_0=1 (numpy array)
+
+    Returns:
+        tuple: (A, B, C, D) state-space matrices as numpy arrays
+    """
+    import numpy as np
+
+    num = np.atleast_1d(num).flatten()
+    den = np.atleast_1d(den).flatten()
+
+    # Normalize denominator
+    if den[0] != 1.0:
+        num = num / den[0]
+        den = den / den[0]
+
+    # Get system order
+    n = len(den) - 1
+
+    # Pad numerator to match denominator length if needed
+    if len(num) < len(den):
+        num = np.concatenate([np.zeros(len(den) - len(num)), num])
+
+    # Extract coefficients (skip leading coefficient which should be 1/b_0)
+    a_coeffs = den[1:]  # [a_1, a_2, ..., a_n]
+    b_coeffs = num[1:]  # [b_1, b_2, ..., b_n] (skip b_0 for proper systems)
+
+    # Construct A matrix - observable canonical form
+    A = np.zeros((n, n))
+    # Subdiagonal of ones
+    for i in range(n - 1):
+        A[i + 1, i] = 1.0
+    # Last column contains denominator coefficients in reverse order
+    A[:, n - 1] = a_coeffs[::-1]
+
+    # Construct B matrix - numerator coefficients in reverse order
+    B = b_coeffs[::-1].reshape(n, 1)
+
+    # Construct C matrix - output from last state
+    C = np.zeros((1, n))
+    C[0, n - 1] = 1.0
+
+    # D matrix - direct feedthrough (zero for proper systems)
+    D = np.array([[num[0] if len(num) == len(den) else 0.0]])
+
+    return A, B, C, D
+
+
+def tf_to_ss_scipy_cas(num, den):
+    """Convert transfer function to state-space using scipy's algorithm (CasADi version).
+
+    This implements scipy's tf2ss algorithm using controller canonical form,
+    compatible with CasADi symbolic variables.
+
+    Args:
+        num: Numerator polynomial coefficients in descending degree order
+             [b_0, b_1, ..., b_m] for b_0*z^m + b_1*z^(m-1) + ... + b_m
+             (CasADi SX/MX/DM column vector)
+        den: Denominator polynomial coefficients in descending degree order
+             [a_0, a_1, ..., a_n] for a_0*z^n + a_1*z^(n-1) + ... + a_n
+             (CasADi SX/MX/DM column vector)
+
+    Returns:
+        tuple: (A, B, C, D) state-space matrices in controller canonical form
+
+    Note:
+        - Denominator must be normalized (a_0 = 1.0)
+        - System order K = len(den) - 1
+        - For SISO systems: A is (K,K), B is (K,1), C is (1,K), D is (1,1)
+    """
+    # Get dimensions
+    M = num.shape[0]  # numerator length
+    N = den.shape[0]  # denominator length
+
+    # System order
+    K = N - 1
+
+    # Normalize denominator (divide by first coefficient)
+    # In scipy this is done via the normalize() function
+    den_normalized = den / den[0]
+    num_normalized = num / den[0]
+
+    # Pad numerator to match denominator length if needed
+    if M < N:
+        num_padded = cas.vertcat(cas.SX.zeros(N - M, 1), num_normalized)
+    else:
+        num_padded = num_normalized
+
+    # Extract D matrix (feedthrough) from first element
+    D = cas.reshape(num_padded[0], 1, 1)
+
+    # Handle special case K=1 (first order system)
+    if K == 1:
+        A = cas.SX.zeros(1, 1)
+        B = cas.SX.ones(1, 1)
+        C = num_padded[1] - num_padded[0] * den_normalized[1]
+        C = cas.reshape(C, 1, 1)
+        return A, B, C, D
+
+    # Build A matrix: controller canonical form
+    # First row: -[a_1, a_2, ..., a_n]
+    # Remaining rows: shifted identity matrix
+    A = cas.SX.zeros(K, K)
+    for j in range(K):
+        A[0, j] = -den_normalized[j + 1]
+    for i in range(1, K):
+        A[i, i - 1] = 1.0
+
+    # Build B matrix: [1, 0, 0, ..., 0]^T
+    B = cas.SX.zeros(K, 1)
+    B[0] = 1.0
+
+    # Build C matrix: num[1:] - num[0] * den[1:]
+    # For SISO: C is a row vector
+    C = cas.SX.zeros(1, K)
+    for j in range(K):
+        C[0, j] = num_padded[j + 1] - num_padded[0] * den_normalized[j + 1]
+
+    return A, B, C, D
+
+
+def tf_to_ss_oct_cas(num, den):
+    """Convert transfer function to observable canonical form (CasADi version).
+
+    This function constructs the observable canonical form state-space matrices
+    using CasADi symbolic arrays. Supports symbolic variables. The observable
+    canonical form has a companion matrix structure that makes the states
+    directly related to output derivatives.
+
+    State-space form:
+        x(k+1) = A*x(k) + B*u(k)
+        y(k) = C*x(k) + D*u(k)
+
+    where A has the form:
+        A = [0   0   ...  0   a_n    ]
+            [1   0   ...  0   a_{n-1}]
+            [0   1   ...  0   a_{n-2}]
+            [...            ...       ]
+            [0   0   ...  1   a_1    ]
+
+    B = [b_n, b_{n-1}, ..., b_1]^T, C = [0, 0, ..., 0, 1], D = 0
+
+    Args:
+        num: Numerator polynomial coefficients in descending degree order
+             [b_0, b_1, ..., b_m] (CasADi SX/MX/DM column vector)
+        den: Denominator polynomial coefficients in descending degree order
+             [a_0, a_1, ..., a_n] where a_0=1 (CasADi SX/MX/DM column vector)
+
+    Returns:
+        tuple: (A, B, C, D) state-space matrices as CasADi expressions
+    """
+    # Get dimensions
+    M = num.shape[0]  # numerator length
+    N = den.shape[0]  # denominator length
+
+    # System order
+    n = N - 1
+
+    # Normalize denominator
+    den_normalized = den / den[0]
+    num_normalized = num / den[0]
+
+    # Pad numerator to match denominator length if needed
+    if M < N:
+        num_padded = cas.vertcat(cas.SX.zeros(N - M, 1), num_normalized)
+    else:
+        num_padded = num_normalized
+
+    # Extract coefficients (skip leading coefficient which should be 1)
+    a_coeffs = den_normalized[1:]  # [a_1, a_2, ..., a_n]
+    b_coeffs = num_padded[1:]  # [b_1, b_2, ..., b_n]
+
+    # Construct A matrix - observable canonical form
+    A = cas.SX.zeros(n, n)
+    # Subdiagonal of ones
+    for i in range(n - 1):
+        A[i + 1, i] = 1.0
+    # Last column contains denominator coefficients in reverse order
+    for i in range(n):
+        A[i, n - 1] = a_coeffs[n - 1 - i]
+
+    # Construct B matrix - numerator coefficients in reverse order
+    B = cas.SX.zeros(n, 1)
+    for i in range(n):
+        B[i] = b_coeffs[n - 1 - i]
+
+    # Construct C matrix - output from last state
+    C = cas.SX.zeros(1, n)
+    C[0, n - 1] = 1.0
+
+    # D matrix - direct feedthrough (zero for proper systems)
+    D = cas.reshape(num_padded[0], 1, 1)
+
+    return A, B, C, D
+
+
 class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
     """A discrete-time ARX model of a dynamical system:
 
@@ -187,9 +407,9 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
                + b_1 u(k-nk) + b_2 u(k-nk-1) + ... + b_nb u(k-nk-nb+1)
                + e(k)
 
-    The model is implemented in observable canonical form to match
-    Matlab/Octave's arx() function, using a minimal state representation
-    with n = max(na, nb+nk) states.
+    The model is implemented using scipy.signal.tf2ss to convert the transfer
+    function representation to state-space form, which provides a reliable
+    and well-tested conversion algorithm.
 
     """
     na: int
@@ -272,39 +492,18 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         t = cas.SX.sym("t")
         uk = cas.SX.sym("uk")
 
-        # Minimal state dimension
-        n = int(max(na, nb + nk))
+        # Convert ARX parameters to transfer function form
+        # den = [1, a_1, a_2, ..., a_na]
+        # num = [0, 0, ..., 0, b_1, b_2, ..., b_nb] with nk leading zeros
+        den = cas.vertcat(1, A)
+        num = cas.vertcat(cas.SX.zeros(nk, 1), B)
+
+        # Use the CasADi conversion function to get state-space matrices
+        A_mat, B_mat, C_mat, D_mat = tf_to_ss_oct_cas(num, den)
+
+        # Get the state dimension from the A matrix
+        n = A_mat.shape[0]
         xk = cas.SX.sym("xk", n)
-
-        # Pad coefficients to length n if needed
-        A_padded = cas.sparsify(cas.vertcat(A, cas.SX.zeros(n - na, 1)))
-        B_padded = cas.sparsify(cas.vertcat(B, cas.SX.zeros(n - nb, 1)))
-
-        # Observable canonical form matrices
-        # A matrix: companion form with shifts on subdiagonal and AR
-        # coefficients in last column
-        A_mat = cas.SX.zeros(n, n)
-        for i in range(n - 1):
-            # Alternating signs on subdiagonal: 1, -1, 1, -1, ...
-            A_mat[i + 1, i] = (-1) ** i
-        # Last column contains AR coefficients with specific pattern
-        for i in range(na):
-            if i % 2 == 0:
-                A_mat[n - 1 - i, n - 1] = -A_padded[i]
-            else:
-                A_mat[n - 1 - i, n - 1] = A_padded[i]
-
-        # B matrix: reversed B coefficients padded with zeros
-        B_mat = cas.SX.zeros(n, 1)
-        for i in range(nb):
-            B_mat[nb - 1 - i] = B_padded[i]
-
-        # C matrix: extracts output from last state with negation
-        C_mat = cas.SX.zeros(1, n)
-        C_mat[0, n - 1] = -1
-
-        # D matrix: direct feedthrough (zero for ARX with nk >= 1)
-        D_mat = cas.SX.zeros(1, 1)
 
         # State-space equations:
         # x(k+1) = A_mat * x(k) + B_mat * u(k)
