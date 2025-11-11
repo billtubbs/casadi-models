@@ -191,7 +191,6 @@ def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
 
 
 def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
-
     # ARX(2, 2, 1) model with fixed coefficients
     A = [-1.40429502, 0.69767633]
     B = [0.18669536, 0.16536220]
@@ -233,16 +232,18 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
     y = cas.vcat(y)
 
     # Compare with Octave simulation results
-    X_octave = data_TP04_Q1a_ss[['x1', 'x2', 'x3']].to_numpy()
-    y_octave = data_TP04_Q1a_ss['y'].to_numpy().reshape(-1, 1)
+    X_octave = data_TP04_Q1a_ss[["x1", "x2", "x3"]].to_numpy()
+    y_octave = data_TP04_Q1a_ss["y"].to_numpy().reshape(-1, 1)
 
     # Verify states match
-    assert np.allclose(np.array(X), X_octave, atol=1e-6), \
+    assert np.allclose(np.array(X), X_octave, atol=1e-6), (
         "States don't match Octave output"
+    )
 
     # Verify outputs match
-    assert np.allclose(np.array(y), y_octave, atol=1e-6), \
+    assert np.allclose(np.array(y), y_octave, atol=1e-6), (
         "Outputs don't match Octave output"
+    )
 
     # ARX(2, 2, 1) model with symbolic coefficients
     na = 2
@@ -274,12 +275,14 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
     y = cas.vcat(y)
 
     # Verify states match
-    assert np.allclose(np.array(X), X_octave, atol=1e-6), \
+    assert np.allclose(np.array(X), X_octave, atol=1e-6), (
         "States don't match Octave output"
+    )
 
     # Verify outputs match
-    assert np.allclose(np.array(y), y_octave, atol=1e-6), \
+    assert np.allclose(np.array(y), y_octave, atol=1e-6), (
         "Outputs don't match Octave output"
+    )
 
     # Simulate symbolically
     xk = cas.DM.zeros(n)
@@ -300,28 +303,82 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
         model.params.values(),
         [cas.sumsqr(y - y_m) / (nT + 1)],
         model.params.keys(),
-        ['sumsq_error']
+        ["sumsq_error"],
     )
 
     opti = cas.Opti()
     params = {}
     for name, param in model.params.items():
         params[name] = opti.variable(param.shape[0])
-    
+
     prediction_error = calculate_sumsq_error(*params.values())
     opti.minimize(prediction_error)
 
     # Solve with nonlinear solver (suppress verbose output)
-    opti.solver('ipopt', {'ipopt.print_level': 0, 'print_time': 0})
+    opti.solver("ipopt", {"ipopt.print_level": 0, "print_time": 0})
     sol = opti.solve()
 
-    assert sol.stats()['return_status'] == 'Solve_Succeeded'
+    assert sol.stats()["return_status"] == "Solve_Succeeded"
     assert sol.value(prediction_error) < 1e-10
 
     params_sol = [sol.value(v) for v in params.values()]
     assert np.allclose(
-        params_sol,
-        [-1.40429502, 0.69767633, 0.18669536, 0.16536220]
+        params_sol, [-1.40429502, 0.69767633, 0.18669536, 0.16536220]
+    )
+
+
+def test_StateSpaceModelDTTFSISO_input_types(tf_test_case_2):
+    """Test StateSpaceModelDTTFSISO accepts different input types.
+
+    Tests that the model can be instantiated with CasADi DM, numpy arrays,
+    and Python lists, and produces consistent results.
+    """
+    # Expected string representation (should be same for all input types)
+    str_rep_expected = (
+        "StateSpaceModelDTTFSISO("
+        "F=Function(F:(t,xk[3],uk)->(xkp1[3]) SXFunction), "
+        "H=Function(H:(t,xk[3],uk)->(yk) SXFunction), "
+        "n=3, nu=1, ny=1, "
+        "params={}, "
+        "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
+        "output_names=['y']"
+        ")"
+    )
+
+    # Test with CasADi DM
+    num = cas.DM(tf_test_case_2["num"])
+    den = cas.DM(tf_test_case_2["den"])
+    model_dm = StateSpaceModelDTTFSISO(num=num, den=den)
+    assert str(model_dm) == str_rep_expected
+    assert model_dm.n == 3
+
+    # Test with numpy arrays
+    num = tf_test_case_2["num"]
+    den = tf_test_case_2["den"]
+    model_np = StateSpaceModelDTTFSISO(num=num, den=den)
+    assert str(model_np) == str_rep_expected
+    assert model_np.n == 3
+
+    # Test with Python lists
+    num = tf_test_case_2["num"].tolist()
+    den = tf_test_case_2["den"].tolist()
+    model_list = StateSpaceModelDTTFSISO(num=num, den=den)
+    assert str(model_list) == str_rep_expected
+    assert model_list.n == 3
+
+    # Test with CasADi symbolic variables
+    num = cas.SX.sym("b", len(num))
+    den = cas.SX.sym("a", len(den))
+    model_sx = StateSpaceModelDTTFSISO(num=num, den=den)
+    assert str(model_sx) == (
+        "StateSpaceModelDTTFSISO("
+        "F=Function(F:(t,xk[3],uk,b_0,b_1,b_2,a_0,a_1,a_2,a_3)->(xkp1[3]) SXFunction), "
+        "H=Function(H:(t,xk[3],uk,b_0,b_1,b_2,a_0,a_1,a_2,a_3)->(yk) SXFunction), "
+        "n=3, nu=1, ny=1, "
+        "params={'b_0': SX(b_0), 'b_1': SX(b_1), 'b_2': SX(b_2), "
+        "'a_0': SX(a_0), 'a_1': SX(a_1), 'a_2': SX(a_2), 'a_3': SX(a_3)}, "
+        "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
+        "output_names=['y'])"
     )
 
 
@@ -333,7 +390,7 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
         (3, "tf_test_case_3"),
         (4, "tf_test_case_4"),
         (5, "tf_test_case_5"),
-    ]
+    ],
 )
 def test_StateSpaceModelDTTFSISO(
     sys_num, test_case_fixture, request, data_tf2ss_simulation
@@ -377,8 +434,9 @@ def test_StateSpaceModelDTTFSISO(
     # Don't compare states since Octave uses different state-space form
     # Use looser tolerance for higher-order systems with complex poles
     atol = 1e-2 if sys_num == 5 else 1e-6
-    assert np.allclose(np.array(y).flatten(), y_octave, atol=atol), \
+    assert np.allclose(np.array(y).flatten(), y_octave, atol=atol), (
         f"System {sys_num} output doesn't match Octave output"
+    )
 
 
 # def test_StateSpaceModelDTFromABCD_FO_SISO(symbolic_FO_SISO):

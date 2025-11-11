@@ -171,7 +171,7 @@ class StateSpaceModelDTSISO(StateSpaceModelDT):
         )
 
 
-def tf_to_ss_oct_np(num, den):
+def tf_to_ss_obs_np(num, den):
     """Convert transfer function to observable canonical form (NumPy version).
 
     This function constructs the observable canonical form state-space matrices
@@ -242,12 +242,13 @@ def tf_to_ss_oct_np(num, den):
     return A, B, C, D
 
 
-def tf_to_ss_scipy_cas(num, den):
-    """Convert transfer function to state-space using scipy's algorithm (CasADi version).
+def tf_to_ss_con_cas(num, den):
+    """Convert transfer function to state-space representation, compatible
+    with CasADi symbolic variables.
 
-    This implements scipy's tf2ss algorithm using controller canonical form,
-    compatible with CasADi symbolic variables.
-
+    The resulting state space represenation is in controller canonical
+    form, similar to scipy's tf2ss function.
+    
     Args:
         num: Numerator polynomial coefficients in descending degree order
              [b_0, b_1, ..., b_m] for b_0*z^m + b_1*z^(m-1) + ... + b_m
@@ -315,13 +316,13 @@ def tf_to_ss_scipy_cas(num, den):
     return A, B, C, D
 
 
-def tf_to_ss_oct_cas(num, den):
-    """Convert transfer function to observable canonical form (CasADi version).
+def tf_to_ss_obs_cas(num, den):
+    """Convert transfer function to state-space representation, compatible
+    with CasADi symbolic variables.
 
     This function constructs the observable canonical form state-space matrices
-    using CasADi symbolic arrays. Supports symbolic variables. The observable
-    canonical form has a companion matrix structure that makes the states
-    directly related to output derivatives.
+    using CasADi symbolic arrays. The observable canonical form has a companion
+    matrix structure that makes the states directly related to output derivatives.
 
     State-space form:
         x(k+1) = A*x(k) + B*u(k)
@@ -410,7 +411,7 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
         x(k+1) = A*x(k) + B*u(k)
           y(k) = C*x(k) + D*u(k)
 
-    where A, B, C, D matrices are computed using the tf_to_ss_oct_cas
+    where A, B, C, D matrices are computed using the tf_to_ss_obs_cas
     function.
 
     """
@@ -487,7 +488,7 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
         assert den.shape[1] == 1, "den must be a column vector"
 
         # Use the CasADi conversion function to get state-space matrices
-        A_mat, B_mat, C_mat, D_mat = tf_to_ss_oct_cas(num, den)
+        A_mat, B_mat, C_mat, D_mat = tf_to_ss_obs_cas(num, den)
 
         # Get the state dimension from the A matrix
         n = A_mat.shape[0]
@@ -559,9 +560,9 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
                + b_1 u(k-nk) + b_2 u(k-nk-1) + ... + b_nb u(k-nk-nb+1)
                + e(k)
 
-    The model is implemented using scipy.signal.tf2ss to convert the transfer
-    function representation to state-space form, which provides a reliable
-    and well-tested conversion algorithm.
+    The model is implemented in observable canonical form to match
+    Matlab/Octave's arx() function, using a minimal state representation
+    with n = max(na, nb+nk) states.
 
     """
     na: int
@@ -644,18 +645,39 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         t = cas.SX.sym("t")
         uk = cas.SX.sym("uk")
 
-        # Convert ARX parameters to transfer function form
-        # den = [1, a_1, a_2, ..., a_na]
-        # num = [0, 0, ..., 0, b_1, b_2, ..., b_nb] with nk leading zeros
-        den = cas.vertcat(1, A)
-        num = cas.vertcat(cas.SX.zeros(nk, 1), B)
-
-        # Use the CasADi conversion function to get state-space matrices
-        A_mat, B_mat, C_mat, D_mat = tf_to_ss_oct_cas(num, den)
-
-        # Get the state dimension from the A matrix
-        n = A_mat.shape[0]
+        # Minimal state dimension
+        n = int(max(na, nb + nk))
         xk = cas.SX.sym("xk", n)
+
+        # Pad coefficients to length n if needed
+        A_padded = cas.sparsify(cas.vertcat(A, cas.SX.zeros(n - na, 1)))
+        B_padded = cas.sparsify(cas.vertcat(B, cas.SX.zeros(n - nb, 1)))
+
+        # Observable canonical form matrices
+        # A matrix: companion form with shifts on subdiagonal and AR
+        # coefficients in last column
+        A_mat = cas.SX.zeros(n, n)
+        for i in range(n - 1):
+            # Alternating signs on subdiagonal: 1, -1, 1, -1, ...
+            A_mat[i + 1, i] = (-1) ** i
+        # Last column contains AR coefficients with specific pattern
+        for i in range(na):
+            if i % 2 == 0:
+                A_mat[n - 1 - i, n - 1] = -A_padded[i]
+            else:
+                A_mat[n - 1 - i, n - 1] = A_padded[i]
+
+        # B matrix: reversed B coefficients padded with zeros
+        B_mat = cas.SX.zeros(n, 1)
+        for i in range(nb):
+            B_mat[nb - 1 - i] = B_padded[i]
+
+        # C matrix: extracts output from last state with negation
+        C_mat = cas.SX.zeros(1, n)
+        C_mat[0, n - 1] = -1
+
+        # D matrix: direct feedthrough (zero for ARX with nk >= 1)
+        D_mat = cas.SX.zeros(1, 1)
 
         # State-space equations:
         # x(k+1) = A_mat * x(k) + B_mat * u(k)
