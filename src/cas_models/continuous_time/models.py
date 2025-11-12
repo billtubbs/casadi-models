@@ -50,8 +50,8 @@ class StateSpaceModelCT:
     """A continuous-time state-space model of a dynamical system
     of the form:
 
-        dx/dt = f(t, x, u)
-        y = h(t, x, u)
+        dx(t)/dt = f(t, x(t), u(t))
+        y(t) = h(t, x(t), u(t))
 
     """
 
@@ -143,8 +143,8 @@ class StateSpaceModelCTSISO(StateSpaceModelCT):
     """A continuous-time state-space model of a single-input,
     single output (SISO) dynamical system of the form:
 
-        dx/dt = f(t, x, u)
-        y = h(t, x, u)
+        dx(t)/dt = f(t, x(t), u(t))
+        y(t) = h(t, x(t), u(t))
 
     """
 
@@ -156,7 +156,7 @@ class StateSpaceModelCTSISO(StateSpaceModelCT):
         params=None,
         input_name=None,
         state_names=None,
-        output_name=None
+        output_name=None,
     ):
         input_names = None if input_name is None else [input_name]
         output_names = None if output_name is None else [output_name]
@@ -167,6 +167,58 @@ class StateSpaceModelCTSISO(StateSpaceModelCT):
             nu=1,
             ny=1,
             params=params,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
+
+
+class StateSpaceModelCTStaticNonlinearity(StateSpaceModelCT):
+    """A continous-time state-space model of a static non-linearity,
+    i.e. with no dynamics:
+
+        y(t) = h(t, x(t), u(t))
+
+    where x(t) = [], dx(t)/dt = f(t, x(t), u(t)) = [].
+
+    """
+
+    def __init__(
+        self,
+        h,
+        nu=1,
+        ny=1,
+        params=None,
+        input_names=None,
+        state_names=None,
+        output_names=None,
+    ):
+        symbolic_params = {}
+        for param in params.values():
+            for p in cas.symvar(cas.SX(param)):
+                symbolic_params[p.name()] = p
+
+        # Construct an empty ODE right-hand side
+        n = 0
+        t = cas.SX.sym("t")
+        x = cas.SX.sym("x", n)
+        u = cas.SX.sym("u", nu)
+        rhs = cas.SX.zeros(n)
+        f = cas.Function(
+            "f",
+            [t, x, u, *symbolic_params.values()],
+            [rhs],
+            ["t", "x", "u", *symbolic_params.keys()],
+            ["rhs"],
+        )
+
+        super().__init__(
+            f,
+            h,
+            n,
+            nu=nu,
+            ny=ny,
+            params=symbolic_params,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,

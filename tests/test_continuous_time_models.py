@@ -5,6 +5,7 @@ import numpy as np
 import casadi as cas
 from cas_models.continuous_time.models import (
     StateSpaceModelCT,
+    StateSpaceModelCTStaticNonlinearity,
     StateSpaceModelCTFromABCD,
     SSModelCTFromABCDSISO,
     SSModelCTDirectTransmission,
@@ -131,6 +132,60 @@ def test_StateSpaceModelCT_FO_SISO(symbolic_FO_SISO):
     assert float(model.h(0.0, 0.0, 0.0, 1.0, 2.0)) == 0.0
     assert float(model.f(0.0, 1.0, 0.0, 1.0, 2.0)) == -0.5
     assert float(model.h(0.0, 1.0, 0.0, 1.0, 2.0)) == 0.5
+
+
+def test_StateSpaceModelCTStaticNonlinearity():
+    nu = 3
+    ny = 1
+
+    # Construct a nonlinear output function
+    # 4th order - polynomial
+    n = 0
+    nu = 1
+    ny = 1
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+    p = cas.SX.sym("p", 4)
+    y = p[3] * u**3 + p[2] * u**2 - p[1] * u + p[0]
+
+    # TODO: How to pass params as vectors
+    # params = {"p": p}
+
+    symbolic_params = {}
+    for pi in cas.symvar(cas.SX(p)):
+        symbolic_params[pi.name()] = pi
+
+    h = cas.Function(
+        "f",
+        [t, x, u, *symbolic_params.values()],
+        [y],
+        ["t", "x", "u", *symbolic_params.keys()],
+        ["y"],
+    )
+
+    model = StateSpaceModelCTStaticNonlinearity(
+        h, nu=nu, ny=ny, params=symbolic_params
+    )
+
+    assert str(model) == (
+        "StateSpaceModelCTStaticNonlinearity("
+        "f=Function(f:(t,x[0],u,p_0,p_1,p_2,p_3)->(rhs[0]) SXFunction), "
+        "h=Function(f:(t,x[0],u,p_0,p_1,p_2,p_3)->(y) SXFunction), "
+        "n=0, nu=1, ny=1, "
+        "params={'p_0': SX(p_0), 'p_1': SX(p_1), 'p_2': SX(p_2), 'p_3': SX(p_3)}, "
+        "input_names=['u'], state_names=['x'], output_names=['y'])"
+    )
+
+    # Test function calculations
+    t = 0.0
+    x = []
+    u = -1.5
+    p_0, p_1, p_2, p_3 = [1, -7, 1, 2]
+    rhs = model.f(t, x, u, p_0, p_1, p_2, p_3)
+    assert rhs.shape == (0, 1)  # empty
+    y = model.h(t, x, u, p_0, p_1, p_2, p_3)
+    assert y == p_3 * u**3 + p_2 * u**2 - p_1 * u + p_0
 
 
 def test_StateSpaceModelCT_O2_SISO(symbolic_O2_SISO):
@@ -578,7 +633,6 @@ def test_connect_nonlinear_systems_in_series():
 
 
 def test_tf_models():
-
     sys1 = SSModelCTLinearFONoGainSISO(T1=1)
     sys2 = SSModelCTLinearFOSISO(K=2, T1=2.5)
 
