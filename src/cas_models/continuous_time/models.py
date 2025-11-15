@@ -860,7 +860,7 @@ def make_step_function(mag=1.0, t_step=0.0):
     return cas.Function("step", [t], [y], ["t"], ["y"])
 
 
-def make_sim_step_function_RK4(f, h, n, nu, params=None, name="F"):
+def make_sim_step_function_RK4(f, n, nu, params=None, name="F"):
     if params is None:
         params = {}
 
@@ -900,9 +900,8 @@ def make_n_step_simulation_function(F, H, n, nu, ny, nT, params=None, name=None)
     tk = t_eval[0]
     for k in range(nT):
         tkp1 = t_eval[k + 1]
-        dt = tkp1 - tk
         uk = U[k, :].T
-        xkp1 = F(tk, xk, uk, tkp1 - tk, *params.values())
+        xkp1 = F(tk, xk, uk, *params.values())
         yk = H(tk, xk, uk, *params.values())
         X.append(xkp1.T)
         Y.append(yk.T)

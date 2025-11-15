@@ -7,6 +7,7 @@ from cas_models.param_utils import (
     make_list_of_enumerated_names,
 )
 from cas_models.validation import validate_casadi_function_dims
+from cas_models.continuous_time.models import make_sim_step_function_RK4
 
 
 def validate_F_function(F: cas.Function, n: int, nu: int, params=None):
@@ -56,6 +57,7 @@ class StateSpaceModelDT:
     n: int
     nu: int
     ny: int
+    dt: float
     params: dict
     input_names: list[str] = None
     state_names: list[str] = None
@@ -68,6 +70,7 @@ class StateSpaceModelDT:
         n,
         nu=1,
         ny=1,
+        dt=None,
         params=None,
         input_names=None,
         state_names=None,
@@ -121,6 +124,7 @@ class StateSpaceModelDT:
         self.n = n
         self.nu = nu
         self.ny = ny
+        self.dt = dt
         if params is None:
             params = {}
         self.params = params
@@ -135,6 +139,70 @@ class StateSpaceModelDT:
         if output_names is None:
             output_names = make_list_of_enumerated_names("y", ny)
         self.output_names = output_names
+
+
+class StateSpaceModelDTFromCTRK4(StateSpaceModelDT):
+    """A discrete-time state-space model of a dynamical system
+    of the form:
+
+          x(k+1) = F(t, x(k), u(k), *params.values())
+            y(k) = H(t, x(k), u(k), *params.values())
+
+    created from a continuous-time system model.
+    """
+
+    def __init__(self, model_ct, dt):
+
+        f = model_ct.f
+        n = model_ct.n
+        nu = model_ct.nu
+        ny = model_ct.ny
+        params = model_ct.params
+
+        # State transition function - integral of continuous-time ODE
+        sim_step = make_sim_step_function_RK4(f, n, nu, params=params)
+
+        # Symbolic variables
+        t = cas.SX.sym("t")
+        xk = cas.SX.sym("xk", n)
+        uk = cas.SX.sym("uk", nu)
+        xkp1 = sim_step(t, xk, uk, dt, *params.values())
+
+        # Convert to state transition function with fixed time-step
+        F = cas.Function(
+            "F",
+            [t, xk, uk, *params.values()],
+            [xkp1],
+            ["t", "xk", "uk", *params.keys()],
+            ["xkp1"],
+        )
+
+        # Output function - same as in continuous-time
+        yk = model_ct.h(t, xk, uk, *params.values())
+        H = cas.Function(
+            "H",
+            [t, xk, uk, *params.values()],
+            [yk],
+            ["t", "xk", "uk", *params.keys()],
+            ["yk"],
+        )
+
+        input_names = model_ct.input_names
+        state_names = model_ct.state_names
+        output_names = model_ct.output_names
+
+        super().__init__(
+            F,
+            H,
+            n,
+            nu=nu,
+            ny=ny,
+            dt=dt,
+            params=params,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
 
 
 class StateSpaceModelDTSISO(StateSpaceModelDT):
