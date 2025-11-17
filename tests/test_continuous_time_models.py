@@ -15,7 +15,9 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearO2NoGainSISO,
     SSModelCTLinearO2UnderdampedSISO,
     block_diag,
+    is_ss_ct,
 )
+from cas_models.discrete_time.models import is_ss_dt
 from cas_models.transformations import (
     connect_nonlinear_systems_in_parallel,
     connect_nonlinear_systems_in_series,
@@ -146,6 +148,10 @@ def test_StateSpaceModelCT_FO_SISO(symbolic_FO_SISO):
     assert float(model.f(0.0, 1.0, 0.0, 1.0, 2.0)) == -0.5
     assert float(model.h(0.0, 1.0, 0.0, 1.0, 2.0)) == 0.5
 
+    # Test model type identification
+    assert is_ss_ct(model) is True
+    assert is_ss_dt(model) is False
+
 
 def test_StateSpaceModelCTStaticNonlinearity():
     nu = 3
@@ -200,6 +206,10 @@ def test_StateSpaceModelCTStaticNonlinearity():
     y = model.h(t, x, u, p_0, p_1, p_2, p_3)
     assert y == p_3 * u**3 + p_2 * u**2 - p_1 * u + p_0
 
+    # Test model type identification
+    assert is_ss_ct(model) is True
+    assert is_ss_dt(model) is False
+
 
 def test_StateSpaceModelCT_O2_SISO(symbolic_O2_SISO):
     n, _, _, _, _, _, _, _, f, h, params = symbolic_O2_SISO
@@ -233,6 +243,10 @@ def test_StateSpaceModelCT_O2_SISO(symbolic_O2_SISO):
         model.h(t, x, u, K, T1, T2), cas.DM(0.26666666666666666)
     )
 
+    # Test model type identification
+    assert is_ss_ct(model) is True
+    assert is_ss_dt(model) is False
+
 
 def test_StateSpaceModelCTFromABCD_FO_SISO(symbolic_FO_SISO):
     _, _, _, A, B, C, D, _, _, _, _ = symbolic_FO_SISO
@@ -254,6 +268,10 @@ def test_StateSpaceModelCTFromABCD_FO_SISO(symbolic_FO_SISO):
     assert np.array_equal(model.h(0.0, 0.0, 0.0, 1.0, 2.0), np.array([[0.0]]))
     assert np.array_equal(model.f(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[-0.5]]))
     assert np.array_equal(model.h(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[0.5]]))
+
+    # Test model type identification
+    assert is_ss_ct(model) is True
+    assert is_ss_dt(model) is False
 
 
 def test_StateSpaceModelCTFromABCD_O2_SISO(symbolic_O2_SISO):
@@ -286,6 +304,10 @@ def test_StateSpaceModelCTFromABCD_O2_SISO(symbolic_O2_SISO):
     assert np.allclose(
         model.h(t, x, u, K, T1, T2), cas.DM(0.26666666666666666)
     )
+
+    # Test model type identification
+    assert is_ss_ct(model) is True
+    assert is_ss_dt(model) is False
 
 
 def test_SSModelCTFromABCDSISO(symbolic_FO_SISO):
@@ -346,6 +368,10 @@ def test_SSModelCTDirectTransmission():
     x = np.empty((0, 1))
     assert np.array_equal(model.f(0.0, x, u), np.empty((0, 1)))
     assert np.array_equal(model.h(0.0, x, u), np.array([[-2.0], [4.25]]))
+
+    # Test model type identification
+    assert is_ss_ct(model) is True
+    assert is_ss_dt(model) is False
 
 
 def test_SSModelCTLinearFONoGainSISO():
