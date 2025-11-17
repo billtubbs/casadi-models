@@ -45,6 +45,23 @@ def validate_h_function(
     )
 
 
+def is_ss_ct(sys):
+    """Check if a system is a continuous-time state-space model.
+
+    A continuous-time model is identified by having 'f' and 'h'
+    attributes (lowercase), which are the right-hand-side of the
+    differential equation and output function respectively.
+
+    Args:
+        sys: A system object to check
+
+    Returns:
+        bool: True if the system has continuous-time attributes (f, h),
+              False otherwise
+    """
+    return hasattr(sys, 'f') and hasattr(sys, 'h')
+
+
 @dataclass
 class StateSpaceModelCT:
     """A continuous-time state-space model of a dynamical system

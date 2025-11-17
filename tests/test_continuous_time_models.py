@@ -15,9 +15,22 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearO2NoGainSISO,
     SSModelCTLinearO2UnderdampedSISO,
     block_diag,
+)
+from cas_models.transformations import (
     connect_nonlinear_systems_in_parallel,
     connect_nonlinear_systems_in_series,
 )
+
+# Attribute names for continuous-time models
+ATTR_NAMES_CT = {
+    'state_func': 'f',
+    'output_func': 'h',
+    'state_var': 'x',
+    'input_var': 'u',
+    'state_output': 'rhs',
+    'output_var': 'y',
+    'model_class': StateSpaceModelCT
+}
 
 
 @pytest.fixture
@@ -524,8 +537,8 @@ def test_connect_nonlinear_systems_in_parallel():
     sys1 = SSModelCTLinearFOSISO()
     sys2 = SSModelCTLinearFONoGainSISO()
 
-    # With defaults
-    sys_combined = connect_nonlinear_systems_in_parallel([sys1, sys2])
+    # With defaults - using new generalized function
+    sys_combined = connect_nonlinear_systems_in_parallel([sys1, sys2], ATTR_NAMES_CT)
 
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -540,7 +553,7 @@ def test_connect_nonlinear_systems_in_parallel():
     # With custom keys
     sys3 = SSModelCTLinearFONoGainSISO()
     sys_combined = connect_nonlinear_systems_in_parallel(
-        [sys1, sys2, sys3], keys=["a", "b", "c"]
+        [sys1, sys2, sys3], ATTR_NAMES_CT, keys=["a", "b", "c"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -558,7 +571,7 @@ def test_connect_nonlinear_systems_in_parallel():
     sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys3 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys_combined = connect_nonlinear_systems_in_parallel(
-        [sys1, sys2, sys3], keys=["a", "b", "c"]
+        [sys1, sys2, sys3], ATTR_NAMES_CT, keys=["a", "b", "c"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -575,8 +588,8 @@ def test_connect_nonlinear_systems_in_series():
     sys1 = SSModelCTLinearFOSISO()
     sys2 = SSModelCTLinearFONoGainSISO()
 
-    # With defaults
-    sys_combined = connect_nonlinear_systems_in_series([sys1, sys2])
+    # With defaults - using new generalized function
+    sys_combined = connect_nonlinear_systems_in_series([sys1, sys2], ATTR_NAMES_CT)
     assert str(sys_combined) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x[2],u,K,sys1_T1,sys2_T1)->(rhs[2]) SXFunction), "
@@ -589,7 +602,7 @@ def test_connect_nonlinear_systems_in_series():
 
     # With custom keys
     sys_combined = connect_nonlinear_systems_in_series(
-        [sys1, sys2], keys=["in", "out"]
+        [sys1, sys2], ATTR_NAMES_CT, keys=["in", "out"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -603,7 +616,7 @@ def test_connect_nonlinear_systems_in_series():
 
     # With verbose names
     sys_combined = connect_nonlinear_systems_in_series(
-        [sys1, sys2], keys=["in", "out"], verbose_names=True
+        [sys1, sys2], ATTR_NAMES_CT, keys=["in", "out"], verbose_names=True
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -619,7 +632,7 @@ def test_connect_nonlinear_systems_in_series():
     sys1 = SSModelCTLinearFOSISO(K=2)
     sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys_combined = connect_nonlinear_systems_in_series(
-        [sys1, sys2], keys=["in", "out"], verbose_names=True
+        [sys1, sys2], ATTR_NAMES_CT, keys=["in", "out"], verbose_names=True
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("

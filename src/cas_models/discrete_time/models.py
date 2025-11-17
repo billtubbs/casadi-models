@@ -42,6 +42,23 @@ def validate_H_function(
     )
 
 
+def is_ss_dt(sys):
+    """Check if a system is a discrete-time state-space model.
+
+    A discrete-time model is identified by having 'F' and 'H'
+    attributes (uppercase), which are the state transition function
+    and output function respectively.
+
+    Args:
+        sys: A system object to check
+
+    Returns:
+        bool: True if the system has discrete-time attributes (F, H),
+              False otherwise
+    """
+    return hasattr(sys, 'F') and hasattr(sys, 'H')
+
+
 @dataclass
 class StateSpaceModelDT:
     """A discrete-time state-space model of a dynamical system
