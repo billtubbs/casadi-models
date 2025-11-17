@@ -5,6 +5,7 @@ from casadi import SX
 from cas_models.param_utils import (
     make_list_of_enumerated_names,
     concatenate_lists_of_names,
+    make_list_of_unique_names,
     merge_param_dicts,
     make_symbolic_vars_from_kwargs,
 )
@@ -16,6 +17,24 @@ def test_make_list_of_enumerated_names():
 
     names = make_list_of_enumerated_names("sys", 2, sep="_")
     assert names == ["sys_1", "sys_2"]
+
+
+def test_make_list_of_unique_names():
+    keys = [None, None, None]
+    names = make_list_of_unique_names(keys)
+    assert names == ['sys1', 'sys2', 'sys3']
+
+    keys = [None, None, "out"]
+    names = make_list_of_unique_names(keys)
+    assert names == ['sys1', 'sys2', 'out']
+
+    keys = make_list_of_enumerated_names("sys", 3, sep='_')
+    names = make_list_of_unique_names(keys)
+    assert names == ['sys_1', 'sys_2', 'sys_3']
+
+    keys = [None, None, "sys1"]
+    names = make_list_of_unique_names(keys)
+    assert names == ['sys2', 'sys3', 'sys1']
 
 
 def test_concatenate_lists_of_names():
@@ -47,7 +66,7 @@ def test_merge_param_dicts():
     T2_2 = SX.sym("T2_2")
     params1 = {"K": K, "T1": T1_1}
     params2 = {"K": K, "T1": T1_2, "T2": T2_2}
-    result = merge_param_dicts([params1, params2], keys=["sys1", "sys2"])
+    result = merge_param_dicts([params1, params2], ["sys1", "sys2"])
     assert result == {
         "K": K,
         "sys1_T1": T1_1,
@@ -57,7 +76,7 @@ def test_merge_param_dicts():
 
     # With verbose param names
     result = merge_param_dicts(
-        [params1, params2], keys=["sys1", "sys2"], verbose_names=True
+        [params1, params2], ["sys1", "sys2"], verbose_names=True
     )
     assert result == {
         "sys1_sys2_K": K,

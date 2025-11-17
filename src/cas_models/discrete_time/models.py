@@ -76,6 +76,7 @@ class StateSpaceModelDT:
     ny: int
     dt: float
     params: dict
+    name: str = None
     input_names: list[str] = None
     state_names: list[str] = None
     output_names: list[str] = None
@@ -89,6 +90,7 @@ class StateSpaceModelDT:
         ny=1,
         dt=None,
         params=None,
+        name=None,
         input_names=None,
         state_names=None,
         output_names=None,
@@ -112,6 +114,7 @@ class StateSpaceModelDT:
             ny (int, optional): Number of outputs (dimension of y). Default: 1.
             params (dict, optional): Dictionary of symbolic parameters used by
                 f and h functions. If None, defaults to empty dict.
+            name (str, optional): Optional name for the model. Default: None.
             input_names (list[str], optional): Names for input variables.
                 If None, defaults to ["u"] or ["u1", "u2", ...] for nu > 1.
             state_names (list[str], optional): Names for state variables.
@@ -145,6 +148,7 @@ class StateSpaceModelDT:
         if params is None:
             params = {}
         self.params = params
+        self.name = name
         validate_F_function(F, n, nu, params=params)
         validate_H_function(H, n, nu, ny, params=params)
         if input_names is None:

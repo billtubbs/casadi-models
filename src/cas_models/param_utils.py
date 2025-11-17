@@ -18,6 +18,22 @@ def make_list_of_enumerated_names(prefix, n, sep=""):
     return names
 
 
+def make_list_of_unique_names(keys, prefix="sys"):
+    new_names = []
+    i = 0
+    for key in keys:
+        if key is None:
+            while True:
+                i += 1
+                new_name = prefix + str(i)
+                if new_name not in keys:
+                    break
+        else:
+            new_name = key
+        new_names.append(new_name)
+    return new_names
+
+
 def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
     if keys is None:
         keys = make_list_of_enumerated_names(prefix, len(lists_of_names))
@@ -34,7 +50,7 @@ def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
 
 
 def merge_param_dicts(
-    list_of_dicts, keys=None, verbose_names=False, prefix="sys"
+    list_of_dicts, keys, verbose_names=False
 ):
     """Merges a list of parameter dictionaries into one dictionary of
     unique model variables. Note that the same symbolic variables
@@ -58,9 +74,7 @@ def merge_param_dicts(
     'sys2_T1': SX(T1_2),
     'sys2_T2': SX(T2_2)}
     """
-    if keys is None:
-        keys = make_list_of_enumerated_names(prefix, len(list_of_dicts))
-    elif len(list_of_dicts) > len(set(keys)):
+    if len(list_of_dicts) > len(set(keys)):
         raise ValueError("not enough unique keys")
 
     # Group all parameters by their original key name

@@ -16,23 +16,13 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearO2UnderdampedSISO,
     block_diag,
     is_ss_ct,
+    ATTR_NAMES,
 )
 from cas_models.discrete_time.models import is_ss_dt
 from cas_models.transformations import (
     connect_nonlinear_systems_in_parallel,
     connect_nonlinear_systems_in_series,
 )
-
-# Attribute names for continuous-time models
-ATTR_NAMES_CT = {
-    'state_func': 'f',
-    'output_func': 'h',
-    'state_var': 'x',
-    'input_var': 'u',
-    'state_output': 'rhs',
-    'output_var': 'y',
-    'model_class': StateSpaceModelCT
-}
 
 
 @pytest.fixture
@@ -139,7 +129,7 @@ def test_StateSpaceModelCT_FO_SISO(symbolic_FO_SISO):
         "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
-        "params={'K': SX(K), 'T1': SX(T1)}, "
+        "params={'K': SX(K), 'T1': SX(T1)}, name=None, "
         "input_names=['u'], state_names=['x'], output_names=['y'])"
     )
 
@@ -192,7 +182,7 @@ def test_StateSpaceModelCTStaticNonlinearity():
         "f=Function(f:(t,x[0],u,p_0,p_1,p_2,p_3)->(rhs[0]) SXFunction), "
         "h=Function(f:(t,x[0],u,p_0,p_1,p_2,p_3)->(y) SXFunction), "
         "n=0, nu=1, ny=1, "
-        "params={'p_0': SX(p_0), 'p_1': SX(p_1), 'p_2': SX(p_2), 'p_3': SX(p_3)}, "
+        "params={'p_0': SX(p_0), 'p_1': SX(p_1), 'p_2': SX(p_2), 'p_3': SX(p_3)}, name=None, "
         "input_names=['u'], state_names=['x'], output_names=['y'])"
     )
 
@@ -222,7 +212,7 @@ def test_StateSpaceModelCT_O2_SISO(symbolic_O2_SISO):
         "f=Function(f:(t,x[2],u,K,T1,T2)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,K,T1,T2)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, "
+        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y'])"
     )
 
@@ -258,7 +248,7 @@ def test_StateSpaceModelCTFromABCD_FO_SISO(symbolic_FO_SISO):
         "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
-        "params={'K': SX(K), 'T1': SX(T1)}, "
+        "params={'K': SX(K), 'T1': SX(T1)}, name=None, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -284,7 +274,7 @@ def test_StateSpaceModelCTFromABCD_O2_SISO(symbolic_O2_SISO):
         "f=Function(f:(t,x[2],u,K,T1,T2)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,K,T1,T2)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, "
+        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y'])"
     )
 
@@ -320,7 +310,7 @@ def test_SSModelCTFromABCDSISO(symbolic_FO_SISO):
         "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
-        "params={'K': SX(K), 'T1': SX(T1)}, "
+        "params={'K': SX(K), 'T1': SX(T1)}, name=None, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -340,7 +330,7 @@ def test_SSModelCTDirectTransmission():
         "SSModelCTDirectTransmission("
         "f=Function(f:(t,x[0],u)->(rhs[0]) SXFunction), "
         "h=Function(h:(t,x[0],u)->(y) SXFunction), "
-        "n=0, nu=1, ny=1, params={}, "
+        "n=0, nu=1, ny=1, params={}, name=None, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -357,7 +347,7 @@ def test_SSModelCTDirectTransmission():
         "SSModelCTDirectTransmission("
         "f=Function(f:(t,x[0],u[2])->(rhs[0]) SXFunction), "
         "h=Function(h:(t,x[0],u[2])->(y[2]) SXFunction), "
-        "n=0, nu=2, ny=2, params={}, "
+        "n=0, nu=2, ny=2, params={}, name=None, "
         "input_names=['u1', 'u2'], state_names=['x'], "
         "output_names=['y1', 'y2']"
         ")"
@@ -383,7 +373,7 @@ def test_SSModelCTLinearFONoGainSISO():
         "f=Function(f:(t,x,u,T1)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u,T1)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
-        "params={'T1': SX(T1)}, "
+        "params={'T1': SX(T1)}, name=None, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -403,7 +393,7 @@ def test_SSModelCTLinearFONoGainSISO():
         "f=Function(f:(t,x,u)->(rhs) SXFunction), "
         "h=Function(h:(t,x,u)->(y) SXFunction), "
         "n=1, nu=1, ny=1, "
-        "params={}, "
+        "params={}, name=None, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -424,7 +414,7 @@ def test_SSModelCTLinearO2SISO():
         "f=Function(f:(t,x[2],u,K,T1,T2)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,K,T1,T2)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, "
+        "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
         ")"
     )
@@ -444,7 +434,7 @@ def test_SSModelCTLinearO2SISO():
         "f=Function(f:(t,x[2],u,T2)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,T2)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'T2': SX(T2)}, "
+        "params={'T2': SX(T2)}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
         ")"
     )
@@ -465,7 +455,7 @@ def test_SSModelCTLinearO2NoGainSISO():
         "f=Function(f:(t,x[2],u,T1,T2)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,T1,T2)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'T1': SX(T1), 'T2': SX(T2)}, "
+        "params={'T1': SX(T1), 'T2': SX(T2)}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
         ")"
     )
@@ -484,7 +474,7 @@ def test_SSModelCTLinearO2NoGainSISO():
         "f=Function(f:(t,x[2],u,T2)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,T2)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'T2': SX(T2)}, "
+        "params={'T2': SX(T2)}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
         ")"
     )
@@ -505,7 +495,7 @@ def test_SSModelCTLinearO2UnderdampedSISO():
         "f=Function(f:(t,x[2],u,K,omega_n,zeta)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,K,omega_n,zeta)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'K': SX(K), 'omega_n': SX(omega_n), 'zeta': SX(zeta)}, "
+        "params={'K': SX(K), 'omega_n': SX(omega_n), 'zeta': SX(zeta)}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y']"
         ")"
     )
@@ -525,7 +515,7 @@ def test_SSModelCTLinearO2UnderdampedSISO():
         "f=Function(f:(t,x[2],u,K)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,K)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'K': SX(K)}, "
+        "params={'K': SX(K)}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y'])"
     )
 
@@ -564,14 +554,16 @@ def test_connect_nonlinear_systems_in_parallel():
     sys2 = SSModelCTLinearFONoGainSISO()
 
     # With defaults - using new generalized function
-    sys_combined = connect_nonlinear_systems_in_parallel([sys1, sys2], ATTR_NAMES_CT)
+    sys_combined = connect_nonlinear_systems_in_parallel(
+        [sys1, sys2], ATTR_NAMES, StateSpaceModelCT
+    )
 
     assert str(sys_combined) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x[2],u[2],K,sys1_T1,sys2_T1)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u[2],K,sys1_T1,sys2_T1)->(y[2]) SXFunction), "
         "n=2, nu=2, ny=2, "
-        "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1)}, "
+        "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1)}, name=None, "
         "input_names=['sys1_u', 'sys2_u'], state_names=['sys1_x', 'sys2_x'], "
         "output_names=['sys1_y', 'sys2_y'])"
     )
@@ -579,14 +571,14 @@ def test_connect_nonlinear_systems_in_parallel():
     # With custom keys
     sys3 = SSModelCTLinearFONoGainSISO()
     sys_combined = connect_nonlinear_systems_in_parallel(
-        [sys1, sys2, sys3], ATTR_NAMES_CT, keys=["a", "b", "c"]
+        [sys1, sys2, sys3], ATTR_NAMES, StateSpaceModelCT, keys=["a", "b", "c"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x[3],u[3],K,a_T1,b_T1,c_T1)->(rhs[3]) SXFunction), "
         "h=Function(h:(t,x[3],u[3],K,a_T1,b_T1,c_T1)->(y[3]) SXFunction), "
         "n=3, nu=3, ny=3, "
-        "params={'K': SX(K), 'a_T1': SX(T1), 'b_T1': SX(T1), 'c_T1': SX(T1)}, "
+        "params={'K': SX(K), 'a_T1': SX(T1), 'b_T1': SX(T1), 'c_T1': SX(T1)}, name=None, "
         "input_names=['a_u', 'b_u', 'c_u'], "
         "state_names=['a_x', 'b_x', 'c_x'], "
         "output_names=['a_y', 'b_y', 'c_y'])"
@@ -597,13 +589,13 @@ def test_connect_nonlinear_systems_in_parallel():
     sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys3 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys_combined = connect_nonlinear_systems_in_parallel(
-        [sys1, sys2, sys3], ATTR_NAMES_CT, keys=["a", "b", "c"]
+        [sys1, sys2, sys3], ATTR_NAMES, StateSpaceModelCT, keys=["a", "b", "c"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x[3],u[3],T1)->(rhs[3]) SXFunction), "
         "h=Function(h:(t,x[3],u[3],T1)->(y[3]) SXFunction), "
-        "n=3, nu=3, ny=3, params={'T1': SX(T1)}, "
+        "n=3, nu=3, ny=3, params={'T1': SX(T1)}, name=None, "
         "input_names=['a_u', 'b_u', 'c_u'], "
         "state_names=['a_x', 'b_x', 'c_x'], "
         "output_names=['a_y', 'b_y', 'c_y'])"
@@ -615,41 +607,44 @@ def test_connect_nonlinear_systems_in_series():
     sys2 = SSModelCTLinearFONoGainSISO()
 
     # With defaults - using new generalized function
-    sys_combined = connect_nonlinear_systems_in_series([sys1, sys2], ATTR_NAMES_CT)
+    sys_combined = connect_nonlinear_systems_in_series(
+        [sys1, sys2], ATTR_NAMES, StateSpaceModelCT
+    )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x[2],u,K,sys1_T1,sys2_T1)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,K,sys1_T1,sys2_T1)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1)}, "
+        "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1)}, name=None, "
         "input_names=['u'], state_names=['sys2_x', 'sys1_x'], "
         "output_names=['y'])"
     )
 
     # With custom keys
     sys_combined = connect_nonlinear_systems_in_series(
-        [sys1, sys2], ATTR_NAMES_CT, keys=["in", "out"]
+        [sys1, sys2], ATTR_NAMES, StateSpaceModelCT, keys=["in", "out"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x[2],u,K,in_T1,out_T1)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,K,in_T1,out_T1)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'K': SX(K), 'in_T1': SX(T1), 'out_T1': SX(T1)}, "
+        "params={'K': SX(K), 'in_T1': SX(T1), 'out_T1': SX(T1)}, name=None, "
         "input_names=['u'], state_names=['out_x', 'in_x'], "
         "output_names=['y'])"
     )
 
     # With verbose names
     sys_combined = connect_nonlinear_systems_in_series(
-        [sys1, sys2], ATTR_NAMES_CT, keys=["in", "out"], verbose_names=True
+        [sys1, sys2], ATTR_NAMES, StateSpaceModelCT,
+        keys=["in", "out"], verbose_names=True
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x[2],u,in_K,in_T1,out_T1)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,in_K,in_T1,out_T1)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'in_K': SX(K), 'in_T1': SX(T1), 'out_T1': SX(T1)}, "
+        "params={'in_K': SX(K), 'in_T1': SX(T1), 'out_T1': SX(T1)}, name=None, "
         "input_names=['u'], state_names=['out_x', 'in_x'], "
         "output_names=['y'])"
     )
@@ -658,17 +653,60 @@ def test_connect_nonlinear_systems_in_series():
     sys1 = SSModelCTLinearFOSISO(K=2)
     sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys_combined = connect_nonlinear_systems_in_series(
-        [sys1, sys2], ATTR_NAMES_CT, keys=["in", "out"], verbose_names=True
+        [sys1, sys2], ATTR_NAMES, StateSpaceModelCT,
+        keys=["in", "out"], verbose_names=True
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
         "f=Function(f:(t,x[2],u,in_out_T1)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,in_out_T1)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'in_out_T1': SX(T1)}, "
+        "params={'in_out_T1': SX(T1)}, name=None, "
         "input_names=['u'], state_names=['out_x', 'in_x'], "
         "output_names=['y'])"
     )
+
+
+def test_mul_operator_series_connection():
+    """Test the * operator for connecting systems in series"""
+    sys1 = SSModelCTLinearFOSISO()
+    sys2 = SSModelCTLinearFONoGainSISO()
+
+    # Use * operator to connect in series
+    sys_combined = sys1 * sys2
+
+    # Should produce the same result as connect_nonlinear_systems_in_series
+    assert str(sys_combined) == (
+        "StateSpaceModelCT("
+        "f=Function(f:(t,x[2],u,K,sys1_T1,sys2_T1)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u,K,sys1_T1,sys2_T1)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, "
+        "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1)}, name=None, "
+        "input_names=['u'], state_names=['sys2_x', 'sys1_x'], "
+        "output_names=['y'])"
+    )
+
+    # Test chaining multiple systems: sys1 * sys2 * sys3
+    sys3 = SSModelCTLinearO2NoGainSISO()
+    sys_combined_3 = sys1 * sys2 * sys3
+
+    assert str(sys_combined_3) == (
+        "StateSpaceModelCT("
+        "f=Function(f:(t,x[4],u,K,sys1_T1,sys2_T1,T1,T2)->(rhs[4]) SXFunction), "
+        "h=Function(h:(t,x[4],u,K,sys1_T1,sys2_T1,T1,T2)->(y) SXFunction), "
+        "n=4, nu=1, ny=1, "
+        "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1), "
+        "'T1': SX(T1), 'T2': SX(T2)}, name=None, "
+        "input_names=['u'], "
+        "state_names=['sys2_x1', 'sys2_x2', 'sys1_sys2_x', 'sys1_sys1_x'], "
+        "output_names=['y'])"
+    )
+
+    assert sys_combined_3.n == 4  # Total of 3 states
+    assert sys_combined_3.nu == 1  # Input dimension
+    assert sys_combined_3.ny == 1  # Output dimension
+    assert is_ss_ct(sys_combined_3) is True
+    assert is_ss_dt(sys_combined_3) is False
 
 
 def test_tf_models():

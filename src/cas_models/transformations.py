@@ -6,13 +6,20 @@ and discrete-time state-space models.
 
 import casadi as cas
 from cas_models.param_utils import (
+    make_list_of_unique_names,
     concatenate_lists_of_names,
     merge_param_dicts,
 )
+from cas_models.param_utils import make_list_of_enumerated_names
 
 
 def connect_nonlinear_systems_in_parallel(
-    systems, attr_names, keys=None, verbose_names=False, prefix="sys"
+    systems,
+    attr_names,
+    model_class,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
 ):
     """Combine a collection of nonlinear systems into one large parallel system.
 
@@ -29,7 +36,8 @@ def connect_nonlinear_systems_in_parallel(
             - 'input_var': Variable name for input ('u' or 'uk')
             - 'state_output': Output name for state function ('rhs' or 'xkp1')
             - 'output_var': Output name for output function ('y' or 'yk')
-            - 'model_class': Class to instantiate (StateSpaceModelCT or StateSpaceModelDT)
+        model_class: Class to instantiate for the combined system
+            (StateSpaceModelCT or StateSpaceModelDT)
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to [prefix + "1", prefix + "2", ...].
         verbose_names (bool, optional): If True, use verbose parameter naming.
@@ -49,10 +57,9 @@ def connect_nonlinear_systems_in_parallel(
         ...     'input_var': 'u',
         ...     'state_output': 'rhs',
         ...     'output_var': 'y',
-        ...     'model_class': StateSpaceModelCT
         ... }
         >>> combined = connect_nonlinear_systems_in_parallel(
-        ...     [sys1, sys2], attr_names_ct
+        ...     [sys1, sys2], attr_names_ct, StateSpaceModelCT
         ... )
         >>>
         >>> # For discrete-time models:
@@ -63,17 +70,18 @@ def connect_nonlinear_systems_in_parallel(
         ...     'input_var': 'uk',
         ...     'state_output': 'xkp1',
         ...     'output_var': 'yk',
-        ...     'model_class': StateSpaceModelDT
         ... }
         >>> combined = connect_nonlinear_systems_in_parallel(
-        ...     [sys1, sys2], attr_names_dt
+        ...     [sys1, sys2], attr_names_dt, StateSpaceModelDT
         ... )
     """
+    if keys is None:
+        keys = [sys.name for sys in systems]
+    keys = make_list_of_unique_names(keys, prefix=prefix)
     params = merge_param_dicts(
         [sys.params for sys in systems],
-        keys=keys,
+        keys,
         verbose_names=verbose_names,
-        prefix=prefix,
     )
 
     t = cas.SX.sym("t")
@@ -84,19 +92,19 @@ def connect_nonlinear_systems_in_parallel(
     y_signals = []
 
     for sys in systems:
-        x = cas.SX.sym(attr_names['state_var'], sys.n)
+        x = cas.SX.sym(attr_names["state_var"], sys.n)
         x_states.append(x)
 
-        u = cas.SX.sym(attr_names['input_var'], sys.nu)
+        u = cas.SX.sym(attr_names["input_var"], sys.nu)
         u_signals.append(u)
 
         # Get state function and call it: f(t, x, u, *params.values())
-        state_func = getattr(sys, attr_names['state_func'])
+        state_func = getattr(sys, attr_names["state_func"])
         state_out = state_func(t, x, u, *sys.params.values())
         state_outputs.append(state_out)
 
         # Get output function and call it: h(t, x, u, *params.values())
-        output_func = getattr(sys, attr_names['output_func'])
+        output_func = getattr(sys, attr_names["output_func"])
         y = output_func(t, x, u, *sys.params.values())
         y_signals.append(y)
 
@@ -110,22 +118,32 @@ def connect_nonlinear_systems_in_parallel(
     assert state_combined.shape == x.shape
 
     state_function = cas.Function(
-        attr_names['state_func'],
+        attr_names["state_func"],
         [t, x, u, *params.values()],
         [state_combined],
-        ["t", attr_names['state_var'], attr_names['input_var'], *params.keys()],
-        [attr_names['state_output']],
+        [
+            "t",
+            attr_names["state_var"],
+            attr_names["input_var"],
+            *params.keys(),
+        ],
+        [attr_names["state_output"]],
     )
 
     y = cas.vcat(y_signals)
     ny = y.shape[0]
 
     output_function = cas.Function(
-        attr_names['output_func'],
+        attr_names["output_func"],
         [t, x, u, *params.values()],
         [y],
-        ["t", attr_names['state_var'], attr_names['input_var'], *params.keys()],
-        [attr_names['output_var']],
+        [
+            "t",
+            attr_names["state_var"],
+            attr_names["input_var"],
+            *params.keys(),
+        ],
+        [attr_names["output_var"]],
     )
 
     state_names = concatenate_lists_of_names(
@@ -145,7 +163,7 @@ def connect_nonlinear_systems_in_parallel(
     )
     assert len(output_names) == ny
 
-    combined_system = attr_names['model_class'](
+    combined_system = model_class(
         state_function,
         output_function,
         n,
@@ -161,7 +179,12 @@ def connect_nonlinear_systems_in_parallel(
 
 
 def connect_nonlinear_systems_in_series(
-    systems, attr_names, keys=None, verbose_names=False, prefix="sys"
+    systems,
+    attr_names,
+    model_class,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
 ):
     """Combine a series of non-linear systems by connecting their inputs and
     outputs in series.
@@ -180,7 +203,8 @@ def connect_nonlinear_systems_in_series(
             - 'input_var': Variable name for input ('u' or 'uk')
             - 'state_output': Output name for state function ('rhs' or 'xkp1')
             - 'output_var': Output name for output function ('y' or 'yk')
-            - 'model_class': Class to instantiate (StateSpaceModelCT or StateSpaceModelDT)
+        model_class: Class to instantiate for the combined system
+            (StateSpaceModelCT or StateSpaceModelDT)
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to [prefix + "1", prefix + "2", ...].
         verbose_names (bool, optional): If True, use verbose parameter naming.
@@ -200,15 +224,14 @@ def connect_nonlinear_systems_in_series(
         ...     'input_var': 'u',
         ...     'state_output': 'rhs',
         ...     'output_var': 'y',
-        ...     'model_class': StateSpaceModelCT
         ... }
         >>> combined = connect_nonlinear_systems_in_series(
-        ...     [sys1, sys2], attr_names_ct
+        ...     [sys1, sys2], attr_names_ct, StateSpaceModelCT
         ... )
     """
     if keys is None:
-        keys = [f"{prefix}{i + 1}" for i in range(len(systems))]
-
+        keys = [sys.name for sys in systems]
+    keys = make_list_of_unique_names(keys, prefix=prefix)
     param_dicts = [sys.params for sys in systems]
     state_name_lists = [sys.state_names for sys in systems]
 
@@ -221,25 +244,25 @@ def connect_nonlinear_systems_in_series(
         # System 1
         n1 = sys1.n
         nu1 = sys1.nu
-        u1 = cas.SX.sym(attr_names['input_var'], nu1)
-        x1 = cas.SX.sym(attr_names['state_var'], n1)
-        state_func1 = getattr(sys1, attr_names['state_func'])
+        u1 = cas.SX.sym(attr_names["input_var"], nu1)
+        x1 = cas.SX.sym(attr_names["state_var"], n1)
+        state_func1 = getattr(sys1, attr_names["state_func"])
         params1 = merge_param_dicts(
-            param_dicts[:i], keys=keys[:i], verbose_names=verbose_names
+            param_dicts[:i], keys[:i], verbose_names=verbose_names
         )
         state_out1 = state_func1(t, x1, u1, *params1.values())
-        output_func1 = getattr(sys1, attr_names['output_func'])
+        output_func1 = getattr(sys1, attr_names["output_func"])
         y1 = output_func1(t, x1, u1, *params1.values())
 
         # System 2
         n2 = sys2.n
         ny2 = sys2.ny
         u2 = y1
-        x2 = cas.SX.sym(attr_names['state_var'], n2)
-        state_func2 = getattr(sys2, attr_names['state_func'])
+        x2 = cas.SX.sym(attr_names["state_var"], n2)
+        state_func2 = getattr(sys2, attr_names["state_func"])
         params2 = sys2.params
         state_out2 = state_func2(t, x2, u2, *params2.values())
-        output_func2 = getattr(sys2, attr_names['output_func'])
+        output_func2 = getattr(sys2, attr_names["output_func"])
         y2 = output_func2(t, x2, u2, *params2.values())
 
         # Variables of combined system
@@ -253,15 +276,20 @@ def connect_nonlinear_systems_in_series(
         assert state_combined.shape[0] == n
         params = merge_param_dicts(
             param_dicts[: i + 1],
-            keys=keys[: i + 1],
+            keys[: i + 1],
             verbose_names=verbose_names,
         )
         state_function = cas.Function(
-            attr_names['state_func'],
+            attr_names["state_func"],
             [t, x, u, *params.values()],
             [state_combined],
-            ["t", attr_names['state_var'], attr_names['input_var'], *params.keys()],
-            [attr_names['state_output']],
+            [
+                "t",
+                attr_names["state_var"],
+                attr_names["input_var"],
+                *params.keys(),
+            ],
+            [attr_names["state_output"]],
         )
 
         # Combined output function
@@ -269,13 +297,18 @@ def connect_nonlinear_systems_in_series(
         ny = ny2
         assert y.shape[0] == ny
         output_function = cas.Function(
-            attr_names['output_func'],
+            attr_names["output_func"],
             [t, x, u, *params.values()],
             [y],
-            ["t", attr_names['state_var'], attr_names['input_var'], *params.keys()],
-            [attr_names['output_var']],
+            [
+                "t",
+                attr_names["state_var"],
+                attr_names["input_var"],
+                *params.keys(),
+            ],
+            [attr_names["output_var"]],
         )
-        combined_system = attr_names['model_class'](
+        combined_system = model_class(
             state_function, output_function, n, nu, ny, params=params
         )
 

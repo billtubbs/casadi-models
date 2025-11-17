@@ -13,6 +13,17 @@ from cas_models.param_utils import (
 from cas_models.validation import validate_casadi_function_dims
 
 
+# Attribute names for continuous-time state-space models
+ATTR_NAMES = {
+    'state_func': 'f',
+    'output_func': 'h',
+    'state_var': 'x',
+    'input_var': 'u',
+    'state_output': 'rhs',
+    'output_var': 'y',
+}
+
+
 def validate_f_function(f: cas.Function, n: int, nu: int, params=None):
     """Use this to check a state transition function has the correct
     arguments (excluding any parameters) and return dimensions.
@@ -78,6 +89,7 @@ class StateSpaceModelCT:
     nu: int
     ny: int
     params: dict
+    name: str = None
     input_names: list[str] = None
     state_names: list[str] = None
     output_names: list[str] = None
@@ -90,6 +102,7 @@ class StateSpaceModelCT:
         nu=1,
         ny=1,
         params=None,
+        name=None,
         input_names=None,
         state_names=None,
         output_names=None,
@@ -111,6 +124,7 @@ class StateSpaceModelCT:
             ny (int, optional): Number of outputs (dimension of y). Default: 1.
             params (dict, optional): Dictionary of symbolic parameters used by
                 f and h functions. If None, defaults to empty dict.
+            name (str, optional): Optional name for the model. Default: None.
             input_names (list[str], optional): Names for input variables.
                 If None, defaults to ["u"] or ["u1", "u2", ...] for nu > 1.
             state_names (list[str], optional): Names for state variables.
@@ -143,6 +157,7 @@ class StateSpaceModelCT:
         if params is None:
             params = {}
         self.params = params
+        self.name = name
         validate_f_function(f, n, nu, params=params)
         validate_h_function(h, n, nu, ny, params=params)
         if input_names is None:
@@ -154,6 +169,36 @@ class StateSpaceModelCT:
         if output_names is None:
             output_names = make_list_of_enumerated_names("y", ny)
         self.output_names = output_names
+
+    def __mul__(self, other):
+        """Connect two continuous-time systems in series using the * operator.
+
+        This allows for intuitive composition of systems where the output of
+        self is connected to the input of other.
+
+        Args:
+            other: Another StateSpaceModelCT instance to connect in series.
+
+        Returns:
+            StateSpaceModelCT: Combined system where self -> other.
+
+        Example:
+            >>> sys1 = SSModelCTLinearFOSISO(K=2, T1=1)
+            >>> sys2 = SSModelCTLinearFOSISO(K=3, T1=2)
+            >>> sys_combined = sys1 * sys2  # Connect in series
+
+        Note:
+            The output dimension of self must match the input dimension of
+            other (self.ny == other.nu).
+        """
+        # Import here to avoid circular imports
+        from cas_models.transformations import (
+            connect_nonlinear_systems_in_series,
+        )
+
+        return connect_nonlinear_systems_in_series(
+            [self, other], ATTR_NAMES, model_class=StateSpaceModelCT
+        )
 
 
 class StateSpaceModelCTSISO(StateSpaceModelCT):
@@ -687,182 +732,6 @@ def linear_systems_in_series(
         "params": params,
         "state_names": state_names,
     }
-
-
-def connect_nonlinear_systems_in_parallel(
-    systems, keys=None, verbose_names=False, prefix="sys"
-):
-    """Combine a collection of nonlinear systems into one large
-    parallel system.
-    """
-
-    params = merge_param_dicts(
-        [sys.params for sys in systems],
-        keys=keys,
-        verbose_names=verbose_names,
-        prefix=prefix,
-    )
-
-    t = cas.SX.sym("t")
-
-    u_signals = []
-    x_states = []
-    rhs_expressions = []
-    y_signals = []
-    for sys in systems:
-        x = cas.SX.sym("x", sys.n)
-        x_states.append(x)
-
-        u = cas.SX.sym("u", sys.nu)
-        u_signals.append(u)
-
-        # f(t, x, u, *params.values())
-        rhs = sys.f(t, x, u, *sys.params.values())
-        rhs_expressions.append(rhs)
-
-        # h(t, x, u, *params.values())
-        y = sys.h(t, x, u, *sys.params.values())
-        y_signals.append(y)
-
-    x = cas.vcat(x_states)
-    n = x.shape[0]
-
-    u = cas.vcat(u_signals)
-    nu = u.shape[0]
-
-    rhs = cas.vcat(rhs_expressions)
-    assert rhs.shape == x.shape
-    f = cas.Function(
-        "f",
-        [t, x, u, *params.values()],
-        [rhs],
-        ["t", "x", "u", *params.keys()],
-        ["rhs"],
-    )
-
-    y = cas.vcat(y_signals)
-    ny = y.shape[0]
-    h = cas.Function(
-        "h",
-        [t, x, u, *params.values()],
-        [y],
-        ["t", "x", "u", *params.keys()],
-        ["y"],
-    )
-
-    state_names = concatenate_lists_of_names(
-        [sys.state_names for sys in systems],
-        keys=keys,
-        prefix=prefix,
-    )
-    assert len(state_names) == n
-    input_names = concatenate_lists_of_names(
-        [sys.input_names for sys in systems], keys=keys, prefix=prefix
-    )
-    assert len(input_names) == nu
-    output_names = concatenate_lists_of_names(
-        [sys.output_names for sys in systems], keys=keys, prefix=prefix
-    )
-    assert len(output_names) == ny
-
-    combined_system = StateSpaceModelCT(
-        f,
-        h,
-        n,
-        nu,
-        ny,
-        params=params,
-        input_names=input_names,
-        state_names=state_names,
-        output_names=output_names,
-    )
-
-    return combined_system
-
-
-def connect_nonlinear_systems_in_series(
-    systems, keys=None, verbose_names=False, prefix="sys"
-):
-    """Combine a series of non-linear systems by connecting
-    their inputs and outputs in series.
-    """
-
-    if keys is None:
-        keys = [f"{prefix}{i + 1}" for i in range(len(systems))]
-
-    param_dicts = [sys.params for sys in systems]
-    state_name_lists = [sys.state_names for sys in systems]
-
-    t = cas.SX.sym("t")
-    combined_system = systems[0]
-    for i, sys2 in enumerate(systems[1:], start=1):
-        sys1 = combined_system
-        assert sys2.nu == sys1.ny, "incompatible dimensions"
-
-        # System 1
-        n1 = sys1.n
-        nu1 = sys1.nu
-        u1 = cas.SX.sym("u", nu1)
-        x1 = cas.SX.sym("x", n1)
-        f1 = sys1.f
-        params1 = merge_param_dicts(
-            param_dicts[:i], keys=keys[:i], verbose_names=verbose_names
-        )
-        rhs1 = f1(t, x1, u1, *params1.values())
-        h1 = sys1.h
-        y1 = h1(t, x1, u1, *params1.values())
-
-        # System 2
-        n2 = sys2.n
-        ny2 = sys2.ny
-        u2 = y1
-        x2 = cas.SX.sym("x", n2)
-        f2 = sys2.f
-        params2 = sys2.params
-        rhs2 = f2(t, x2, u2, *params2.values())
-        h2 = sys2.h
-        y2 = h2(t, x2, u2, *params2.values())
-
-        # Variables of combined system
-        x = cas.vcat([x2, x1])  # stack with sys2 states at top
-        u = u1
-        nu = nu1
-
-        # Combined ODE rhs function
-        rhs = cas.vcat([rhs2, rhs1])
-        n = n1 + n2
-        assert rhs.shape[0] == n
-        params = merge_param_dicts(
-            param_dicts[: i + 1],
-            keys=keys[: i + 1],
-            verbose_names=verbose_names,
-        )
-        f = cas.Function(
-            "f",
-            [t, x, u, *params.values()],
-            [rhs],
-            ["t", "x", "u", *params.keys()],
-            ["rhs"],
-        )
-
-        # Combined output function
-        y = y2
-        ny = ny2
-        assert y.shape[0] == ny
-        h = cas.Function(
-            "h",
-            [t, x, u, *params.values()],
-            [y],
-            ["t", "x", "u", *params.keys()],
-            ["y"],
-        )
-        combined_system = StateSpaceModelCT(f, h, n, nu, ny, params=params)
-
-    combined_system.state_names = concatenate_lists_of_names(
-        list(reversed(state_name_lists)), keys=list(reversed(keys))
-    )
-
-    return combined_system
 
 
 def make_step_function(mag=1.0, t_step=0.0):
