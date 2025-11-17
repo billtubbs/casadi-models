@@ -786,3 +786,41 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             state_names=state_names,
             output_name=output_name,
         )
+
+
+
+def make_n_step_simulation_function(model, nT, name=None):
+    if name is None:
+        name = f"{model.F.name()}_sim_{nT}_steps"
+    t_eval = cas.SX.sym("t_eval", nT + 1)
+    nu = model.nu
+    n = model.n
+    params = model.params
+    U = cas.SX.sym("U", nT, nu)
+    x0 = cas.SX.sym("x0", n)
+    X = [x0.T]
+    Y = []
+    xk = x0
+    tk = t_eval[0]
+    for k in range(nT):
+        tkp1 = t_eval[k + 1]
+        uk = U[k, :].T
+        xkp1 = model.F(tk, xk, uk, *params.values())
+        yk = model.H(tk, xk, uk, *params.values())
+        X.append(xkp1.T)
+        Y.append(yk.T)
+        tk = tkp1
+        xk = xkp1
+
+    yk = model.H(tk, xk, uk, *params.values())
+    Y.append(yk.T)
+    X = cas.vcat(X)
+    Y = cas.vcat(Y)
+
+    return cas.Function(
+        name,
+        [t_eval, U, x0, *params.values()],
+        [X, Y],
+        ["t_eval", "U", "x0", *params.keys()],
+        ["X", "Y"],
+    )

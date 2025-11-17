@@ -886,7 +886,9 @@ def make_sim_step_function_RK4(f, n, nu, params=None, name="F"):
     )
 
 
-def make_n_step_simulation_function(F, H, n, nu, ny, nT, params=None, name=None):
+def make_n_step_simulation_function(
+    F, H, n, nu, ny, nT, params=None, name=None
+):
     if params is None:
         params = {}
     if name is None:
