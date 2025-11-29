@@ -7,7 +7,7 @@ from cas_models.param_utils import (
     make_list_of_enumerated_names,
 )
 from cas_models.validation import validate_casadi_function_dims
-from cas_models.continuous_time.models import make_sim_step_function_RK4
+from cas_models.continuous_time.simulate import make_sim_step_function_RK4
 
 
 def validate_F_function(F: cas.Function, n: int, nu: int, params=None):
@@ -409,9 +409,10 @@ def tf_to_ss_obs_cas(num, den):
     """Convert transfer function to state-space representation, compatible
     with CasADi symbolic variables.
 
-    This function constructs the observable canonical form state-space matrices
-    using CasADi symbolic arrays. The observable canonical form has a companion
-    matrix structure that makes the states directly related to output derivatives.
+    This function constructs the observable canonical form state-space
+    matrices using CasADi symbolic arrays. The observable canonical form
+    has a companion matrix structure that makes the states directly
+    related to output derivatives.
 
     State-space form:
         x(k+1) = A*x(k) + B*u(k)
@@ -679,7 +680,8 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             B(q^-1) = b_1  + b_2 q^-1 + ... + b_nb q^{-nb+1}
             and q^-1 is the backward-in-time shift operator
 
-        This is internally represented as a state-space model with state vector:
+        This is internally represented as a state-space model with state
+        vector:
             x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb)]
 
         Args:

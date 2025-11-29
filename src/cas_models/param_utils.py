@@ -1,6 +1,5 @@
 import casadi as cas
 from collections import defaultdict
-from itertools import chain
 
 
 def make_list_of_enumerated_names(prefix, n, sep=""):
@@ -50,7 +49,7 @@ def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
 
 
 def merge_param_dicts(
-    list_of_dicts, keys, verbose_names=False
+    list_of_dicts, keys=None, verbose_names=False, prefix="sys"
 ):
     """Merges a list of parameter dictionaries into one dictionary of
     unique model variables. Note that the same symbolic variables
@@ -74,6 +73,8 @@ def merge_param_dicts(
     'sys2_T1': SX(T1_2),
     'sys2_T2': SX(T2_2)}
     """
+    if keys is None:
+        keys = make_list_of_enumerated_names(prefix, len(list_of_dicts))
     if len(list_of_dicts) > len(set(keys)):
         raise ValueError("not enough unique keys")
 

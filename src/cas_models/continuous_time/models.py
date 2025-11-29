@@ -114,27 +114,36 @@ class StateSpaceModelCT:
 
         Args:
             f (cas.Function): State transition function with signature
-                (t, x, u, *params.values()) -> rhs where rhs has shape (n, 1).
-                Must have named inputs ["t", "x", "u", ...] and output ["rhs"].
+                (t, x, u, *params.values()) -> rhs where rhs has
+                shape (n, 1). Must have named inputs
+                ["t", "x", "u", ...] and output ["rhs"].
             h (cas.Function): Output function with signature
-                (t, x, u, *params.values()) -> y where y has shape (ny, 1).
-                Must have named inputs ["t", "x", "u", ...] and output ["y"].
+                (t, x, u, *params.values()) -> y where y has shape
+                (ny, 1). Must have named inputs ["t", "x", "u", ...]
+                and output ["y"].
             n (int): Number of states (dimension of x).
-            nu (int, optional): Number of inputs (dimension of u). Default: 1.
-            ny (int, optional): Number of outputs (dimension of y). Default: 1.
-            params (dict, optional): Dictionary of symbolic parameters used by
-                f and h functions. If None, defaults to empty dict.
-            name (str, optional): Optional name for the model. Default: None.
+            nu (int, optional): Number of inputs (dimension of u).
+                Default: 1.
+            ny (int, optional): Number of outputs (dimension of y).
+                Default: 1.
+            params (dict, optional): Dictionary of symbolic parameters
+                used by f and h functions. If None, defaults to empty dict.
+            name (str, optional): Optional name for the model.
+                Default: None.
             input_names (list[str], optional): Names for input variables.
-                If None, defaults to ["u"] or ["u1", "u2", ...] for nu > 1.
+                If None, defaults to ["u"] or ["u1", "u2", ...]
+                for nu > 1.
             state_names (list[str], optional): Names for state variables.
-                If None, defaults to ["x"] or ["x1", "x2", ...] for n > 1.
+                If None, defaults to ["x"] or ["x1", "x2", ...]
+                for n > 1.
             output_names (list[str], optional): Names for output variables.
-                If None, defaults to ["y"] or ["y1", "y2", ...] for ny > 1.
+                If None, defaults to ["y"] or ["y1", "y2", ...]
+                for ny > 1.
 
         Note:
-            The functions f and h are validated during initialization to ensure
-            they have the correct argument names and dimensional consistency.
+            The functions f and h are validated during initialization to
+            ensure they have the correct argument names and dimensional
+            consistency.
 
         Example:
             >>> t = cas.SX.sym("t")
@@ -672,8 +681,8 @@ def linear_systems_in_parallel(
 def linear_systems_in_series(
     systems, keys=None, verbose_names=False, prefix="sys"
 ):
-    """Combine a sequence of linear systems into one system by connecting their
-    outputs and inputs in series.
+    """Combine a sequence of linear systems into one system by
+    connecting their outputs and inputs in series.
     """
     n_sys = len(systems)
     col_sizes = [sys["A"].shape[1] for sys in systems]
@@ -732,82 +741,6 @@ def linear_systems_in_series(
         "params": params,
         "state_names": state_names,
     }
-
-
-def make_step_function(mag=1.0, t_step=0.0):
-    u0 = cas.DM(0.0)
-    u_step = cas.DM(mag)
-    t_step = cas.DM(t_step)
-    t = cas.SX.sym("t")
-    before_step = cas.Function("before_step", [], [u0])
-    after_step = cas.Function("after_step", [], [u_step])
-    f_cond = cas.Function.if_else("f_cond", after_step, before_step)
-    y = f_cond(t >= t_step)
-    return cas.Function("step", [t], [y], ["t"], ["y"])
-
-
-def make_sim_step_function_RK4(f, n, nu, params=None, name="F"):
-    if params is None:
-        params = {}
-
-    # Symbolic variables
-    t = cas.SX.sym("t")
-    dt = cas.SX.sym("dt")
-    x = cas.SX.sym("x", n)
-    u = cas.SX.sym("u", nu)
-
-    # RK4 approximation
-    k1 = f(t, x, u, *params.values())
-    k2 = f(t, x + dt / 2 * k1, u, *params.values())
-    k3 = f(t, x + dt / 2 * k2, u, *params.values())
-    k4 = f(t, x + dt * k3, u, *params.values())
-    xf = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-
-    return cas.Function(
-        name,
-        [t, x, u, dt, *params.values()],
-        [xf],
-        ["t", "x", "u", "dt", *params.keys()],
-        ["xf"],
-    )
-
-
-def make_n_step_simulation_function(
-    F, H, n, nu, ny, nT, params=None, name=None
-):
-    if params is None:
-        params = {}
-    if name is None:
-        name = f"{F.name()}_sim_{nT}_steps"
-    t_eval = cas.SX.sym("t_eval", nT + 1)
-    U = cas.SX.sym("U", nT, nu)
-    x0 = cas.SX.sym("x0", n)
-    X = [x0.T]
-    Y = []
-    xk = x0
-    tk = t_eval[0]
-    for k in range(nT):
-        tkp1 = t_eval[k + 1]
-        uk = U[k, :].T
-        xkp1 = F(tk, xk, uk, *params.values())
-        yk = H(tk, xk, uk, *params.values())
-        X.append(xkp1.T)
-        Y.append(yk.T)
-        tk = tkp1
-        xk = xkp1
-
-    yk = H(tk, xk, uk, *params.values())
-    Y.append(yk.T)
-    X = cas.vcat(X)
-    Y = cas.vcat(Y)
-
-    return cas.Function(
-        name,
-        [t_eval, U, x0, *params.values()],
-        [X, Y],
-        ["t_eval", "U", "x0", *params.keys()],
-        ["X", "Y"],
-    )
 
 
 def sympy2casadi(sympy_expr, sympy_vars, casadi_vars, sparsify=True):

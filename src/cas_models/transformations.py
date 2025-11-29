@@ -1,7 +1,7 @@
 """Transformations for combining state-space models.
 
-This module provides generalized functions for combining both continuous-time
-and discrete-time state-space models.
+This module provides generalized functions for combining both
+continuous-time and discrete-time state-space models.
 """
 
 import casadi as cas
@@ -10,7 +10,112 @@ from cas_models.param_utils import (
     concatenate_lists_of_names,
     merge_param_dicts,
 )
-from cas_models.param_utils import make_list_of_enumerated_names
+
+
+# TODO: These linear functions are redundant since no linear models 
+# currently defined
+def linear_systems_in_parallel(
+    systems, keys=None, verbose_names=False, prefix="sys"
+):
+    """Combine a collection of linear systems into one large parallel
+    system.
+    """
+    A = cas.sparsify(
+        block_diag(list(sys["A"] for sys in systems), square=True)
+    )
+    B = cas.sparsify(block_diag(list(sys["B"] for sys in systems)))
+    C = cas.sparsify(block_diag(list(sys["C"] for sys in systems)))
+    D = cas.sparsify(block_diag(list(sys["D"] for sys in systems)))
+    params = merge_param_dicts(
+        [sys.params for sys in systems],
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+    )
+    input_names = concatenate_lists_of_names(
+        [sys.input_names for sys in systems], keys=keys, prefix=prefix
+    )
+    state_names = concatenate_lists_of_names(
+        [sys.state_names for sys in systems], keys=keys, prefix=prefix
+    )
+    output_names = concatenate_lists_of_names(
+        [sys.output_names for sys in systems], keys=keys, prefix=prefix
+    )
+    return {
+        "A": A,
+        "B": B,
+        "C": C,
+        "D": D,
+        "params": params,
+        "input_names": input_names,
+        "state_names": state_names,
+        "output_names": output_names,
+    }
+
+
+def linear_systems_in_series(
+    systems, keys=None, verbose_names=False, prefix="sys"
+):
+    """Combine a sequence of linear systems into one system by connecting their
+    outputs and inputs in series.
+    """
+    n_sys = len(systems)
+    col_sizes = [sys["A"].shape[1] for sys in systems]
+    A_rows = []
+    B_rows = []
+    C_row = []
+    for i, sys in enumerate(systems):
+        A = sys["A"]
+        B = sys["B"]
+        C = sys["C"]
+        D = sys["D"]
+
+        # Add rows to A matrix
+        n_rows = A.shape[0]
+        assert n_rows == col_sizes[i], "A matrix not square"
+        A_row = []
+        if i > 0:
+            for j in range(i - 1):
+                A_row.append(cas.SX.zeros(n_rows, col_sizes[j]))
+            A_row.append(B @ systems[i - 1]["C"])
+        A_row.append(A)
+        for j in range(i + 1, n_sys):
+            A_row.append(cas.SX.zeros(n_rows, col_sizes[j]))
+        A_rows.append(A_row)
+
+        # Add rows to B matrix
+        if i > 0:
+            B_rows.append(B @ systems[i - 1]["D"])
+        else:
+            B_rows.append(B)
+
+        # Add columns to C matrix
+        if i < n_sys - 1:
+            C_row.append(systems[i + 1]["D"] @ C)
+        else:
+            C_row.append(C)
+
+    A = cas.sparsify(cas.blockcat(A_rows))
+    B = cas.sparsify(cas.vcat(B_rows))
+    C = cas.sparsify(cas.hcat(C_row))
+    D = reduce(cas.SX.__matmul__, (sys["D"] for sys in systems))
+    params = merge_param_dicts(
+        [sys.params for sys in systems],
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+    )
+    state_names = concatenate_lists_of_names(
+        [sys.state_names for sys in systems], keys=keys, prefix=prefix
+    )
+    return {
+        "A": A,
+        "B": B,
+        "C": C,
+        "D": D,
+        "params": params,
+        "state_names": state_names,
+    }
 
 
 def connect_nonlinear_systems_in_parallel(
