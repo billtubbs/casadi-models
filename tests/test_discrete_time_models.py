@@ -7,6 +7,7 @@ import casadi as cas
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
+    StateSpaceModelDTDelay,
     StateSpaceModelDTTFSISO,
     StateSpaceModelDTFromCTRK4,
     StateSpaceModelDTFromCT,
@@ -675,3 +676,191 @@ def test_StateSpaceModelDTFromCT_compare_solvers():
 
     # RK and RK4 should also be close
     assert np.allclose(x1_rk4, x1_rk, rtol=1e-4, atol=1e-6)
+
+
+def test_StateSpaceModelDTDelay_SISO():
+    """Test SISO delay model."""
+    nk = 5
+    model = StateSpaceModelDTDelay(nk)
+
+    # Verify model dimensions
+    assert model.n == nk
+    assert model.nu == 1
+    assert model.ny == 1
+    assert model.nk == nk
+    assert model.G.shape == (1, 1)
+    assert float(model.G) == 1.0
+
+    # Test step response - output should be delayed by nk steps
+    x = cas.DM.zeros(model.n, 1)
+    u_val = 1.0
+    t_val = 0.0
+
+    for k in range(15):
+        y = model.H(t_val, x, u_val)
+
+        # Output should be 0 before delay, 1 after delay
+        if k < nk:
+            assert float(y) == 0.0, f"At k={k}, expected y=0 but got {float(y)}"
+        else:
+            assert float(y) == 1.0, f"At k={k}, expected y=1 but got {float(y)}"
+
+        x = model.F(t_val, x, u_val)
+        t_val += 1
+
+
+def test_StateSpaceModelDTDelay_MIMO_identity():
+    """Test MIMO delay model with identity gain matrix."""
+    nu = 2
+    nk = 3
+    model = StateSpaceModelDTDelay(nk, nu)
+
+    # Verify model dimensions
+    assert model.n == nk * nu
+    assert model.nu == nu
+    assert model.ny == nu  # ny defaults to nu when G is None
+    assert model.nk == nk
+    assert model.G.shape == (nu, nu)
+    assert np.allclose(np.array(model.G), np.eye(nu))
+
+    # Test step response with different values on each input
+    x = cas.DM.zeros(model.n, 1)
+    u_val = cas.DM([[1.0], [2.0]])
+    t_val = 0.0
+
+    for k in range(10):
+        y = np.array(model.H(t_val, x, u_val)).flatten()
+
+        # Outputs should be delayed versions of inputs
+        if k < nk:
+            assert np.allclose(y, [0.0, 0.0]), f"At k={k}, expected y=[0, 0] but got {y}"
+        else:
+            assert np.allclose(y, [1.0, 2.0]), f"At k={k}, expected y=[1, 2] but got {y}"
+
+        x = model.F(t_val, x, u_val)
+        t_val += 1
+
+
+def test_StateSpaceModelDTDelay_MIMO_custom_gain():
+    """Test MIMO delay model with custom gain matrix."""
+    nu = 2
+    nk = 3
+    G = cas.DM([[1.0, 0.5], [0.0, 2.0]])
+    model = StateSpaceModelDTDelay(nk, nu, G=G)
+
+    # Verify model dimensions
+    ny = G.shape[0]  # ny is inferred from G
+    assert model.n == nk * nu
+    assert model.nu == nu
+    assert model.ny == ny
+    assert model.nk == nk
+    assert model.G.shape == (ny, nu)
+    assert np.allclose(np.array(model.G), np.array(G))
+
+    # Test step response
+    x = cas.DM.zeros(model.n, 1)
+    u_val = cas.DM([[1.0], [2.0]])
+    t_val = 0.0
+
+    # Expected output after delay: y = G * u
+    # y[0] = 1.0*1.0 + 0.5*2.0 = 2.0
+    # y[1] = 0.0*1.0 + 2.0*2.0 = 4.0
+    y_expected = np.array([2.0, 4.0])
+
+    for k in range(10):
+        y = np.array(model.H(t_val, x, u_val)).flatten()
+
+        # Outputs should be zero before delay, G*u after delay
+        if k < nk:
+            assert np.allclose(y, [0.0, 0.0]), f"At k={k}, expected y=[0, 0] but got {y}"
+        else:
+            assert np.allclose(y, y_expected), f"At k={k}, expected y={y_expected} but got {y}"
+
+        x = model.F(t_val, x, u_val)
+        t_val += 1
+
+
+def test_StateSpaceModelDTDelay_varying_input():
+    """Test delay model with time-varying input."""
+    nk = 4
+    model = StateSpaceModelDTDelay(nk)
+
+    # Simulate with varying input signal
+    x = cas.DM.zeros(model.n, 1)
+    t_val = 0.0
+
+    # Input sequence: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    # Expected output (delayed by 4): [0, 0, 0, 0, 0, 1, 2, 3, 4, 5]
+    for k in range(10):
+        u_val = float(k)
+        y = float(model.H(t_val, x, u_val))
+
+        # Output should be input from nk steps ago
+        if k < nk:
+            y_expected = 0.0
+        else:
+            y_expected = float(k - nk)
+
+        assert np.isclose(y, y_expected), f"At k={k}, expected y={y_expected} but got {y}"
+
+        x = model.F(t_val, x, u_val)
+        t_val += 1
+
+
+def test_StateSpaceModelDTDelay_edge_cases():
+    """Test edge cases for delay model."""
+    # Test nk=1 (minimum delay)
+    model = StateSpaceModelDTDelay(1)
+    assert model.n == 1
+
+    x = cas.DM.zeros(1, 1)
+    y = float(model.H(0.0, x, 1.0))
+    assert y == 0.0  # Initially zero
+
+    x = model.F(0.0, x, 1.0)
+    y = float(model.H(1.0, x, 1.0))
+    assert y == 1.0  # After 1 step, output equals previous input
+
+    # Test non-square MIMO system
+    G = cas.DM([[1.0, 0.5, 0.2], [0.3, 0.0, 1.5]])
+    model = StateSpaceModelDTDelay(2, nu=3, G=G)
+    assert model.n == 2 * 3  # nk * nu
+    assert model.nu == 3
+    assert model.ny == 2
+    assert model.G.shape == (2, 3)
+    assert np.allclose(np.array(model.G), np.array(G))
+
+
+def test_StateSpaceModelDTDelay_compare_with_TF():
+    """Compare StateSpaceModelDTDelay with StateSpaceModelDTTFSISO for pure delay."""
+    nk = 5
+
+    # Create delay model
+    model_delay = StateSpaceModelDTDelay(nk)
+
+    # Create equivalent TF model: G(z) = z^(-nk)
+    num = cas.DM([1])
+    den = cas.DM([1] + [0] * nk)
+    model_tf = StateSpaceModelDTTFSISO(num=num, den=den)
+
+    # Both should have same number of states
+    assert model_delay.n == model_tf.n == nk
+
+    # Simulate both with same input
+    x_delay = cas.DM.zeros(model_delay.n, 1)
+    x_tf = cas.DM.zeros(model_tf.n, 1)
+    u_val = 1.0
+    t_val = 0.0
+
+    for k in range(12):
+        y_delay = float(model_delay.H(t_val, x_delay, u_val))
+        y_tf = float(model_tf.H(t_val, x_tf, u_val))
+
+        # Outputs should match
+        assert np.isclose(y_delay, y_tf), (
+            f"At k={k}, delay model y={y_delay} but TF model y={y_tf}"
+        )
+
+        x_delay = model_delay.F(t_val, x_delay, u_val)
+        x_tf = model_tf.F(t_val, x_tf, u_val)
+        t_val += 1

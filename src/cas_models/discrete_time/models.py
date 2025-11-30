@@ -208,6 +208,8 @@ class StateSpaceModelDTFromCTRK4(StateSpaceModelDT):
             ["yk"],
         )
 
+        # Copy information from continuous-time model
+        name = model_ct.name
         input_names = model_ct.input_names
         state_names = model_ct.state_names
         output_names = model_ct.output_names
@@ -220,6 +222,7 @@ class StateSpaceModelDTFromCTRK4(StateSpaceModelDT):
             ny=ny,
             dt=dt,
             params=params,
+            name=name,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -280,6 +283,8 @@ class StateSpaceModelDTFromCT(StateSpaceModelDT):
             ["yk"],
         )
 
+        # Copy information from continuous-time model
+        name = model_ct.name
         input_names = model_ct.input_names
         state_names = model_ct.state_names
         output_names = model_ct.output_names
@@ -292,6 +297,7 @@ class StateSpaceModelDTFromCT(StateSpaceModelDT):
             ny=ny,
             dt=dt,
             params=params,
+            name=name,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -707,6 +713,156 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
+        )
+
+
+class StateSpaceModelDTDelay(StateSpaceModelDT):
+    """A discrete-time state-space model implementing a pure time delay.
+
+    For a MIMO system with nu inputs and ny outputs, this model implements:
+
+        y(k) = G * u(k - nk)
+
+    where:
+        - nk is the delay in time steps (scalar, applies to all I/O paths)
+        - G is the gain matrix of shape (ny, nu)
+
+    The delay is implemented using a shift register for each input, creating
+    a state vector of dimension n = nk * nu, with the following structure:
+
+        x(k) = [x1(k), x2(k), ..., xnu(k)]
+
+    where each xi(k) represents the shift register for input i:
+        xi(k) = [ui(k-1), ui(k-2), ..., ui(k-nk)]
+
+    State-space matrices:
+        - A: Block diagonal matrix with nu shift register blocks
+        - B: Each input feeds into its corresponding shift register
+        - C: Extracts delayed inputs and applies gain matrix G
+        - D: Zero (no direct feedthrough)
+
+    """
+
+    def __init__(
+        self,
+        nk,
+        nu=1,
+        G=None,
+        dt=None,
+        name=None,
+        input_names=None,
+        state_names=None,
+        output_names=None,
+    ):
+        """Initialize a discrete-time delay model.
+
+        Args:
+            nk (int): Delay in time steps (must be >= 1).
+            nu (int, optional): Number of inputs. Default: 1.
+            G (array-like, optional): Gain matrix of shape (ny, nu) mapping
+                delayed inputs to outputs. If None, defaults to identity
+                matrix (ny = nu). If provided, ny is inferred from G.shape[0].
+            dt (float, optional): Sample time. Default: None.
+            name (str, optional): Optional name for the model. Default: None.
+            input_names (list[str], optional): Names for input variables.
+                If None, defaults to ["u"] or ["u1", "u2", ...] for nu > 1.
+            state_names (list[str], optional): Names for state variables.
+                If None, defaults to ["x1", "x2", ...].
+            output_names (list[str], optional): Names for output variables.
+                If None, defaults to ["y"] or ["y1", "y2", ...] for ny > 1.
+
+        Raises:
+            AssertionError: If nk < 1 or if G has incorrect dimensions.
+
+        Example:
+            >>> # SISO delay of 3 steps
+            >>> model = StateSpaceModelDTDelay(nk=3)
+            >>>
+            >>> # MIMO delay of 5 steps with 2 inputs
+            >>> model = StateSpaceModelDTDelay(nk=5, nu=2)
+            >>>
+            >>> # MIMO delay with custom gain matrix
+            >>> G = cas.DM([[1.0, 0.5], [0.0, 2.0]])
+            >>> model = StateSpaceModelDTDelay(nk=5, nu=2, G=G)
+
+        """
+        assert nk >= 1, "Delay nk must be >= 1"
+
+        # Infer ny from G or default to nu
+        if G is None:
+            ny = nu
+            G = cas.DM.eye(ny)
+        else:
+            G = cas.DM(G)
+            ny = G.shape[0]
+            assert G.shape[1] == nu, f"G.shape[1] must equal nu ({nu}), got {G.shape[1]}"
+
+        # Number of states: nk states per input
+        n = nk * nu
+
+        # Build state-space matrices using SX for symbolic computation
+        # A matrix: Block diagonal with shift register blocks
+        A = cas.SX.zeros(n, n)
+        for i in range(nu):
+            # Each block is a shift register of size (nk x nk)
+            block_start = i * nk
+            for j in range(nk - 1):
+                A[block_start + j + 1, block_start + j] = 1.0
+
+        # B matrix: Each input feeds into first position of its shift register
+        B = cas.SX.zeros(n, nu)
+        for i in range(nu):
+            B[i * nk, i] = 1.0
+
+        # C matrix: Extract last state of each shift register and apply gain G
+        # Last state of shift register i is at index (i+1)*nk - 1
+        C_extract = cas.SX.zeros(nu, n)
+        for i in range(nu):
+            C_extract[i, (i + 1) * nk - 1] = 1.0
+
+        # Apply gain matrix: C = G * C_extract
+        C = cas.mtimes(cas.SX(G), C_extract)
+
+        # D matrix: No direct feedthrough
+        D = cas.SX.zeros(ny, nu)
+
+        # Sparsify matrices to take advantage of sparse structure
+        A = cas.sparsify(A)
+        B = cas.sparsify(B)
+        C = cas.sparsify(C)
+        D = cas.sparsify(D)
+
+        # Create symbolic variables for the state-space equations
+        t = cas.SX.sym("t")
+        xk = cas.SX.sym("xk", n)
+        uk = cas.SX.sym("uk", nu)
+
+        # State-space equations:
+        # x(k+1) = A*x(k) + B*u(k)
+        # y(k) = C*x(k) + D*u(k)
+        xkp1 = cas.mtimes(A, xk) + cas.mtimes(B, uk)
+        yk = cas.mtimes(C, xk) + cas.mtimes(D, uk)
+
+        # Create CasADi Functions for F and H
+        F = cas.Function("F", [t, xk, uk], [xkp1], ["t", "xk", "uk"], ["xkp1"])
+        H = cas.Function("H", [t, xk, uk], [yk], ["t", "xk", "uk"], ["yk"])
+
+        # Store delay-specific attributes
+        self.nk = nk
+        self.G = G
+
+        super().__init__(
+            F,
+            H,
+            n,
+            nu=nu,
+            ny=ny,
+            dt=dt,
+            params={},
+            name=name,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
         )
 
 

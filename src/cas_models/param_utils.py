@@ -18,6 +18,24 @@ def make_list_of_enumerated_names(prefix, n, sep=""):
 
 
 def make_list_of_unique_names(keys, prefix="sys"):
+    """Generate a list of unique names from keys, replacing None values.
+
+    For each key in the input list:
+    - If the key is not None, use it as-is
+    - If the key is None, generate a unique name using the prefix and a
+      sequential number (e.g., "sys1", "sys2", etc.)
+
+    Args:
+        keys: List of keys (strings or None values)
+        prefix: Prefix to use for auto-generated names (default: "sys")
+
+    Returns:
+        List of unique names (all strings, no None values)
+
+    Example:
+        >>> make_list_of_unique_names(["plant", None, "controller"])
+        ["plant", "sys1", "controller"]
+    """
     new_names = []
     i = 0
     for key in keys:
