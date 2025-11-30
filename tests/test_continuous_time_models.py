@@ -597,7 +597,7 @@ def test_connect_nonlinear_systems_in_parallel():
         "StateSpaceModelCT("
         "f=Function(f:(t,x[3],u[3],T1)->(rhs[3]) SXFunction), "
         "h=Function(h:(t,x[3],u[3],T1)->(y[3]) SXFunction), "
-        "n=3, nu=3, ny=3, params={'T1': SX(T1)}, name=None, "
+        "n=3, nu=3, ny=3, params={'T1': SX(T1)}, name='sys1_sys2_sys3', "
         "input_names=['a_u', 'b_u', 'c_u'], "
         "state_names=['a_x', 'b_x', 'c_x'], "
         "output_names=['a_y', 'b_y', 'c_y'])"
@@ -646,7 +646,7 @@ def test_connect_nonlinear_systems_in_series():
         "f=Function(f:(t,x[2],u,in_K,in_T1,out_T1)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,in_K,in_T1,out_T1)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'in_K': SX(K), 'in_T1': SX(T1), 'out_T1': SX(T1)}, name=None, "
+        "params={'in_K': SX(K), 'in_T1': SX(T1), 'out_T1': SX(T1)}, name='sys1_sys2', "
         "input_names=['u'], state_names=['out_x', 'in_x'], "
         "output_names=['y'])"
     )
@@ -663,7 +663,7 @@ def test_connect_nonlinear_systems_in_series():
         "f=Function(f:(t,x[2],u,in_out_T1)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,in_out_T1)->(y) SXFunction), "
         "n=2, nu=1, ny=1, "
-        "params={'in_out_T1': SX(T1)}, name=None, "
+        "params={'in_out_T1': SX(T1)}, name='sys1_sys2', "
         "input_names=['u'], state_names=['out_x', 'in_x'], "
         "output_names=['y'])"
     )
@@ -698,9 +698,9 @@ def test_mul_operator_series_connection():
         "h=Function(h:(t,x[4],u,K,sys1_T1,sys2_T1,T1,T2)->(y) SXFunction), "
         "n=4, nu=1, ny=1, "
         "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1), "
-        "'T1': SX(T1), 'T2': SX(T2)}, name=None, "
+        "'T1': SX(T1), 'T2': SX(T2)}, name='sys1_sys2_sys1', "
         "input_names=['u'], "
-        "state_names=['sys2_x1', 'sys2_x2', 'sys1_sys2_x', 'sys1_sys1_x'], "
+        "state_names=['sys1_x1', 'sys1_x2', 'sys1_sys2_sys2_x', 'sys1_sys2_sys1_x'], "
         "output_names=['y'])"
     )
 

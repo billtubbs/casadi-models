@@ -2,11 +2,15 @@ from collections import OrderedDict
 from dataclasses import dataclass
 
 import casadi as cas
-import sympy
 
 from cas_models.param_utils import (
     make_list_of_enumerated_names,
     make_symbolic_vars_from_kwargs,
+)
+from cas_models.sympy_conversion import (
+    convert_sympy_state_space_to_casadi_SX,
+    get_free_symbols_in_sympy_ss,
+    make_casadi_vars_from_sympy_vars,
 )
 from cas_models.validation import validate_casadi_function_dims
 
@@ -37,7 +41,9 @@ def validate_f_function(f: cas.Function, n: int, nu: int, params=None):
     )
 
 
-def validate_h_function(h: cas.Function, n: int, nu: int, ny: int, params=None):
+def validate_h_function(
+    h: cas.Function, n: int, nu: int, ny: int, params=None
+):
     """Use this to check an output function has the corret arguments
     (excluding any parameters) and return dimensions.
     """
@@ -149,8 +155,12 @@ class StateSpaceModelCT:
             >>> f = cas.Function(
             ...     "f", [t, x, u, a], [rhs], ["t", "x", "u", "a"], ["rhs"]
             ... )
-            >>> h = cas.Function("h", [t, x, u, a], [x[0]], ["t", "x", "u", "a"], ["y"])
-            >>> model = StateSpaceModelCT(f, h, n=2, nu=1, ny=1, params={"a": a})
+            >>> h = cas.Function(
+            ...     "h", [t, x, u, a], [x[0]], ["t", "x", "u", "a"], ["y"]
+            ... )
+            >>> model = StateSpaceModelCT(
+            ...     f, h, n=2, nu=1, ny=1, params={"a": a}
+            ... )
         """
         self.f = f
         self.h = h
@@ -333,7 +343,8 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
             for p in params:
                 symbolic_params.update({p.name(): p})
         symbolic_params = {
-            name_key: symbolic_params[name_key] for name_key in sorted(symbolic_params)
+            name_key: symbolic_params[name_key]
+            for name_key in sorted(symbolic_params)
         }
 
         # Construct ODE right-hand side
@@ -646,11 +657,15 @@ class SSModelCTLinearO2UnderdampedSISO(SSModelCTFromABCDSISO):
             omega_n : natural frequency
 
         """
-        params = make_symbolic_vars_from_kwargs(K=K, zeta=zeta, omega_n=omega_n)
+        params = make_symbolic_vars_from_kwargs(
+            K=K, zeta=zeta, omega_n=omega_n
+        )
         K = params["K"]
         zeta = params["zeta"]
         omega_n = params["omega_n"]
-        A = cas.sparsify(cas.blockcat([[0, 1], [-(omega_n**2), -2 * omega_n * zeta]]))
+        A = cas.sparsify(
+            cas.blockcat([[0, 1], [-(omega_n**2), -2 * omega_n * zeta]])
+        )
         B = cas.sparsify(cas.blockcat([[0], [1]]))
         C = cas.sparsify(cas.blockcat([[K, 0]]))
         D = cas.sparsify(cas.DM(0))
@@ -666,61 +681,35 @@ class SSModelCTLinearO2UnderdampedSISO(SSModelCTFromABCDSISO):
         )
 
 
-def sympy2casadi(sympy_expr, sympy_vars, casadi_vars, sparsify=True):
-    """Convert Sympy expression to CasADi symbolic expression.
+class SSModelCTFromSympySS(StateSpaceModelCTFromABCD):
+    def __init__(
+        self,
+        sys,
+        name=None,
+        input_names=None,
+        state_names=None,
+        output_names=None,
+    ):
+        """Construct a continuous time linear state-space model from
+        a Sympy StateSpace (symbolic) model.
+        """
 
-    Warning: This function uses Python's exec function, and thus should not
-    be used on unsanitized input.
+        # Identify symbolic variables in Sympy StateSpace model
+        sympy_vars = get_free_symbols_in_sympy_ss(sys)
+        casadi_vars = make_casadi_vars_from_sympy_vars(sympy_vars)
 
-    Also note there is a bug in Sympy version 1.13.0 so it is better to wait
-    until this is fixed before relying on the StateSpace model.
+        # Create CasADi state space model matrices
+        A, B, C, D = convert_sympy_state_space_to_casadi_SX(
+            sys, sympy_vars, casadi_vars, sparsify=True
+        )
 
-    See:
-      - https://github.com/sympy/sympy/issues/26827
-
-    """
-
-    mapping = {
-        "ImmutableDenseMatrix": cas.blockcat,
-        "MutableDenseMatrix": cas.blockcat,
-        "Abs": cas.fabs,
-    }
-    f = sympy.lambdify(sympy_vars, sympy_expr, modules=[mapping, cas])
-
-    result = f(*casadi_vars)
-    if sparsify:
-        return cas.sparsify(result)
-    else:
-        return result
-
-
-def make_casadi_and_sympy_vars(var_names):
-    """Makes two dictionaries containing matching symbolic variables with
-    the names defined in var_names.
-    """
-    sympy_vars = {}
-    casadi_vars = {}
-    for k, shape in var_names.items():
-        if shape == ():
-            sympy_vars[k] = sympy.Symbol(k, *shape)
-            casadi_vars[k] = cas.SX.sym(k)
-        else:
-            sympy_vars[k] = sympy.MatrixSymbol(k, *shape)
-            casadi_vars[k] = cas.SX.sym(k, *shape)
-    return sympy_vars, casadi_vars
-
-
-def convert_sympy_state_space_to_casadi_SX(sys, sympy_vars, casadi_vars, sparsify=True):
-    """Warning: The sympy2casadi function uses Python's exec function,
-    and is thus a potential security threat.
-    """
-    A, B, C, D = [
-        sympy2casadi(item, sympy_vars, casadi_vars, sparsify=sparsify)
-        for item in [
-            sys.state_matrix,
-            sys.input_matrix,
-            sys.output_matrix,
-            sys.feedforward_matrix,
-        ]
-    ]
-    return A, B, C, D
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            name=name,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )

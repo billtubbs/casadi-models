@@ -57,14 +57,18 @@ def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
     elif len(lists_of_names) > len(set(keys)):
         raise ValueError("not enough unique keys")
     names = [
-        f"{key}_{name}" for key, names in zip(keys, lists_of_names) for name in names
+        f"{key}_{name}"
+        for key, names in zip(keys, lists_of_names)
+        for name in names
     ]
     if len(names) > len(set(names)):
         raise ValueError("non-unique names")
     return names
 
 
-def merge_param_dicts(list_of_dicts, keys=None, verbose_names=False, prefix="sys"):
+def merge_param_dicts(
+    list_of_dicts, keys=None, verbose_names=False, prefix="sys"
+):
     """Merges a list of parameter dictionaries into one dictionary of
     unique model variables. Note that the same symbolic variables
     (dictionary values) may be used multiple times for different
@@ -108,7 +112,9 @@ def merge_param_dicts(list_of_dicts, keys=None, verbose_names=False, prefix="sys
             param = unique_params.pop()
             if verbose_names:
                 # Include all systems that use this parameter
-                systems = "_".join(sorted(sys_key for sys_key, _ in sys_params))
+                systems = "_".join(
+                    sorted(sys_key for sys_key, _ in sys_params)
+                )
                 new_key = f"{systems}_{orig_key}"
             else:
                 new_key = orig_key

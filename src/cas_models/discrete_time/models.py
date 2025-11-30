@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from dataclasses import dataclass
 
+import numpy as np
 import casadi as cas
 
 from cas_models.continuous_time.simulate import (
@@ -39,7 +40,9 @@ def validate_F_function(F: cas.Function, n: int, nu: int, params=None):
     )
 
 
-def validate_H_function(H: cas.Function, n: int, nu: int, ny: int, params=None):
+def validate_H_function(
+    H: cas.Function, n: int, nu: int, ny: int, params=None
+):
     """Use this to check an output function has the corret arguments
     (excluding any parameters) and return dimensions.
     """
@@ -144,12 +147,22 @@ class StateSpaceModelDT:
             >>> a = cas.SX.sym("a")
             >>> xkp1 = cas.vertcat(-a * xk[0], xk[1])
             >>> F = cas.Function(
-            ...     "F", [t, xk, uk, a], [xkp1], ["t", "xk", "uk", "a"], ["xkp1"]
+            ...     "F",
+            ...     [t, xk, uk, a],
+            ...     [xkp1],
+            ...     ["t", "xk", "uk", "a"],
+            ...     ["xkp1"],
             ... )
             >>> H = cas.Function(
-            ...     "H", [t, xk, uk, a], [xk[0]], ["t", "xk", "uk", "a"], ["yk"]
+            ...     "H",
+            ...     [t, xk, uk, a],
+            ...     [xk[0]],
+            ...     ["t", "xk", "uk", "a"],
+            ...     ["yk"],
             ... )
-            >>> model = StateSpaceModelDT(F, H, n=2, nu=1, ny=1, params={"a": a})
+            >>> model = StateSpaceModelDT(
+            ...     F, H, n=2, nu=1, ny=1, params={"a": a}
+            ... )
         """
         self.F = F
         self.H = H
@@ -193,7 +206,9 @@ class StateSpaceModelDTFromCTRK4(StateSpaceModelDT):
         params = model_ct.params
 
         # State transition function - RK4 integration with fixed time-step
-        F = make_sim_step_function_RK4_fixed_dt(f, n, nu, dt, params=params, name="F")
+        F = make_sim_step_function_RK4_fixed_dt(
+            f, n, nu, dt, params=params, name="F"
+        )
 
         # Output function - same as in continuous-time
         t = cas.SX.sym("t")
@@ -369,7 +384,6 @@ def tf_to_ss_obs_np(num, den):
     Returns:
         tuple: (A, B, C, D) state-space matrices as numpy arrays
     """
-    import numpy as np
 
     num = np.atleast_1d(num).flatten()
     den = np.atleast_1d(den).flatten()
@@ -795,7 +809,9 @@ class StateSpaceModelDTDelay(StateSpaceModelDT):
         else:
             G = cas.DM(G)
             ny = G.shape[0]
-            assert G.shape[1] == nu, f"G.shape[1] must equal nu ({nu}), got {G.shape[1]}"
+            assert G.shape[1] == nu, (
+                f"G.shape[1] must equal nu ({nu}), got {G.shape[1]}"
+            )
 
         # Number of states: nk states per input
         n = nk * nu
