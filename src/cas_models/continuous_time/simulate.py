@@ -13,7 +13,41 @@ def make_step_function(mag=1.0, t_step=0.0):
     return cas.Function("step", [t], [y], ["t"], ["y"])
 
 
+def _rk4_step_symbolic(f, t, x, u, dt, params):
+    """Compute RK4 integration step symbolically.
+
+    Args:
+        f: CasADi Function for ODE right-hand side
+        t: Symbolic time variable
+        x: Symbolic state variable
+        u: Symbolic input variable
+        dt: Symbolic or numeric time step
+        params: Dictionary of symbolic parameters
+
+    Returns:
+        Symbolic expression for next state xf
+    """
+    k1 = f(t, x, u, *params.values())
+    k2 = f(t, x + dt / 2 * k1, u, *params.values())
+    k3 = f(t, x + dt / 2 * k2, u, *params.values())
+    k4 = f(t, x + dt * k3, u, *params.values())
+    xf = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+    return xf
+
+
 def make_sim_step_function_RK4(f, n, nu, params=None, name="F"):
+    """Create a simulation step function using RK4 with variable dt.
+
+    Args:
+        f (cas.Function): CasADi Function for ODE right-hand side
+        n (int): Number of states
+        nu (int): Number of inputs
+        params (dict, optional): Dictionary of symbolic parameters
+        name (str, optional): Name for the returned function
+
+    Returns:
+        cas.Function: Function with signature (t, x, u, dt, *params) -> xf
+    """
     if params is None:
         params = {}
 
@@ -23,12 +57,8 @@ def make_sim_step_function_RK4(f, n, nu, params=None, name="F"):
     x = cas.SX.sym("x", n)
     u = cas.SX.sym("u", nu)
 
-    # RK4 approximation
-    k1 = f(t, x, u, *params.values())
-    k2 = f(t, x + dt / 2 * k1, u, *params.values())
-    k3 = f(t, x + dt / 2 * k2, u, *params.values())
-    k4 = f(t, x + dt * k3, u, *params.values())
-    xf = x + dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+    # Compute RK4 step
+    xf = _rk4_step_symbolic(f, t, x, u, dt, params)
 
     return cas.Function(
         name,
@@ -39,82 +69,67 @@ def make_sim_step_function_RK4(f, n, nu, params=None, name="F"):
     )
 
 
-def make_sim_step_function_integrator(
-    f, n, nu, params=None, name="F", solver='cvodes', integrator_opts=None
-):
-    """Create a simulation step function using CasADi's integrator
-    framework.
+def make_sim_step_function_RK4_fixed_dt(f, n, nu, dt, params=None, name="F"):
+    """Create a simulation step function using RK4 with fixed dt.
 
-    This function has the same signature as make_sim_step_function_RK4 but
-    uses CasADi's built-in integration methods (e.g., cvodes, rk, idas)
-    instead of manual RK4 implementation.
-
-    The integrator is created with time scaling to allow dt to be a
-    symbolic variable. Specifically, to integrate dx/dt = f(t, x, u) from
-    t to t+dt, we use a change of variables s = (τ - t)/dt, giving
-    dx/ds = dt * f(t + s*dt, x, u) integrated from s=0 to s=1.
+    This version uses discrete-time naming conventions (xk, uk, xkp1)
+    for compatibility with discrete-time models.
 
     Args:
-        f (cas.Function): CasADi Function for ODE right-hand side with
-            signature (t, x, u, *params) -> rhs where rhs has shape (n, 1).
-        n (int): Number of states (dimension of x).
-        nu (int): Number of inputs (dimension of u).
-        params (dict, optional): Dictionary of symbolic parameters used
-            by f. If None, defaults to empty dict.
-        name (str, optional): Name for the returned function.
-            Default: "F".
-        solver (str, optional): Integration method to use. Options:
-            - 'cvodes': Variable-step implicit (good for stiff systems)
-            - 'rk': Fixed-step Runge-Kutta method
-            - 'idas': For DAE systems
-            Default: 'cvodes'.
-        integrator_opts (dict, optional): Options dict for the integrator.
-            Common options for cvodes/idas:
-            - 'abstol': Absolute tolerance (default: 1e-8)
-            - 'reltol': Relative tolerance (default: 1e-6)
-            - 'max_num_steps': Maximum number of steps (default: 10000)
-            Common options for rk:
-            - 'number_of_finite_elements': Number of integration steps
-              (default: 20)
+        f (cas.Function): CasADi Function for ODE right-hand side
+        n (int): Number of states
+        nu (int): Number of inputs
+        dt (float): Fixed time step
+        params (dict, optional): Dictionary of symbolic parameters
+        name (str, optional): Name for the returned function
 
     Returns:
-        cas.Function: A CasADi Function with signature
-            (t, x, u, dt, *params) -> xf, identical to the signature
-            returned by make_sim_step_function_RK4.
-
-    Example:
-        >>> t = cas.SX.sym("t")
-        >>> x = cas.SX.sym("x", 2)
-        >>> u = cas.SX.sym("u")
-        >>> a = cas.SX.sym("a")
-        >>> rhs = cas.vertcat(-a * x[0], x[1])
-        >>> f = cas.Function("f", [t, x, u, a], [rhs],
-        ...     ["t", "x", "u", "a"], ["rhs"])
-        >>> # Using CVodes integrator
-        >>> F_cvodes = make_sim_step_function_integrator(
-        ...     f, n=2, nu=1, params={'a': a}, solver='cvodes')
-        >>> # Using built-in RK integrator
-        >>> F_rk = make_sim_step_function_integrator(
-        ...     f, n=2, nu=1, params={'a': a}, solver='rk',
-        ...     integrator_opts={'number_of_finite_elements': 4})
-
-    Note:
-        The returned function signature matches make_sim_step_function_RK4
-        exactly, making it a drop-in replacement. The choice of solver
-        affects accuracy, computational cost, and suitability for stiff
-        systems.
+        cas.Function: Function with signature (t, xk, uk, *params) -> xkp1
     """
     if params is None:
         params = {}
-    if integrator_opts is None:
-        integrator_opts = {}
 
-    # Symbolic variables for the wrapper function signature (matches RK4)
+    # Symbolic variables (no dt - it's fixed)
+    # Use discrete-time naming: xk, uk, xkp1
     t = cas.SX.sym("t")
-    dt = cas.SX.sym("dt")
-    x = cas.SX.sym("x", n)
-    u = cas.SX.sym("u", nu)
+    xk = cas.SX.sym("xk", n)
+    uk = cas.SX.sym("uk", nu)
 
+    # Compute RK4 step with fixed dt
+    xkp1 = _rk4_step_symbolic(f, t, xk, uk, dt, params)
+
+    return cas.Function(
+        name,
+        [t, xk, uk, *params.values()],
+        [xkp1],
+        ["t", "xk", "uk", *params.keys()],
+        ["xkp1"],
+    )
+
+
+def _integrator_step_symbolic(
+    f, n, nu, t, x, u, dt, params, solver, integrator_opts, integrator_name
+):
+    """Compute integration step using CasADi's integrator framework.
+
+    Uses time scaling to handle symbolic or numeric dt.
+
+    Args:
+        f: CasADi Function for ODE right-hand side
+        n: Number of states
+        nu: Number of inputs
+        t: Symbolic or numeric time variable
+        x: Symbolic state variable
+        u: Symbolic input variable
+        dt: Symbolic or numeric time step
+        params: Dictionary of symbolic parameters
+        solver: Integration method ('cvodes', 'rk', 'idas')
+        integrator_opts: Options dict for the integrator
+        integrator_name: Name for the integrator
+
+    Returns:
+        Symbolic expression for next state xf
+    """
     # Create time-scaled DAE for the integrator
     # To integrate from t to t+dt with dx/dt = f(t, x, u, params),
     # we use scaled time s ∈ [0, 1] where
@@ -136,29 +151,61 @@ def make_sim_step_function_integrator(
     p_combined = cas.vertcat(dt_param, t_param, u_param, *params_dae)
 
     # Create DAE dictionary for the integrator
-    dae = {
-        't': s,
-        'x': x_dae,
-        'p': p_combined,
-        'ode': rhs_scaled
-    }
+    dae = {"t": s, "x": x_dae, "p": p_combined, "ode": rhs_scaled}
 
     # Create integrator from s=0 to s=1
     integrator = cas.integrator(
-        name,
+        integrator_name,
         solver,
         dae,
         0,  # t0 = 0
         1,  # tf = 1
-        integrator_opts
+        integrator_opts,
     )
 
     # Call the integrator with the appropriate parameter values
     p_values = cas.vertcat(dt, t, u, *params.values())
     result = integrator(x0=x, p=p_values)
-    xf = result['xf']
+    xf = result["xf"]
 
-    # Return a CasADi Function with the same signature as RK4 version
+    return xf
+
+
+def make_sim_step_function_integrator(
+    f, n, nu, params=None, name="F", solver="cvodes", integrator_opts=None
+):
+    """Create a simulation step function using CasADi's integrator
+    framework with variable dt.
+
+    Args:
+        f (cas.Function): CasADi Function for ODE right-hand side
+        n (int): Number of states
+        nu (int): Number of inputs
+        params (dict, optional): Dictionary of symbolic parameters
+        name (str, optional): Name for the returned function
+        solver (str, optional): Integration method ('cvodes', 'rk', 'idas')
+        integrator_opts (dict, optional): Options dict for the integrator
+
+    Returns:
+        cas.Function: Function with signature (t, x, u, dt, *params) -> xf
+    """
+    if params is None:
+        params = {}
+    if integrator_opts is None:
+        integrator_opts = {}
+
+    # Symbolic variables for the wrapper function signature
+    t = cas.SX.sym("t")
+    dt = cas.SX.sym("dt")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+
+    # Compute integration step
+    xf = _integrator_step_symbolic(
+        f, n, nu, t, x, u, dt, params, solver, integrator_opts, name
+    )
+
+    # Return a CasADi Function with variable dt
     return cas.Function(
         name,
         [t, x, u, dt, *params.values()],
@@ -168,39 +215,49 @@ def make_sim_step_function_integrator(
     )
 
 
-def make_n_step_simulation_function(
-    F, H, n, nu, ny, nT, params=None, name=None
+def make_sim_step_function_integrator_fixed_dt(
+    f, n, nu, dt, params=None, name="F", solver="cvodes", integrator_opts=None
 ):
+    """Create a simulation step function using CasADi's integrator
+    framework with fixed dt.
+
+    This version uses discrete-time naming conventions (xk, uk, xkp1)
+    for compatibility with discrete-time models.
+
+    Args:
+        f (cas.Function): CasADi Function for ODE right-hand side
+        n (int): Number of states
+        nu (int): Number of inputs
+        dt (float): Fixed time step
+        params (dict, optional): Dictionary of symbolic parameters
+        name (str, optional): Name for the returned function
+        solver (str, optional): Integration method ('cvodes', 'rk', 'idas')
+        integrator_opts (dict, optional): Options dict for the integrator
+
+    Returns:
+        cas.Function: Function with signature (t, xk, uk, *params) -> xkp1
+    """
     if params is None:
         params = {}
-    if name is None:
-        name = f"{F.name()}_sim_{nT}_steps"
-    t_eval = cas.SX.sym("t_eval", nT + 1)
-    U = cas.SX.sym("U", nT, nu)
-    x0 = cas.SX.sym("x0", n)
-    X = [x0.T]
-    Y = []
-    xk = x0
-    tk = t_eval[0]
-    for k in range(nT):
-        tkp1 = t_eval[k + 1]
-        uk = U[k, :].T
-        xkp1 = F(tk, xk, uk, *params.values())
-        yk = H(tk, xk, uk, *params.values())
-        X.append(xkp1.T)
-        Y.append(yk.T)
-        tk = tkp1
-        xk = xkp1
+    if integrator_opts is None:
+        integrator_opts = {}
 
-    yk = H(tk, xk, uk, *params.values())
-    Y.append(yk.T)
-    X = cas.vcat(X)
-    Y = cas.vcat(Y)
+    # Symbolic variables (no dt - it's fixed)
+    # Use discrete-time naming: xk, uk, xkp1
+    t = cas.SX.sym("t")
+    xk = cas.SX.sym("xk", n)
+    uk = cas.SX.sym("uk", nu)
 
+    # Compute integration step with fixed dt
+    xkp1 = _integrator_step_symbolic(
+        f, n, nu, t, xk, uk, dt, params, solver, integrator_opts, name + "_integrator"
+    )
+
+    # Return a CasADi Function without dt argument
     return cas.Function(
         name,
-        [t_eval, U, x0, *params.values()],
-        [X, Y],
-        ["t_eval", "U", "x0", *params.keys()],
-        ["X", "Y"],
+        [t, xk, uk, *params.values()],
+        [xkp1],
+        ["t", "xk", "uk", *params.keys()],
+        ["xkp1"],
     )

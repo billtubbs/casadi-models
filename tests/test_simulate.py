@@ -5,10 +5,15 @@ import numpy as np
 import casadi as cas
 from cas_models.continuous_time.simulate import (
     make_sim_step_function_RK4,
+    make_sim_step_function_RK4_fixed_dt,
     make_sim_step_function_integrator,
-    make_n_step_simulation_function,
+    make_sim_step_function_integrator_fixed_dt,
     make_step_function,
 )
+from cas_models.discrete_time.simulate import (
+    make_n_step_simulation_function,
+)
+from cas_models.discrete_time.models import validate_F_function
 
 
 @pytest.fixture
@@ -578,3 +583,153 @@ def test_make_sim_step_function_RK4_with_dt_parameter(cart_pole_system):
     delta_large = np.linalg.norm(np.array(x1_large) - x0.reshape(-1, 1))
 
     assert delta_large > delta_small
+
+
+def test_make_sim_step_function_RK4_fixed_dt(cart_pole_system):
+    """Test RK4 integration with fixed dt."""
+    n, nu, ny, f, h, params, param_values = cart_pole_system
+
+    # Create fixed-dt RK4 integrator
+    dt = 0.01
+    F_fixed = make_sim_step_function_RK4_fixed_dt(
+        f, n, nu, dt, params=params, name="F_fixed"
+    )
+
+    # Verify function signature using validate_F_function
+    validate_F_function(F_fixed, n, nu, params=params)
+
+    # Check function has correct signature (no dt argument)
+    assert F_fixed.n_in() == 3 + len(params)  # t, x, u, + params
+    assert F_fixed.n_out() == 1  # xf
+
+    # Initial state
+    x0 = np.array([0.0, 0.0, 0.1, 0.0])
+    u = 0.0
+    t = 0.0
+
+    # Take one step with fixed-dt version
+    x1_fixed = F_fixed(t, x0, u, *param_values.values())
+
+    # Compare with variable-dt version using same dt
+    F_variable = make_sim_step_function_RK4(f, n, nu, params=params)
+    x1_variable = F_variable(t, x0, u, dt, *param_values.values())
+
+    # Results should be identical
+    assert np.allclose(x1_fixed, x1_variable, rtol=1e-10, atol=1e-12)
+
+
+def test_make_sim_step_function_integrator_fixed_dt_rk(cart_pole_system):
+    """Test CasADi RK integrator with fixed dt."""
+    n, nu, ny, f, h, params, param_values = cart_pole_system
+
+    # Create fixed-dt RK integrator
+    dt = 0.01
+    F_fixed = make_sim_step_function_integrator_fixed_dt(
+        f, n, nu, dt, params=params, name="F_fixed_rk", solver='rk',
+        integrator_opts={'number_of_finite_elements': 4}
+    )
+
+    # Verify function signature using validate_F_function
+    validate_F_function(F_fixed, n, nu, params=params)
+
+    # Check function has correct signature (no dt argument)
+    assert F_fixed.n_in() == 3 + len(params)  # t, x, u, + params
+    assert F_fixed.n_out() == 1  # xf
+
+    # Initial state
+    x0 = np.array([0.0, 0.0, 0.1, 0.0])
+    u = 0.0
+    t = 0.0
+
+    # Take one step with fixed-dt version
+    x1_fixed = F_fixed(t, x0, u, *param_values.values())
+
+    # Compare with variable-dt version using same dt
+    F_variable = make_sim_step_function_integrator(
+        f, n, nu, params=params, solver='rk',
+        integrator_opts={'number_of_finite_elements': 4}
+    )
+    x1_variable = F_variable(t, x0, u, dt, *param_values.values())
+
+    # Results should be very close
+    assert np.allclose(x1_fixed, x1_variable, rtol=1e-6, atol=1e-8)
+
+
+def test_make_sim_step_function_integrator_fixed_dt_cvodes(cart_pole_system):
+    """Test CasADi CVodes integrator with fixed dt."""
+    n, nu, ny, f, h, params, param_values = cart_pole_system
+
+    # Create fixed-dt CVodes integrator
+    dt = 0.01
+    F_fixed = make_sim_step_function_integrator_fixed_dt(
+        f, n, nu, dt, params=params, name="F_fixed_cvodes",
+        solver='cvodes',
+        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+    )
+
+    # Verify function signature using validate_F_function
+    validate_F_function(F_fixed, n, nu, params=params)
+
+    # Check function has correct signature (no dt argument)
+    assert F_fixed.n_in() == 3 + len(params)  # t, x, u, + params
+    assert F_fixed.n_out() == 1  # xf
+
+    # Initial state
+    x0 = np.array([0.0, 0.0, 0.1, 0.0])
+    u = 0.0
+    t = 0.0
+
+    # Take one step with fixed-dt version
+    x1_fixed = F_fixed(t, x0, u, *param_values.values())
+
+    # Compare with variable-dt version using same dt
+    F_variable = make_sim_step_function_integrator(
+        f, n, nu, params=params, solver='cvodes',
+        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+    )
+    x1_variable = F_variable(t, x0, u, dt, *param_values.values())
+
+    # Results should be very close
+    assert np.allclose(x1_fixed, x1_variable, rtol=1e-6, atol=1e-8)
+
+
+def test_fixed_dt_functions_with_n_step_simulation(cart_pole_system):
+    """Test that fixed-dt functions work directly with
+    make_n_step_simulation_function.
+    """
+    n, nu, ny, f, h, params, param_values = cart_pole_system
+
+    # Create fixed-dt integrator
+    dt = 0.05
+    F_fixed = make_sim_step_function_RK4_fixed_dt(
+        f, n, nu, dt, params=params, name="F"
+    )
+
+    # Use directly with n-step simulation (no wrapping needed)
+    nT = 10
+    sim_func = make_n_step_simulation_function(
+        F_fixed, h, n, nu, ny, nT, params=params, name="sim"
+    )
+
+    # Time vector
+    t_eval = np.linspace(0, nT * dt, nT + 1)
+
+    # Control inputs
+    U = np.zeros((nT, nu))
+    U[nT//2:, 0] = 5.0  # Apply force in second half
+
+    # Initial state
+    x0 = np.array([0.0, 0.0, np.pi/4, 0.0])
+
+    # Run simulation
+    X, Y = sim_func(t_eval, U, x0, *param_values.values())
+
+    # Verify results
+    assert X.shape == (nT + 1, n)
+    assert Y.shape == (nT + 1, ny)
+
+    # System should evolve
+    assert not np.allclose(X[-1, :], x0)
+
+    # Position should change due to force
+    assert abs(float(Y[-1, 0])) > 0.01

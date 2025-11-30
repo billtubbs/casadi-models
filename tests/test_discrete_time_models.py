@@ -8,7 +8,10 @@ from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
     StateSpaceModelDTTFSISO,
+    StateSpaceModelDTFromCTRK4,
+    StateSpaceModelDTFromCT,
 )
+from cas_models.continuous_time.models import StateSpaceModelCT
 from pathlib import Path
 
 
@@ -496,3 +499,179 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
 #     assert np.allclose(
 #         model.H(t, x, u, K, T1, T2), cas.DM(0.26666666666666666)
 #     )
+
+
+def test_StateSpaceModelDTFromCTRK4():
+    """Test conversion from continuous-time to discrete-time using RK4."""
+    # Create a simple continuous-time first-order system
+    # dx/dt = -a*x + b*u
+    # y = x
+    n = 1
+    nu = 1
+    ny = 1
+    a = cas.SX.sym("a")
+    b = cas.SX.sym("b")
+    params = {"a": a, "b": b}
+
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+
+    rhs = -a * x + b * u
+    y = x
+
+    f = cas.Function("f", [t, x, u, a, b], [rhs],
+                     ["t", "x", "u", "a", "b"], ["rhs"])
+    h = cas.Function("h", [t, x, u, a, b], [y],
+                     ["t", "x", "u", "a", "b"], ["y"])
+
+    model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
+
+    # Convert to discrete-time with dt=0.1
+    dt = 0.1
+    model_dt = StateSpaceModelDTFromCTRK4(model_ct, dt)
+
+    # Verify the discrete-time model
+    assert model_dt.n == n
+    assert model_dt.nu == nu
+    assert model_dt.ny == ny
+    assert model_dt.dt == dt
+    assert len(model_dt.params) == len(params)
+
+    # Test with numeric parameter values
+    a_val = 2.0
+    b_val = 1.5
+    x0 = np.array([1.0])
+    u_val = 0.5
+    t_val = 0.0
+
+    # Compute next state
+    x1 = model_dt.F(t_val, x0, u_val, a_val, b_val)
+    y0 = model_dt.H(t_val, x0, u_val, a_val, b_val)
+
+    # Output should equal state
+    assert np.allclose(y0, x0)
+
+    # State should have evolved (not equal to x0 due to dynamics)
+    assert not np.allclose(x1, x0)
+
+    # For a = 2.0, b = 1.5, u = 0.5, x = 1.0
+    # dx/dt = -2*1 + 1.5*0.5 = -2 + 0.75 = -1.25
+    # After dt=0.1 with RK4, x should decrease (roughly by 1.25*0.1 = 0.125)
+    # but RK4 is more accurate than Euler
+    assert x1 < x0  # State should decrease
+
+
+def test_StateSpaceModelDTFromCT():
+    """Test conversion from continuous-time to discrete-time using CasADi
+    integrator.
+    """
+    # Create a simple continuous-time first-order system
+    # dx/dt = -a*x + b*u
+    # y = x
+    n = 1
+    nu = 1
+    ny = 1
+    a = cas.SX.sym("a")
+    b = cas.SX.sym("b")
+    params = {"a": a, "b": b}
+
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+
+    rhs = -a * x + b * u
+    y = x
+
+    f = cas.Function("f", [t, x, u, a, b], [rhs],
+                     ["t", "x", "u", "a", "b"], ["rhs"])
+    h = cas.Function("h", [t, x, u, a, b], [y],
+                     ["t", "x", "u", "a", "b"], ["y"])
+
+    model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
+
+    # Convert to discrete-time with dt=0.1 using default cvodes solver
+    dt = 0.1
+    model_dt = StateSpaceModelDTFromCT(model_ct, dt)
+
+    # Verify the discrete-time model
+    assert model_dt.n == n
+    assert model_dt.nu == nu
+    assert model_dt.ny == ny
+    assert model_dt.dt == dt
+    assert len(model_dt.params) == len(params)
+
+    # Test with numeric parameter values
+    a_val = 2.0
+    b_val = 1.5
+    x0 = np.array([1.0])
+    u_val = 0.5
+    t_val = 0.0
+
+    # Compute next state
+    x1 = model_dt.F(t_val, x0, u_val, a_val, b_val)
+    y0 = model_dt.H(t_val, x0, u_val, a_val, b_val)
+
+    # Output should equal state
+    assert np.allclose(y0, x0)
+
+    # State should have evolved
+    assert not np.allclose(x1, x0)
+    assert x1 < x0  # State should decrease
+
+
+def test_StateSpaceModelDTFromCT_compare_solvers():
+    """Compare RK4 and cvodes integrators for CT to DT conversion."""
+    # Create a simple continuous-time first-order system
+    n = 1
+    nu = 1
+    ny = 1
+    a = cas.SX.sym("a")
+    b = cas.SX.sym("b")
+    params = {"a": a, "b": b}
+
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+
+    rhs = -a * x + b * u
+    y = x
+
+    f = cas.Function("f", [t, x, u, a, b], [rhs],
+                     ["t", "x", "u", "a", "b"], ["rhs"])
+    h = cas.Function("h", [t, x, u, a, b], [y],
+                     ["t", "x", "u", "a", "b"], ["y"])
+
+    model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
+
+    # Convert using both methods
+    dt = 0.1
+    model_rk4 = StateSpaceModelDTFromCTRK4(model_ct, dt)
+    model_cvodes = StateSpaceModelDTFromCT(
+        model_ct, dt, solver='cvodes',
+        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+    )
+
+    # Test with numeric values
+    a_val = 2.0
+    b_val = 1.5
+    x0 = np.array([1.0])
+    u_val = 0.5
+    t_val = 0.0
+
+    # Compute next state with both methods
+    x1_rk4 = model_rk4.F(t_val, x0, u_val, a_val, b_val)
+    x1_cvodes = model_cvodes.F(t_val, x0, u_val, a_val, b_val)
+
+    # Results should be very close (both are high-accuracy integrators)
+    assert np.allclose(x1_rk4, x1_cvodes, rtol=1e-5, atol=1e-7)
+
+    # Test with RK integrator as well
+    model_rk = StateSpaceModelDTFromCT(
+        model_ct, dt, solver='rk',
+        integrator_opts={'number_of_finite_elements': 4}
+    )
+    x1_rk = model_rk.F(t_val, x0, u_val, a_val, b_val)
+
+    # RK and RK4 should also be close
+    assert np.allclose(x1_rk4, x1_rk, rtol=1e-4, atol=1e-6)

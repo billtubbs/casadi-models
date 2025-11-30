@@ -1,26 +1,23 @@
-from functools import reduce
 from collections import OrderedDict
+from dataclasses import dataclass
 
 import casadi as cas
 import sympy
-from dataclasses import dataclass
+
 from cas_models.param_utils import (
     make_list_of_enumerated_names,
-    concatenate_lists_of_names,
-    merge_param_dicts,
     make_symbolic_vars_from_kwargs,
 )
 from cas_models.validation import validate_casadi_function_dims
 
-
 # Attribute names for continuous-time state-space models
 ATTR_NAMES = {
-    'state_func': 'f',
-    'output_func': 'h',
-    'state_var': 'x',
-    'input_var': 'u',
-    'state_output': 'rhs',
-    'output_var': 'y',
+    "state_func": "f",
+    "output_func": "h",
+    "state_var": "x",
+    "input_var": "u",
+    "state_output": "rhs",
+    "output_var": "y",
 }
 
 
@@ -40,9 +37,7 @@ def validate_f_function(f: cas.Function, n: int, nu: int, params=None):
     )
 
 
-def validate_h_function(
-    h: cas.Function, n: int, nu: int, ny: int, params=None
-):
+def validate_h_function(h: cas.Function, n: int, nu: int, ny: int, params=None):
     """Use this to check an output function has the corret arguments
     (excluding any parameters) and return dimensions.
     """
@@ -70,7 +65,7 @@ def is_ss_ct(sys):
         bool: True if the system has continuous-time attributes (f, h),
               False otherwise
     """
-    return hasattr(sys, 'f') and hasattr(sys, 'h')
+    return hasattr(sys, "f") and hasattr(sys, "h")
 
 
 @dataclass
@@ -151,12 +146,11 @@ class StateSpaceModelCT:
             >>> u = cas.SX.sym("u")
             >>> a = cas.SX.sym("a")
             >>> rhs = cas.vertcat(-a * x[0], x[1])
-            >>> f = cas.Function("f", [t, x, u, a], [rhs],
-            ...     ["t", "x", "u", "a"], ["rhs"])
-            >>> h = cas.Function("h", [t, x, u, a], [x[0]],
-            ...     ["t", "x", "u", "a"], ["y"])
-            >>> model = StateSpaceModelCT(f, h, n=2, nu=1, ny=1,
-            ...     params={'a': a})
+            >>> f = cas.Function(
+            ...     "f", [t, x, u, a], [rhs], ["t", "x", "u", "a"], ["rhs"]
+            ... )
+            >>> h = cas.Function("h", [t, x, u, a], [x[0]], ["t", "x", "u", "a"], ["y"])
+            >>> model = StateSpaceModelCT(f, h, n=2, nu=1, ny=1, params={"a": a})
         """
         self.f = f
         self.h = h
@@ -225,6 +219,7 @@ class StateSpaceModelCTSISO(StateSpaceModelCT):
         h,
         n,
         params=None,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -238,6 +233,7 @@ class StateSpaceModelCTSISO(StateSpaceModelCT):
             nu=1,
             ny=1,
             params=params,
+            name=name,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -260,6 +256,7 @@ class StateSpaceModelCTStaticNonlinearity(StateSpaceModelCT):
         nu=1,
         ny=1,
         params=None,
+        name=None,
         input_names=None,
         state_names=None,
         output_names=None,
@@ -290,6 +287,7 @@ class StateSpaceModelCTStaticNonlinearity(StateSpaceModelCT):
             nu=nu,
             ny=ny,
             params=symbolic_params,
+            name=name,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -303,6 +301,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         B,
         C,
         D,
+        name=None,
         input_names=None,
         state_names=None,
         output_names=None,
@@ -334,7 +333,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
             for p in params:
                 symbolic_params.update({p.name(): p})
         symbolic_params = {
-            name: symbolic_params[name] for name in sorted(symbolic_params)
+            name_key: symbolic_params[name_key] for name_key in sorted(symbolic_params)
         }
 
         # Construct ODE right-hand side
@@ -367,6 +366,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
             params=symbolic_params,
             nu=nu,
             ny=ny,
+            name=name,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -378,6 +378,7 @@ class SSModelCTDirectTransmission(StateSpaceModelCTFromABCD):
         self,
         nu=None,
         D=None,
+        name=None,
         input_names=None,
         output_names=None,
     ):
@@ -401,6 +402,7 @@ class SSModelCTDirectTransmission(StateSpaceModelCTFromABCD):
             B,
             C,
             D,
+            name=name,
             input_names=input_names,
             state_names=None,
             output_names=output_names,
@@ -414,6 +416,7 @@ class SSModelCTFromABCDSISO(StateSpaceModelCTFromABCD):
         B,
         C,
         D,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -432,6 +435,7 @@ class SSModelCTFromABCDSISO(StateSpaceModelCTFromABCD):
             B,
             C,
             D,
+            name=name,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -442,6 +446,7 @@ class SSModelCTLinearFONoGainSISO(SSModelCTFromABCDSISO):
     def __init__(
         self,
         T1=None,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -465,6 +470,41 @@ class SSModelCTLinearFONoGainSISO(SSModelCTFromABCDSISO):
             B,
             C,
             D,
+            name=name,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )
+
+
+class SSModelCTLinearIntegratorSISO(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        K=None,
+        T1=None,
+        name=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+    ):
+        """Parameters for a continuous time state-space model
+        of an integrator system with gain K.
+
+            G(s) = K / s
+
+        """
+        params = make_symbolic_vars_from_kwargs(K=K, T1=T1)
+        K = params["K"]
+        A = cas.sparsify(cas.SX(0))
+        B = cas.SX(1)
+        C = cas.SX(K)
+        D = cas.sparsify(cas.SX(0))
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            name=name,
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
@@ -476,6 +516,7 @@ class SSModelCTLinearFOSISO(SSModelCTFromABCDSISO):
         self,
         K=None,
         T1=None,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -498,6 +539,7 @@ class SSModelCTLinearFOSISO(SSModelCTFromABCDSISO):
             B,
             C,
             D,
+            name=name,
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
@@ -510,6 +552,7 @@ class SSModelCTLinearO2SISO(SSModelCTFromABCDSISO):
         K=None,
         T1=None,
         T2=None,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -536,6 +579,7 @@ class SSModelCTLinearO2SISO(SSModelCTFromABCDSISO):
             B,
             C,
             D,
+            name=name,
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
@@ -547,6 +591,7 @@ class SSModelCTLinearO2NoGainSISO(SSModelCTFromABCDSISO):
         self,
         T1=None,
         T2=None,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -572,6 +617,7 @@ class SSModelCTLinearO2NoGainSISO(SSModelCTFromABCDSISO):
             B,
             C,
             D,
+            name=name,
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
@@ -584,6 +630,7 @@ class SSModelCTLinearO2UnderdampedSISO(SSModelCTFromABCDSISO):
         K=None,
         zeta=None,
         omega_n=None,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -599,15 +646,11 @@ class SSModelCTLinearO2UnderdampedSISO(SSModelCTFromABCDSISO):
             omega_n : natural frequency
 
         """
-        params = make_symbolic_vars_from_kwargs(
-            K=K, zeta=zeta, omega_n=omega_n
-        )
+        params = make_symbolic_vars_from_kwargs(K=K, zeta=zeta, omega_n=omega_n)
         K = params["K"]
         zeta = params["zeta"]
         omega_n = params["omega_n"]
-        A = cas.sparsify(
-            cas.blockcat([[0, 1], [-(omega_n**2), -2 * omega_n * zeta]])
-        )
+        A = cas.sparsify(cas.blockcat([[0, 1], [-(omega_n**2), -2 * omega_n * zeta]]))
         B = cas.sparsify(cas.blockcat([[0], [1]]))
         C = cas.sparsify(cas.blockcat([[K, 0]]))
         D = cas.sparsify(cas.DM(0))
@@ -616,131 +659,11 @@ class SSModelCTLinearO2UnderdampedSISO(SSModelCTFromABCDSISO):
             B,
             C,
             D,
+            name=name,
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
         )
-
-
-def block_diag(matrices, square=False):
-    col_sizes = [m.shape[1] for m in matrices]
-    rows = []
-    for i, matrix in enumerate(matrices):
-        row = []
-        n_rows = matrix.shape[0]
-        if square:
-            assert n_rows == col_sizes[i], "matrices not square"
-        for j in range(i):
-            row.append(cas.SX.zeros(n_rows, col_sizes[j]))
-        row.append(matrix)
-        for j in range(i + 1, len(col_sizes)):
-            row.append(cas.SX.zeros(n_rows, col_sizes[j]))
-        rows.append(row)
-    return cas.blockcat(rows)
-
-
-def linear_systems_in_parallel(
-    systems, keys=None, verbose_names=False, prefix="sys"
-):
-    """Combine a collection of linear systems into one large parallel
-    system.
-    """
-    A = cas.sparsify(
-        block_diag(list(sys["A"] for sys in systems), square=True)
-    )
-    B = cas.sparsify(block_diag(list(sys["B"] for sys in systems)))
-    C = cas.sparsify(block_diag(list(sys["C"] for sys in systems)))
-    D = cas.sparsify(block_diag(list(sys["D"] for sys in systems)))
-    params = merge_param_dicts(
-        [sys.params for sys in systems],
-        keys=keys,
-        verbose_names=verbose_names,
-        prefix=prefix,
-    )
-    input_names = concatenate_lists_of_names(
-        [sys.input_names for sys in systems], keys=keys, prefix=prefix
-    )
-    state_names = concatenate_lists_of_names(
-        [sys.state_names for sys in systems], keys=keys, prefix=prefix
-    )
-    output_names = concatenate_lists_of_names(
-        [sys.output_names for sys in systems], keys=keys, prefix=prefix
-    )
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "input_names": input_names,
-        "state_names": state_names,
-        "output_names": output_names,
-    }
-
-
-def linear_systems_in_series(
-    systems, keys=None, verbose_names=False, prefix="sys"
-):
-    """Combine a sequence of linear systems into one system by
-    connecting their outputs and inputs in series.
-    """
-    n_sys = len(systems)
-    col_sizes = [sys["A"].shape[1] for sys in systems]
-    A_rows = []
-    B_rows = []
-    C_row = []
-    for i, sys in enumerate(systems):
-        A = sys["A"]
-        B = sys["B"]
-        C = sys["C"]
-        D = sys["D"]
-
-        # Add rows to A matrix
-        n_rows = A.shape[0]
-        assert n_rows == col_sizes[i], "A matrix not square"
-        A_row = []
-        if i > 0:
-            for j in range(i - 1):
-                A_row.append(cas.SX.zeros(n_rows, col_sizes[j]))
-            A_row.append(B @ systems[i - 1]["C"])
-        A_row.append(A)
-        for j in range(i + 1, n_sys):
-            A_row.append(cas.SX.zeros(n_rows, col_sizes[j]))
-        A_rows.append(A_row)
-
-        # Add rows to B matrix
-        if i > 0:
-            B_rows.append(B @ systems[i - 1]["D"])
-        else:
-            B_rows.append(B)
-
-        # Add columns to C matrix
-        if i < n_sys - 1:
-            C_row.append(systems[i + 1]["D"] @ C)
-        else:
-            C_row.append(C)
-
-    A = cas.sparsify(cas.blockcat(A_rows))
-    B = cas.sparsify(cas.vcat(B_rows))
-    C = cas.sparsify(cas.hcat(C_row))
-    D = reduce(cas.SX.__matmul__, (sys["D"] for sys in systems))
-    params = merge_param_dicts(
-        [sys.params for sys in systems],
-        keys=keys,
-        verbose_names=verbose_names,
-        prefix=prefix,
-    )
-    state_names = concatenate_lists_of_names(
-        [sys.state_names for sys in systems], keys=keys, prefix=prefix
-    )
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "state_names": state_names,
-    }
 
 
 def sympy2casadi(sympy_expr, sympy_vars, casadi_vars, sparsify=True):
@@ -787,9 +710,7 @@ def make_casadi_and_sympy_vars(var_names):
     return sympy_vars, casadi_vars
 
 
-def convert_sympy_state_space_to_casadi_SX(
-    sys, sympy_vars, casadi_vars, sparsify=True
-):
+def convert_sympy_state_space_to_casadi_SX(sys, sympy_vars, casadi_vars, sparsify=True):
     """Warning: The sympy2casadi function uses Python's exec function,
     and is thus a potential security threat.
     """

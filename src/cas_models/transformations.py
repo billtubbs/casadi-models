@@ -12,17 +12,30 @@ from cas_models.param_utils import (
 )
 
 
-# TODO: These linear functions are redundant since no linear models 
+def block_diag(matrices, square=False):
+    col_sizes = [m.shape[1] for m in matrices]
+    rows = []
+    for i, matrix in enumerate(matrices):
+        row = []
+        n_rows = matrix.shape[0]
+        if square:
+            assert n_rows == col_sizes[i], "matrices not square"
+        for j in range(i):
+            row.append(cas.SX.zeros(n_rows, col_sizes[j]))
+        row.append(matrix)
+        for j in range(i + 1, len(col_sizes)):
+            row.append(cas.SX.zeros(n_rows, col_sizes[j]))
+        rows.append(row)
+    return cas.blockcat(rows)
+
+
+# TODO: These linear functions are redundant since no linear models
 # currently defined
-def linear_systems_in_parallel(
-    systems, keys=None, verbose_names=False, prefix="sys"
-):
+def linear_systems_in_parallel(systems, keys=None, verbose_names=False, prefix="sys"):
     """Combine a collection of linear systems into one large parallel
     system.
     """
-    A = cas.sparsify(
-        block_diag(list(sys["A"] for sys in systems), square=True)
-    )
+    A = cas.sparsify(block_diag(list(sys["A"] for sys in systems), square=True))
     B = cas.sparsify(block_diag(list(sys["B"] for sys in systems)))
     C = cas.sparsify(block_diag(list(sys["C"] for sys in systems)))
     D = cas.sparsify(block_diag(list(sys["D"] for sys in systems)))
@@ -53,9 +66,7 @@ def linear_systems_in_parallel(
     }
 
 
-def linear_systems_in_series(
-    systems, keys=None, verbose_names=False, prefix="sys"
-):
+def linear_systems_in_series(systems, keys=None, verbose_names=False, prefix="sys"):
     """Combine a sequence of linear systems into one system by connecting their
     outputs and inputs in series.
     """
@@ -156,12 +167,12 @@ def connect_nonlinear_systems_in_parallel(
     Example:
         >>> # For continuous-time models:
         >>> attr_names_ct = {
-        ...     'state_func': 'f',
-        ...     'output_func': 'h',
-        ...     'state_var': 'x',
-        ...     'input_var': 'u',
-        ...     'state_output': 'rhs',
-        ...     'output_var': 'y',
+        ...     "state_func": "f",
+        ...     "output_func": "h",
+        ...     "state_var": "x",
+        ...     "input_var": "u",
+        ...     "state_output": "rhs",
+        ...     "output_var": "y",
         ... }
         >>> combined = connect_nonlinear_systems_in_parallel(
         ...     [sys1, sys2], attr_names_ct, StateSpaceModelCT
@@ -169,12 +180,12 @@ def connect_nonlinear_systems_in_parallel(
         >>>
         >>> # For discrete-time models:
         >>> attr_names_dt = {
-        ...     'state_func': 'F',
-        ...     'output_func': 'H',
-        ...     'state_var': 'xk',
-        ...     'input_var': 'uk',
-        ...     'state_output': 'xkp1',
-        ...     'output_var': 'yk',
+        ...     "state_func": "F",
+        ...     "output_func": "H",
+        ...     "state_var": "xk",
+        ...     "input_var": "uk",
+        ...     "state_output": "xkp1",
+        ...     "output_var": "yk",
         ... }
         >>> combined = connect_nonlinear_systems_in_parallel(
         ...     [sys1, sys2], attr_names_dt, StateSpaceModelDT
@@ -323,12 +334,12 @@ def connect_nonlinear_systems_in_series(
     Example:
         >>> # For continuous-time models:
         >>> attr_names_ct = {
-        ...     'state_func': 'f',
-        ...     'output_func': 'h',
-        ...     'state_var': 'x',
-        ...     'input_var': 'u',
-        ...     'state_output': 'rhs',
-        ...     'output_var': 'y',
+        ...     "state_func": "f",
+        ...     "output_func": "h",
+        ...     "state_var": "x",
+        ...     "input_var": "u",
+        ...     "state_output": "rhs",
+        ...     "output_var": "y",
         ... }
         >>> combined = connect_nonlinear_systems_in_series(
         ...     [sys1, sys2], attr_names_ct, StateSpaceModelCT

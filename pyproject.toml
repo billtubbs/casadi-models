@@ -42,3 +42,14 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+
+[tool.ruff]
+# Extend the default line length
+line-length = 88
+
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+
+# Use double quotes for docstrings
+docstring-code-format = true

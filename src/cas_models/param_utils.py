@@ -6,7 +6,7 @@ def make_list_of_enumerated_names(prefix, n, sep=""):
     """Convenience function to create default names of vector elements.
 
     Example:
-    >>> make_list_of_enumerated_names('x', 3)
+    >>> make_list_of_enumerated_names("x", 3)
     ['x1', 'x2', 'x3']
 
     """
@@ -39,18 +39,14 @@ def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
     elif len(lists_of_names) > len(set(keys)):
         raise ValueError("not enough unique keys")
     names = [
-        f"{key}_{name}"
-        for key, names in zip(keys, lists_of_names)
-        for name in names
+        f"{key}_{name}" for key, names in zip(keys, lists_of_names) for name in names
     ]
     if len(names) > len(set(names)):
         raise ValueError("non-unique names")
     return names
 
 
-def merge_param_dicts(
-    list_of_dicts, keys=None, verbose_names=False, prefix="sys"
-):
+def merge_param_dicts(list_of_dicts, keys=None, verbose_names=False, prefix="sys"):
     """Merges a list of parameter dictionaries into one dictionary of
     unique model variables. Note that the same symbolic variables
     (dictionary values) may be used multiple times for different
@@ -59,15 +55,15 @@ def merge_param_dicts(
     to make them unique.
 
     Example:
-    >>> K = cas.SX.sym('K')
-    >>> T1_1 = cas.SX.sym('T1_1')
-    >>> T1_2 = cas.SX.sym('T1_2')
-    >>> T2_2 = cas.SX.sym('T2_2')
-    >>> p1 = {'K': K, 'T1': T1_1}
-    >>> p2 = {'K': K, 'T1': T1_2, 'T2': T2_2}
-    >>> merge_param_dicts([p1, p2], keys=['sys1', 'sys2'])
+    >>> K = cas.SX.sym("K")
+    >>> T1_1 = cas.SX.sym("T1_1")
+    >>> T1_2 = cas.SX.sym("T1_2")
+    >>> T2_2 = cas.SX.sym("T2_2")
+    >>> p1 = {"K": K, "T1": T1_1}
+    >>> p2 = {"K": K, "T1": T1_2, "T2": T2_2}
+    >>> merge_param_dicts([p1, p2], keys=["sys1", "sys2"])
     {'K': SX(K), 'sys1_T1': SX(T1_1), 'sys2_T1': SX(T1_2), 'T2': SX(T2_2)}
-    >>> merge_param_dicts([p1, p2], keys=['sys1', 'sys2'], verbose_names=True)
+    >>> merge_param_dicts([p1, p2], keys=["sys1", "sys2"], verbose_names=True)
     {'sys1_sys2_K': SX(K),
     'sys1_T1': SX(T1_1),
     'sys2_T1': SX(T1_2),
@@ -94,9 +90,7 @@ def merge_param_dicts(
             param = unique_params.pop()
             if verbose_names:
                 # Include all systems that use this parameter
-                systems = "_".join(
-                    sorted(sys_key for sys_key, _ in sys_params)
-                )
+                systems = "_".join(sorted(sys_key for sys_key, _ in sys_params))
                 new_key = f"{systems}_{orig_key}"
             else:
                 new_key = orig_key
