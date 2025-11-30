@@ -44,6 +44,22 @@ def RLC_circuit_ABCD(RLC_variables):
     return sympy_vars, casadi_vars, A_sym, B_sym, C_sym, D_sym
 
 
+@pytest.fixture
+def MIMO_2x2_system():
+    """Simple MIMO 2x2 system for testing.
+
+    This is a 2-input, 2-output system with 3 states.
+    """
+    # State-space matrices for a 2x2 MIMO system
+    A_sym = Matrix([[-1, 0, 0], [0, -2, 0], [0, 0, -3]])
+    B_sym = Matrix([[1, 0], [0, 1], [1, 1]])
+    C_sym = Matrix([[1, 0, 0], [0, 1, 1]])
+    D_sym = Matrix([[0, 0], [0, 0]])
+
+    ss_sympy = StateSpace(A_sym, B_sym, C_sym, D_sym)
+    return ss_sympy
+
+
 def test_sympy2casadi(RLC_variables):
     sympy_vars, casadi_vars = RLC_variables
     R = sympy_vars["R"]
@@ -82,26 +98,63 @@ def test_convert_sympy_state_space_to_casadi_SX(RLC_circuit_ABCD):
     assert repr(D_cas) == "DM(00)"
 
 
-def test_SSModelCTFromSympySS(RLC_circuit_ABCD):
-    _, _, A_sym, B_sym, C_sym, D_sym = RLC_circuit_ABCD
-
-    ss_sympy = StateSpace(A_sym, B_sym, C_sym, D_sym)
+@pytest.mark.parametrize(
+    "fixture_name,name,input_names,output_names,expected_str",
+    [
+        (
+            "RLC_circuit_ABCD",
+            "RLC_circuit",
+            ["V_in"],
+            ["V_out"],
+            (
+                "SSModelCTFromSympySS("
+                "f=Function(f:(t,x[2],u,C,L,R)->(rhs[2]) SXFunction), "
+                "h=Function(h:(t,x[2],u,C,L,R)->(y) SXFunction), "
+                "n=2, nu=1, ny=1, "
+                "params={'C': SX(C), 'L': SX(L), 'R': SX(R)}, "
+                "name='RLC_circuit', input_names=['V_in'], "
+                "state_names=['x1', 'x2'], output_names=['V_out'])"
+            ),
+        ),
+        (
+            "MIMO_2x2_system",
+            "MIMO_2x2",
+            ["u1", "u2"],
+            ["y1", "y2"],
+            (
+                "SSModelCTFromSympySS("
+                "f=Function(f:(t,x[3],u[2])->(rhs[3]) SXFunction), "
+                "h=Function(h:(t,x[3],u[2])->(y[2]) SXFunction), "
+                "n=3, nu=2, ny=2, params={}, "
+                "name='MIMO_2x2', input_names=['u1', 'u2'], "
+                "state_names=['x1', 'x2', 'x3'], "
+                "output_names=['y1', 'y2'])"
+            ),
+        ),
+    ],
+)
+def test_SSModelCTFromSympySS(
+    fixture_name, name, input_names, output_names, expected_str, request
+):
+    # Get the fixture data based on fixture_name
+    if fixture_name == "RLC_circuit_ABCD":
+        _, _, A_sym, B_sym, C_sym, D_sym = request.getfixturevalue(
+            fixture_name
+        )
+        ss_sympy = StateSpace(A_sym, B_sym, C_sym, D_sym)
+    elif fixture_name == "MIMO_2x2_system":
+        ss_sympy = request.getfixturevalue(fixture_name)
+    else:
+        raise ValueError(f"Unknown fixture: {fixture_name}")
 
     ss_cas = SSModelCTFromSympySS(
         ss_sympy,
-        name="RLC_circuit",
-        input_names=["V_in"],
-        output_names=["V_out"],
+        name=name,
+        input_names=input_names,
+        output_names=output_names,
     )
 
-    assert str(ss_cas) == (
-        "SSModelCTFromSympySS("
-        "f=Function(f:(t,x[2],u,C,L,R)->(rhs[2]) SXFunction), "
-        "h=Function(h:(t,x[2],u,C,L,R)->(y) SXFunction), "
-        "n=2, nu=1, ny=1, params={'C': SX(C), 'L': SX(L), 'R': SX(R)}, "
-        "name='RLC_circuit', input_names=['V_in'], "
-        "state_names=['x1', 'x2'], output_names=['V_out'])"
-    )
+    assert str(ss_cas) == expected_str
 
 
 def test_SSModelCTFromSympySS_simulation_comparison(RLC_circuit_ABCD):
