@@ -108,7 +108,7 @@ def make_sim_step_function_RK4_fixed_dt(f, n, nu, dt, params=None, name="F"):
 
 
 def _integrator_step_symbolic(
-    f, n, nu, t, x, u, dt, params, solver, integrator_opts, integrator_name
+    f, n, nu, t, x, u, dt, params, solver, integrator_opts
 ):
     """Compute integration step using CasADi's integrator framework.
 
@@ -125,7 +125,6 @@ def _integrator_step_symbolic(
         params: Dictionary of symbolic parameters
         solver: Integration method ('cvodes', 'rk', 'idas')
         integrator_opts: Options dict for the integrator
-        integrator_name: Name for the integrator
 
     Returns:
         Symbolic expression for next state xf
@@ -155,7 +154,7 @@ def _integrator_step_symbolic(
 
     # Create integrator from s=0 to s=1
     integrator = cas.integrator(
-        integrator_name,
+        "integrator",
         solver,
         dae,
         0,  # t0 = 0
@@ -202,7 +201,7 @@ def make_sim_step_function_integrator(
 
     # Compute integration step
     xf = _integrator_step_symbolic(
-        f, n, nu, t, x, u, dt, params, solver, integrator_opts, name
+        f, n, nu, t, x, u, dt, params, solver, integrator_opts
     )
 
     # Return a CasADi Function with variable dt
@@ -250,7 +249,7 @@ def make_sim_step_function_integrator_fixed_dt(
 
     # Compute integration step with fixed dt
     xkp1 = _integrator_step_symbolic(
-        f, n, nu, t, xk, uk, dt, params, solver, integrator_opts, name + "_integrator"
+        f, n, nu, t, xk, uk, dt, params, solver, integrator_opts,
     )
 
     # Return a CasADi Function without dt argument

@@ -28,7 +28,8 @@ def RLC_variables():
 @pytest.fixture
 def RLC_circuit_ABCD(RLC_variables):
     """State space matrices for RLC circuit.
-    See: https://docs.sympy.org/latest/tutorials/physics/control/electrical_problems.html
+    See: https://docs.sympy.org/latest/tutorials/physics/control/
+         electrical_problems.html
     """
     sympy_vars, casadi_vars = RLC_variables
 
@@ -98,16 +99,13 @@ def test_SSModelCTFromSympySS(RLC_circuit_ABCD):
         "f=Function(f:(t,x[2],u,C,L,R)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u,C,L,R)->(y) SXFunction), "
         "n=2, nu=1, ny=1, params={'C': SX(C), 'L': SX(L), 'R': SX(R)}, "
-        "name='RLC_circuit', "
-        "input_names=['V_in'], state_names=['x1', 'x2'], output_names=['V_out'])"
+        "name='RLC_circuit', input_names=['V_in'], "
+        "state_names=['x1', 'x2'], output_names=['V_out'])"
     )
 
 
 def test_SSModelCTFromSympySS_simulation_comparison(RLC_circuit_ABCD):
-    """Compare CasADi simulation with SciPy simulation for 10 time steps.
-
-    Uses a step input that is zero for k=0,1 and then steps to 1.0 at k=2.
-    """
+    """Compare CasADi simulation with SciPy simulation for 10 time steps."""
     _, _, A_sym, B_sym, C_sym, D_sym = RLC_circuit_ABCD
 
     # Numerical parameter values

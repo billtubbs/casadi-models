@@ -3,7 +3,9 @@
 import casadi as cas
 
 
-def make_n_step_simulation_function(F, H, n, nu, ny, nT, params=None, name=None):
+def make_n_step_simulation_function(
+    F, H, n, nu, ny, nT, params=None, name=None
+):
     """Create a multi-step simulation function for discrete-time systems.
 
     This function creates a CasADi Function that simulates a discrete-time
