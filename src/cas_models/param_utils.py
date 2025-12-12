@@ -13,8 +13,10 @@ def make_list_of_enumerated_names(prefix, n, sep=""):
     """
     if n > 1:
         names = [f"{prefix}{sep}{i + 1}" for i in range(n)]
-    else:
+    elif n == 1:
         names = [prefix]
+    else:
+        names = []
     return names
 
 

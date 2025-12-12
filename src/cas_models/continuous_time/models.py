@@ -193,6 +193,8 @@ class StateSpaceModelCTStaticNonlinearity(StateSpaceModelCT):
         state_names=None,
         output_names=None,
     ):
+        if params is None:
+            params = {}
         symbolic_params = {}
         for param in params.values():
             for p in cas.symvar(cas.SX(param)):
