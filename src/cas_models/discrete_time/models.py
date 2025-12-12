@@ -1,12 +1,27 @@
-import casadi as cas
-import sympy
-import numpy as np
 from collections import OrderedDict
 from dataclasses import dataclass
+
+import numpy as np
+import casadi as cas
+
+from cas_models.continuous_time.simulate import (
+    make_sim_step_function_integrator_fixed_dt,
+    make_sim_step_function_RK4_fixed_dt,
+)
 from cas_models.param_utils import (
     make_list_of_enumerated_names,
 )
 from cas_models.validation import validate_casadi_function_dims
+
+# Attribute names for discrete-time state-space models
+ATTR_NAMES = {
+    "state_func": "F",
+    "output_func": "H",
+    "state_var": "xk",
+    "input_var": "uk",
+    "state_output": "xkp1",
+    "output_var": "yk",
+}
 
 
 def validate_F_function(F: cas.Function, n: int, nu: int, params=None):
@@ -41,6 +56,23 @@ def validate_H_function(
     )
 
 
+def is_ss_dt(sys):
+    """Check if a system is a discrete-time state-space model.
+
+    A discrete-time model is identified by having 'F' and 'H'
+    attributes (uppercase), which are the state transition function
+    and output function respectively.
+
+    Args:
+        sys: A system object to check
+
+    Returns:
+        bool: True if the system has discrete-time attributes (F, H),
+              False otherwise
+    """
+    return hasattr(sys, "F") and hasattr(sys, "H")
+
+
 @dataclass
 class StateSpaceModelDT:
     """A discrete-time state-space model of a dynamical system
@@ -56,7 +88,9 @@ class StateSpaceModelDT:
     n: int
     nu: int
     ny: int
+    dt: float
     params: dict
+    name: str = None
     input_names: list[str] = None
     state_names: list[str] = None
     output_names: list[str] = None
@@ -68,7 +102,9 @@ class StateSpaceModelDT:
         n,
         nu=1,
         ny=1,
+        dt=None,
         params=None,
+        name=None,
         input_names=None,
         state_names=None,
         output_names=None,
@@ -92,6 +128,7 @@ class StateSpaceModelDT:
             ny (int, optional): Number of outputs (dimension of y). Default: 1.
             params (dict, optional): Dictionary of symbolic parameters used by
                 f and h functions. If None, defaults to empty dict.
+            name (str, optional): Optional name for the model. Default: None.
             input_names (list[str], optional): Names for input variables.
                 If None, defaults to ["u"] or ["u1", "u2", ...] for nu > 1.
             state_names (list[str], optional): Names for state variables.
@@ -109,21 +146,34 @@ class StateSpaceModelDT:
             >>> uk = cas.SX.sym("uk")
             >>> a = cas.SX.sym("a")
             >>> xkp1 = cas.vertcat(-a * xk[0], xk[1])
-            >>> F = cas.Function("F", [t, xk, uk, a], [xkp1],
-            ...     ["t", "xk", "uk", "a"], ["xkp1"])
-            >>> H = cas.Function("H", [t, xk, uk, a], [xk[0]],
-            ...     ["t", "xk", "uk", "a"], ["yk"])
-            >>> model = StateSpaceModelDT(F, H, n=2, nu=1, ny=1,
-            ...     params={'a': a})
+            >>> F = cas.Function(
+            ...     "F",
+            ...     [t, xk, uk, a],
+            ...     [xkp1],
+            ...     ["t", "xk", "uk", "a"],
+            ...     ["xkp1"],
+            ... )
+            >>> H = cas.Function(
+            ...     "H",
+            ...     [t, xk, uk, a],
+            ...     [xk[0]],
+            ...     ["t", "xk", "uk", "a"],
+            ...     ["yk"],
+            ... )
+            >>> model = StateSpaceModelDT(
+            ...     F, H, n=2, nu=1, ny=1, params={"a": a}
+            ... )
         """
         self.F = F
         self.H = H
         self.n = n
         self.nu = nu
         self.ny = ny
+        self.dt = dt
         if params is None:
             params = {}
         self.params = params
+        self.name = name
         validate_F_function(F, n, nu, params=params)
         validate_H_function(H, n, nu, ny, params=params)
         if input_names is None:
@@ -135,6 +185,138 @@ class StateSpaceModelDT:
         if output_names is None:
             output_names = make_list_of_enumerated_names("y", ny)
         self.output_names = output_names
+
+
+class StateSpaceModelDTFromCTRK4(StateSpaceModelDT):
+    """A discrete-time state-space model of a dynamical system
+    of the form:
+
+          x(k+1) = F(t, x(k), u(k), *params.values())
+            y(k) = H(t, x(k), u(k), *params.values())
+
+    created from a continuous-time system model using the Runge-Kutta 4
+    integration scheme.
+    """
+
+    def __init__(self, model_ct, dt):
+        f = model_ct.f
+        n = model_ct.n
+        nu = model_ct.nu
+        ny = model_ct.ny
+        params = model_ct.params
+
+        # State transition function - RK4 integration with fixed time-step
+        F = make_sim_step_function_RK4_fixed_dt(
+            f, n, nu, dt, params=params, name="F"
+        )
+
+        # Output function - same as in continuous-time
+        t = cas.SX.sym("t")
+        xk = cas.SX.sym("xk", n)
+        uk = cas.SX.sym("uk", nu)
+        yk = model_ct.h(t, xk, uk, *params.values())
+        H = cas.Function(
+            "H",
+            [t, xk, uk, *params.values()],
+            [yk],
+            ["t", "xk", "uk", *params.keys()],
+            ["yk"],
+        )
+
+        # Copy information from continuous-time model
+        name = model_ct.name
+        input_names = model_ct.input_names
+        state_names = model_ct.state_names
+        output_names = model_ct.output_names
+
+        super().__init__(
+            F,
+            H,
+            n,
+            nu=nu,
+            ny=ny,
+            dt=dt,
+            params=params,
+            name=name,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
+
+
+class StateSpaceModelDTFromCT(StateSpaceModelDT):
+    """A discrete-time state-space model of a dynamical system
+    of the form:
+
+          x(k+1) = F(t, x(k), u(k), *params.values())
+            y(k) = H(t, x(k), u(k), *params.values())
+
+    created from a continuous-time system model using CasADi's
+    integrator framework.
+    """
+
+    def __init__(self, model_ct, dt, solver="cvodes", integrator_opts=None):
+        """Initialize a discrete-time model from a continuous-time model.
+
+        Args:
+            model_ct: A continuous-time state-space model with attributes
+                f, h, n, nu, ny, params.
+            dt (float): Fixed time step for discretization.
+            solver (str, optional): Integration method ('cvodes', 'rk',
+                'idas'). Default: 'cvodes'.
+            integrator_opts (dict, optional): Options dict for the
+                integrator. Default: None.
+        """
+        f = model_ct.f
+        n = model_ct.n
+        nu = model_ct.nu
+        ny = model_ct.ny
+        params = model_ct.params
+
+        # State transition function - CasADi integrator with fixed time-step
+        F = make_sim_step_function_integrator_fixed_dt(
+            f,
+            n,
+            nu,
+            dt,
+            params=params,
+            name="F",
+            solver=solver,
+            integrator_opts=integrator_opts,
+        )
+
+        # Output function - same as in continuous-time
+        t = cas.SX.sym("t")
+        xk = cas.SX.sym("xk", n)
+        uk = cas.SX.sym("uk", nu)
+        yk = model_ct.h(t, xk, uk, *params.values())
+        H = cas.Function(
+            "H",
+            [t, xk, uk, *params.values()],
+            [yk],
+            ["t", "xk", "uk", *params.keys()],
+            ["yk"],
+        )
+
+        # Copy information from continuous-time model
+        name = model_ct.name
+        input_names = model_ct.input_names
+        state_names = model_ct.state_names
+        output_names = model_ct.output_names
+
+        super().__init__(
+            F,
+            H,
+            n,
+            nu=nu,
+            ny=ny,
+            dt=dt,
+            params=params,
+            name=name,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
 
 
 class StateSpaceModelDTSISO(StateSpaceModelDT):
@@ -152,6 +334,7 @@ class StateSpaceModelDTSISO(StateSpaceModelDT):
         H,
         n,
         params=None,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -165,6 +348,7 @@ class StateSpaceModelDTSISO(StateSpaceModelDT):
             nu=1,
             ny=1,
             params=params,
+            name=name,
             input_names=input_names,
             state_names=state_names,
             output_names=output_names,
@@ -200,7 +384,6 @@ def tf_to_ss_obs_np(num, den):
     Returns:
         tuple: (A, B, C, D) state-space matrices as numpy arrays
     """
-    import numpy as np
 
     num = np.atleast_1d(num).flatten()
     den = np.atleast_1d(den).flatten()
@@ -248,7 +431,7 @@ def tf_to_ss_con_cas(num, den):
 
     The resulting state space represenation is in controller canonical
     form, similar to scipy's tf2ss function.
-    
+
     Args:
         num: Numerator polynomial coefficients in descending degree order
              [b_0, b_1, ..., b_m] for b_0*z^m + b_1*z^(m-1) + ... + b_m
@@ -320,9 +503,10 @@ def tf_to_ss_obs_cas(num, den):
     """Convert transfer function to state-space representation, compatible
     with CasADi symbolic variables.
 
-    This function constructs the observable canonical form state-space matrices
-    using CasADi symbolic arrays. The observable canonical form has a companion
-    matrix structure that makes the states directly related to output derivatives.
+    This function constructs the observable canonical form state-space
+    matrices using CasADi symbolic arrays. The observable canonical form
+    has a companion matrix structure that makes the states directly
+    related to output derivatives.
 
     State-space form:
         x(k+1) = A*x(k) + B*u(k)
@@ -420,6 +604,7 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
         self,
         num,
         den,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -442,6 +627,7 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
             den: Denominator polynomial coefficients in descending degree order
                 [a_0, a_1, ..., a_n]. Can be a CasADi SX/MX/DM expression,
                 numpy array, or Python list. May contain symbolic parameters.
+            name (str, optional): Optional name for the model. Default: None.
             input_name (str, optional): Name for the input variable. If None,
                 defaults to "u".
             state_names (list[str], optional): Names for state variables. If
@@ -460,8 +646,8 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
             >>> model = StateSpaceModelDTTFSISO(num=num, den=den)
             >>>
             >>> # Create model with symbolic parameters
-            >>> b0, b1 = cas.SX.sym('b0'), cas.SX.sym('b1')
-            >>> a1, a2 = cas.SX.sym('a1'), cas.SX.sym('a2')
+            >>> b0, b1 = cas.SX.sym("b0"), cas.SX.sym("b1")
+            >>> a1, a2 = cas.SX.sym("a1"), cas.SX.sym("a2")
             >>> num = cas.vertcat(b0, b1)
             >>> den = cas.vertcat(1, a1, a2)
             >>> model = StateSpaceModelDTTFSISO(num=num, den=den)
@@ -537,9 +723,162 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
             H,
             n,
             params=params,
+            name=name,
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
+        )
+
+
+class StateSpaceModelDTDelay(StateSpaceModelDT):
+    """A discrete-time state-space model implementing a pure time delay.
+
+    For a MIMO system with nu inputs and ny outputs, this model implements:
+
+        y(k) = G * u(k - nk)
+
+    where:
+        - nk is the delay in time steps (scalar, applies to all I/O paths)
+        - G is the gain matrix of shape (ny, nu)
+
+    The delay is implemented using a shift register for each input, creating
+    a state vector of dimension n = nk * nu, with the following structure:
+
+        x(k) = [x1(k), x2(k), ..., xnu(k)]
+
+    where each xi(k) represents the shift register for input i:
+        xi(k) = [ui(k-1), ui(k-2), ..., ui(k-nk)]
+
+    State-space matrices:
+        - A: Block diagonal matrix with nu shift register blocks
+        - B: Each input feeds into its corresponding shift register
+        - C: Extracts delayed inputs and applies gain matrix G
+        - D: Zero (no direct feedthrough)
+
+    """
+
+    def __init__(
+        self,
+        nk,
+        nu=1,
+        G=None,
+        dt=None,
+        name=None,
+        input_names=None,
+        state_names=None,
+        output_names=None,
+    ):
+        """Initialize a discrete-time delay model.
+
+        Args:
+            nk (int): Delay in time steps (must be >= 1).
+            nu (int, optional): Number of inputs. Default: 1.
+            G (array-like, optional): Gain matrix of shape (ny, nu) mapping
+                delayed inputs to outputs. If None, defaults to identity
+                matrix (ny = nu). If provided, ny is inferred from G.shape[0].
+            dt (float, optional): Sample time. Default: None.
+            name (str, optional): Optional name for the model. Default: None.
+            input_names (list[str], optional): Names for input variables.
+                If None, defaults to ["u"] or ["u1", "u2", ...] for nu > 1.
+            state_names (list[str], optional): Names for state variables.
+                If None, defaults to ["x1", "x2", ...].
+            output_names (list[str], optional): Names for output variables.
+                If None, defaults to ["y"] or ["y1", "y2", ...] for ny > 1.
+
+        Raises:
+            AssertionError: If nk < 1 or if G has incorrect dimensions.
+
+        Example:
+            >>> # SISO delay of 3 steps
+            >>> model = StateSpaceModelDTDelay(nk=3)
+            >>>
+            >>> # MIMO delay of 5 steps with 2 inputs
+            >>> model = StateSpaceModelDTDelay(nk=5, nu=2)
+            >>>
+            >>> # MIMO delay with custom gain matrix
+            >>> G = cas.DM([[1.0, 0.5], [0.0, 2.0]])
+            >>> model = StateSpaceModelDTDelay(nk=5, nu=2, G=G)
+
+        """
+        assert nk >= 1, "Delay nk must be >= 1"
+
+        # Infer ny from G or default to nu
+        if G is None:
+            ny = nu
+            G = cas.DM.eye(ny)
+        else:
+            G = cas.DM(G)
+            ny = G.shape[0]
+            assert G.shape[1] == nu, (
+                f"G.shape[1] must equal nu ({nu}), got {G.shape[1]}"
+            )
+
+        # Number of states: nk states per input
+        n = nk * nu
+
+        # Build state-space matrices using SX for symbolic computation
+        # A matrix: Block diagonal with shift register blocks
+        A = cas.SX.zeros(n, n)
+        for i in range(nu):
+            # Each block is a shift register of size (nk x nk)
+            block_start = i * nk
+            for j in range(nk - 1):
+                A[block_start + j + 1, block_start + j] = 1.0
+
+        # B matrix: Each input feeds into first position of its shift register
+        B = cas.SX.zeros(n, nu)
+        for i in range(nu):
+            B[i * nk, i] = 1.0
+
+        # C matrix: Extract last state of each shift register and apply gain G
+        # Last state of shift register i is at index (i+1)*nk - 1
+        C_extract = cas.SX.zeros(nu, n)
+        for i in range(nu):
+            C_extract[i, (i + 1) * nk - 1] = 1.0
+
+        # Apply gain matrix: C = G * C_extract
+        C = cas.mtimes(cas.SX(G), C_extract)
+
+        # D matrix: No direct feedthrough
+        D = cas.SX.zeros(ny, nu)
+
+        # Sparsify matrices to take advantage of sparse structure
+        A = cas.sparsify(A)
+        B = cas.sparsify(B)
+        C = cas.sparsify(C)
+        D = cas.sparsify(D)
+
+        # Create symbolic variables for the state-space equations
+        t = cas.SX.sym("t")
+        xk = cas.SX.sym("xk", n)
+        uk = cas.SX.sym("uk", nu)
+
+        # State-space equations:
+        # x(k+1) = A*x(k) + B*u(k)
+        # y(k) = C*x(k) + D*u(k)
+        xkp1 = cas.mtimes(A, xk) + cas.mtimes(B, uk)
+        yk = cas.mtimes(C, xk) + cas.mtimes(D, uk)
+
+        # Create CasADi Functions for F and H
+        F = cas.Function("F", [t, xk, uk], [xkp1], ["t", "xk", "uk"], ["xkp1"])
+        H = cas.Function("H", [t, xk, uk], [yk], ["t", "xk", "uk"], ["yk"])
+
+        # Store delay-specific attributes
+        self.nk = nk
+        self.G = G
+
+        super().__init__(
+            F,
+            H,
+            n,
+            nu=nu,
+            ny=ny,
+            dt=dt,
+            params={},
+            name=name,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
         )
 
 
@@ -565,6 +904,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
     with n = max(na, nb+nk) states.
 
     """
+
     na: int
     nb: int
     nk: int = 1
@@ -576,6 +916,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         na=None,
         nb=None,
         nk=1,
+        name=None,
         input_name=None,
         state_names=None,
         output_name=None,
@@ -590,7 +931,8 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             B(q^-1) = b_1  + b_2 q^-1 + ... + b_nb q^{-nb+1}
             and q^-1 is the backward-in-time shift operator
 
-        This is internally represented as a state-space model with state vector:
+        This is internally represented as a state-space model with state
+        vector:
             x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb)]
 
         Args:
@@ -714,6 +1056,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             H,
             n,
             params=params,
+            name=name,
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,

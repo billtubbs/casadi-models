@@ -1,13 +1,12 @@
 import casadi as cas
 from collections import defaultdict
-from itertools import chain
 
 
 def make_list_of_enumerated_names(prefix, n, sep=""):
     """Convenience function to create default names of vector elements.
 
     Example:
-    >>> make_list_of_enumerated_names('x', 3)
+    >>> make_list_of_enumerated_names("x", 3)
     ['x1', 'x2', 'x3']
 
     """
@@ -18,6 +17,40 @@ def make_list_of_enumerated_names(prefix, n, sep=""):
     else:
         names = []
     return names
+
+
+def make_list_of_unique_names(keys, prefix="sys"):
+    """Generate a list of unique names from keys, replacing None values.
+
+    For each key in the input list:
+    - If the key is not None, use it as-is
+    - If the key is None, generate a unique name using the prefix and a
+      sequential number (e.g., "sys1", "sys2", etc.)
+
+    Args:
+        keys: List of keys (strings or None values)
+        prefix: Prefix to use for auto-generated names (default: "sys")
+
+    Returns:
+        List of unique names (all strings, no None values)
+
+    Example:
+        >>> make_list_of_unique_names(["plant", None, "controller"])
+        ["plant", "sys1", "controller"]
+    """
+    new_names = []
+    i = 0
+    for key in keys:
+        if key is None:
+            while True:
+                i += 1
+                new_name = prefix + str(i)
+                if new_name not in keys:
+                    break
+        else:
+            new_name = key
+        new_names.append(new_name)
+    return new_names
 
 
 def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
@@ -46,15 +79,15 @@ def merge_param_dicts(
     to make them unique.
 
     Example:
-    >>> K = cas.SX.sym('K')
-    >>> T1_1 = cas.SX.sym('T1_1')
-    >>> T1_2 = cas.SX.sym('T1_2')
-    >>> T2_2 = cas.SX.sym('T2_2')
-    >>> p1 = {'K': K, 'T1': T1_1}
-    >>> p2 = {'K': K, 'T1': T1_2, 'T2': T2_2}
-    >>> merge_param_dicts([p1, p2], keys=['sys1', 'sys2'])
+    >>> K = cas.SX.sym("K")
+    >>> T1_1 = cas.SX.sym("T1_1")
+    >>> T1_2 = cas.SX.sym("T1_2")
+    >>> T2_2 = cas.SX.sym("T2_2")
+    >>> p1 = {"K": K, "T1": T1_1}
+    >>> p2 = {"K": K, "T1": T1_2, "T2": T2_2}
+    >>> merge_param_dicts([p1, p2], keys=["sys1", "sys2"])
     {'K': SX(K), 'sys1_T1': SX(T1_1), 'sys2_T1': SX(T1_2), 'T2': SX(T2_2)}
-    >>> merge_param_dicts([p1, p2], keys=['sys1', 'sys2'], verbose_names=True)
+    >>> merge_param_dicts([p1, p2], keys=["sys1", "sys2"], verbose_names=True)
     {'sys1_sys2_K': SX(K),
     'sys1_T1': SX(T1_1),
     'sys2_T1': SX(T1_2),
@@ -62,7 +95,7 @@ def merge_param_dicts(
     """
     if keys is None:
         keys = make_list_of_enumerated_names(prefix, len(list_of_dicts))
-    elif len(list_of_dicts) > len(set(keys)):
+    if len(list_of_dicts) > len(set(keys)):
         raise ValueError("not enough unique keys")
 
     # Group all parameters by their original key name

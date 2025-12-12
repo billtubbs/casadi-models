@@ -7,8 +7,12 @@ import casadi as cas
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
+    StateSpaceModelDTDelay,
     StateSpaceModelDTTFSISO,
+    StateSpaceModelDTFromCTRK4,
+    StateSpaceModelDTFromCT,
 )
+from cas_models.continuous_time.models import StateSpaceModelCT
 from pathlib import Path
 
 
@@ -151,8 +155,8 @@ def test_StateSpaceModelDT_FO_SISO(symbolic_FO_SISO):
         "StateSpaceModelDT("
         "F=Function(F:(t,xk,uk,a1,b0)->(xkp1) SXFunction), "
         "H=Function(H:(t,xk,uk,a1,b0)->(yk) SXFunction), "
-        "n=1, nu=1, ny=1, "
-        "params={'a1': SX(a1), 'b0': SX(b0)}, "
+        "n=1, nu=1, ny=1, dt=None, "
+        "params={'a1': SX(a1), 'b0': SX(b0)}, name=None, "
         "input_names=['u'], state_names=['x'], output_names=['y']"
         ")"
     )
@@ -173,8 +177,9 @@ def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
         "StateSpaceModelDT(F=Function("
         "F:(t,xk[4],uk,Aq[2],Bq[2])->(xkp1[4]) SXFunction), "
         "H=Function(H:(t,xk[4],uk,Aq[2],Bq[2])->(yk) SXFunction), "
-        "n=4, nu=1, ny=1, "
+        "n=4, nu=1, ny=1, dt=None, "
         "params={'Aq': SX([Aq_0, Aq_1]), 'Bq': SX([Bq_0, Bq_1])}, "
+        "name=None, "
         "input_names=['u'], state_names=['x1', 'x2', 'x3', 'x4'], "
         "output_names=['y']"
         ")"
@@ -201,8 +206,8 @@ def test_StateSpaceModelDTTFSISO_input_types(tf_test_case_2):
         "StateSpaceModelDTTFSISO("
         "F=Function(F:(t,xk[3],uk)->(xkp1[3]) SXFunction), "
         "H=Function(H:(t,xk[3],uk)->(yk) SXFunction), "
-        "n=3, nu=1, ny=1, "
-        "params={}, "
+        "n=3, nu=1, ny=1, dt=None, "
+        "params={}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
         "output_names=['y']"
         ")"
@@ -237,9 +242,10 @@ def test_StateSpaceModelDTTFSISO_input_types(tf_test_case_2):
         "StateSpaceModelDTTFSISO("
         "F=Function(F:(t,xk[3],uk,b_0,b_1,b_2,a_0,a_1,a_2,a_3)->(xkp1[3]) SXFunction), "
         "H=Function(H:(t,xk[3],uk,b_0,b_1,b_2,a_0,a_1,a_2,a_3)->(yk) SXFunction), "
-        "n=3, nu=1, ny=1, "
+        "n=3, nu=1, ny=1, dt=None, "
         "params={'b_0': SX(b_0), 'b_1': SX(b_1), 'b_2': SX(b_2), "
         "'a_0': SX(a_0), 'a_1': SX(a_1), 'a_2': SX(a_2), 'a_3': SX(a_3)}, "
+        "name=None, "
         "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
         "output_names=['y'])"
     )
@@ -312,8 +318,8 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
         "StateSpaceModelDTARXSISO("
         "F=Function(F:(t,xk[3],uk)->(xkp1[3]) SXFunction), "
         "H=Function(H:(t,xk[3],uk)->(yk) SXFunction), "
-        "n=3, nu=1, ny=1, "
-        "params={}, "
+        "n=3, nu=1, ny=1, dt=None, "
+        "params={}, name=None, "
         "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
         "output_names=['y']"
         ")"
@@ -366,8 +372,9 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
         "StateSpaceModelDTARXSISO("
         "F=Function(F:(t,xk[3],uk,a_0,a_1,b_0,b_1)->(xkp1[3]) SXFunction), "
         "H=Function(H:(t,xk[3],uk,a_0,a_1,b_0,b_1)->(yk) SXFunction), "
-        "n=3, nu=1, ny=1, "
+        "n=3, nu=1, ny=1, dt=None, "
         "params={'a_0': SX(a_0), 'a_1': SX(a_1), 'b_0': SX(b_0), 'b_1': SX(b_1)}, "
+        "name=None, "
         "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
         "output_names=['y']"
         ")"
@@ -450,7 +457,7 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
 #         "StateSpaceModelDTFromABCD("
 #         "f=Function(f:(t,x,u,K,T1)->(rhs) SXFunction), "
 #         "h=Function(h:(t,x,u,K,T1)->(y) SXFunction), "
-#         "n=1, nu=1, ny=1, "
+#         "n=1, nu=1, ny=1, dt=None, "
 #         "params={'K': SX(K), 'T1': SX(T1)}, "
 #         "input_names=['u'], state_names=['x'], output_names=['y']"
 #         ")"
@@ -472,7 +479,7 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
 #         "StateSpaceModelCTFromABCD("
 #         "f=Function(f:(t,x[2],u,K,T1,T2)->(rhs[2]) SXFunction), "
 #         "h=Function(h:(t,x[2],u,K,T1,T2)->(y) SXFunction), "
-#         "n=2, nu=1, ny=1, "
+#         "n=2, nu=1, ny=1, dt=None, "
 #         "params={'K': SX(K), 'T1': SX(T1), 'T2': SX(T2)}, "
 #         "input_names=['u'], state_names=['x1', 'x2'], output_names=['y'])"
 #     )
@@ -493,3 +500,367 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
 #     assert np.allclose(
 #         model.H(t, x, u, K, T1, T2), cas.DM(0.26666666666666666)
 #     )
+
+
+def test_StateSpaceModelDTFromCTRK4():
+    """Test conversion from continuous-time to discrete-time using RK4."""
+    # Create a simple continuous-time first-order system
+    # dx/dt = -a*x + b*u
+    # y = x
+    n = 1
+    nu = 1
+    ny = 1
+    a = cas.SX.sym("a")
+    b = cas.SX.sym("b")
+    params = {"a": a, "b": b}
+
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+
+    rhs = -a * x + b * u
+    y = x
+
+    f = cas.Function("f", [t, x, u, a, b], [rhs],
+                     ["t", "x", "u", "a", "b"], ["rhs"])
+    h = cas.Function("h", [t, x, u, a, b], [y],
+                     ["t", "x", "u", "a", "b"], ["y"])
+
+    model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
+
+    # Convert to discrete-time with dt=0.1
+    dt = 0.1
+    model_dt = StateSpaceModelDTFromCTRK4(model_ct, dt)
+
+    # Verify the discrete-time model
+    assert model_dt.n == n
+    assert model_dt.nu == nu
+    assert model_dt.ny == ny
+    assert model_dt.dt == dt
+    assert len(model_dt.params) == len(params)
+
+    # Test with numeric parameter values
+    a_val = 2.0
+    b_val = 1.5
+    x0 = np.array([1.0])
+    u_val = 0.5
+    t_val = 0.0
+
+    # Compute next state
+    x1 = model_dt.F(t_val, x0, u_val, a_val, b_val)
+    y0 = model_dt.H(t_val, x0, u_val, a_val, b_val)
+
+    # Output should equal state
+    assert np.allclose(y0, x0)
+
+    # State should have evolved (not equal to x0 due to dynamics)
+    assert not np.allclose(x1, x0)
+
+    # For a = 2.0, b = 1.5, u = 0.5, x = 1.0
+    # dx/dt = -2*1 + 1.5*0.5 = -2 + 0.75 = -1.25
+    # After dt=0.1 with RK4, x should decrease (roughly by 1.25*0.1 = 0.125)
+    # but RK4 is more accurate than Euler
+    assert x1 < x0  # State should decrease
+
+
+def test_StateSpaceModelDTFromCT():
+    """Test conversion from continuous-time to discrete-time using CasADi
+    integrator.
+    """
+    # Create a simple continuous-time first-order system
+    # dx/dt = -a*x + b*u
+    # y = x
+    n = 1
+    nu = 1
+    ny = 1
+    a = cas.SX.sym("a")
+    b = cas.SX.sym("b")
+    params = {"a": a, "b": b}
+
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+
+    rhs = -a * x + b * u
+    y = x
+
+    f = cas.Function("f", [t, x, u, a, b], [rhs],
+                     ["t", "x", "u", "a", "b"], ["rhs"])
+    h = cas.Function("h", [t, x, u, a, b], [y],
+                     ["t", "x", "u", "a", "b"], ["y"])
+
+    model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
+
+    # Convert to discrete-time with dt=0.1 using default cvodes solver
+    dt = 0.1
+    model_dt = StateSpaceModelDTFromCT(model_ct, dt)
+
+    # Verify the discrete-time model
+    assert model_dt.n == n
+    assert model_dt.nu == nu
+    assert model_dt.ny == ny
+    assert model_dt.dt == dt
+    assert len(model_dt.params) == len(params)
+
+    # Test with numeric parameter values
+    a_val = 2.0
+    b_val = 1.5
+    x0 = np.array([1.0])
+    u_val = 0.5
+    t_val = 0.0
+
+    # Compute next state
+    x1 = model_dt.F(t_val, x0, u_val, a_val, b_val)
+    y0 = model_dt.H(t_val, x0, u_val, a_val, b_val)
+
+    # Output should equal state
+    assert np.allclose(y0, x0)
+
+    # State should have evolved
+    assert not np.allclose(x1, x0)
+    assert x1 < x0  # State should decrease
+
+
+def test_StateSpaceModelDTFromCT_compare_solvers():
+    """Compare RK4 and cvodes integrators for CT to DT conversion."""
+    # Create a simple continuous-time first-order system
+    n = 1
+    nu = 1
+    ny = 1
+    a = cas.SX.sym("a")
+    b = cas.SX.sym("b")
+    params = {"a": a, "b": b}
+
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
+
+    rhs = -a * x + b * u
+    y = x
+
+    f = cas.Function("f", [t, x, u, a, b], [rhs],
+                     ["t", "x", "u", "a", "b"], ["rhs"])
+    h = cas.Function("h", [t, x, u, a, b], [y],
+                     ["t", "x", "u", "a", "b"], ["y"])
+
+    model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
+
+    # Convert using both methods
+    dt = 0.1
+    model_rk4 = StateSpaceModelDTFromCTRK4(model_ct, dt)
+    model_cvodes = StateSpaceModelDTFromCT(
+        model_ct, dt, solver='cvodes',
+        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+    )
+
+    # Test with numeric values
+    a_val = 2.0
+    b_val = 1.5
+    x0 = np.array([1.0])
+    u_val = 0.5
+    t_val = 0.0
+
+    # Compute next state with both methods
+    x1_rk4 = model_rk4.F(t_val, x0, u_val, a_val, b_val)
+    x1_cvodes = model_cvodes.F(t_val, x0, u_val, a_val, b_val)
+
+    # Results should be very close (both are high-accuracy integrators)
+    assert np.allclose(x1_rk4, x1_cvodes, rtol=1e-5, atol=1e-7)
+
+    # Test with RK integrator as well
+    model_rk = StateSpaceModelDTFromCT(
+        model_ct, dt, solver='rk',
+        integrator_opts={'number_of_finite_elements': 4}
+    )
+    x1_rk = model_rk.F(t_val, x0, u_val, a_val, b_val)
+
+    # RK and RK4 should also be close
+    assert np.allclose(x1_rk4, x1_rk, rtol=1e-4, atol=1e-6)
+
+
+def test_StateSpaceModelDTDelay_SISO():
+    """Test SISO delay model."""
+    nk = 5
+    model = StateSpaceModelDTDelay(nk)
+
+    # Verify model dimensions
+    assert model.n == nk
+    assert model.nu == 1
+    assert model.ny == 1
+    assert model.nk == nk
+    assert model.G.shape == (1, 1)
+    assert float(model.G) == 1.0
+
+    # Test step response - output should be delayed by nk steps
+    x = cas.DM.zeros(model.n, 1)
+    u_val = 1.0
+    t_val = 0.0
+
+    for k in range(15):
+        y = model.H(t_val, x, u_val)
+
+        # Output should be 0 before delay, 1 after delay
+        if k < nk:
+            assert float(y) == 0.0, f"At k={k}, expected y=0 but got {float(y)}"
+        else:
+            assert float(y) == 1.0, f"At k={k}, expected y=1 but got {float(y)}"
+
+        x = model.F(t_val, x, u_val)
+        t_val += 1
+
+
+def test_StateSpaceModelDTDelay_MIMO_identity():
+    """Test MIMO delay model with identity gain matrix."""
+    nu = 2
+    nk = 3
+    model = StateSpaceModelDTDelay(nk, nu)
+
+    # Verify model dimensions
+    assert model.n == nk * nu
+    assert model.nu == nu
+    assert model.ny == nu  # ny defaults to nu when G is None
+    assert model.nk == nk
+    assert model.G.shape == (nu, nu)
+    assert np.allclose(np.array(model.G), np.eye(nu))
+
+    # Test step response with different values on each input
+    x = cas.DM.zeros(model.n, 1)
+    u_val = cas.DM([[1.0], [2.0]])
+    t_val = 0.0
+
+    for k in range(10):
+        y = np.array(model.H(t_val, x, u_val)).flatten()
+
+        # Outputs should be delayed versions of inputs
+        if k < nk:
+            assert np.allclose(y, [0.0, 0.0]), f"At k={k}, expected y=[0, 0] but got {y}"
+        else:
+            assert np.allclose(y, [1.0, 2.0]), f"At k={k}, expected y=[1, 2] but got {y}"
+
+        x = model.F(t_val, x, u_val)
+        t_val += 1
+
+
+def test_StateSpaceModelDTDelay_MIMO_custom_gain():
+    """Test MIMO delay model with custom gain matrix."""
+    nu = 2
+    nk = 3
+    G = cas.DM([[1.0, 0.5], [0.0, 2.0]])
+    model = StateSpaceModelDTDelay(nk, nu, G=G)
+
+    # Verify model dimensions
+    ny = G.shape[0]  # ny is inferred from G
+    assert model.n == nk * nu
+    assert model.nu == nu
+    assert model.ny == ny
+    assert model.nk == nk
+    assert model.G.shape == (ny, nu)
+    assert np.allclose(np.array(model.G), np.array(G))
+
+    # Test step response
+    x = cas.DM.zeros(model.n, 1)
+    u_val = cas.DM([[1.0], [2.0]])
+    t_val = 0.0
+
+    # Expected output after delay: y = G * u
+    # y[0] = 1.0*1.0 + 0.5*2.0 = 2.0
+    # y[1] = 0.0*1.0 + 2.0*2.0 = 4.0
+    y_expected = np.array([2.0, 4.0])
+
+    for k in range(10):
+        y = np.array(model.H(t_val, x, u_val)).flatten()
+
+        # Outputs should be zero before delay, G*u after delay
+        if k < nk:
+            assert np.allclose(y, [0.0, 0.0]), f"At k={k}, expected y=[0, 0] but got {y}"
+        else:
+            assert np.allclose(y, y_expected), f"At k={k}, expected y={y_expected} but got {y}"
+
+        x = model.F(t_val, x, u_val)
+        t_val += 1
+
+
+def test_StateSpaceModelDTDelay_varying_input():
+    """Test delay model with time-varying input."""
+    nk = 4
+    model = StateSpaceModelDTDelay(nk)
+
+    # Simulate with varying input signal
+    x = cas.DM.zeros(model.n, 1)
+    t_val = 0.0
+
+    # Input sequence: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    # Expected output (delayed by 4): [0, 0, 0, 0, 0, 1, 2, 3, 4, 5]
+    for k in range(10):
+        u_val = float(k)
+        y = float(model.H(t_val, x, u_val))
+
+        # Output should be input from nk steps ago
+        if k < nk:
+            y_expected = 0.0
+        else:
+            y_expected = float(k - nk)
+
+        assert np.isclose(y, y_expected), f"At k={k}, expected y={y_expected} but got {y}"
+
+        x = model.F(t_val, x, u_val)
+        t_val += 1
+
+
+def test_StateSpaceModelDTDelay_edge_cases():
+    """Test edge cases for delay model."""
+    # Test nk=1 (minimum delay)
+    model = StateSpaceModelDTDelay(1)
+    assert model.n == 1
+
+    x = cas.DM.zeros(1, 1)
+    y = float(model.H(0.0, x, 1.0))
+    assert y == 0.0  # Initially zero
+
+    x = model.F(0.0, x, 1.0)
+    y = float(model.H(1.0, x, 1.0))
+    assert y == 1.0  # After 1 step, output equals previous input
+
+    # Test non-square MIMO system
+    G = cas.DM([[1.0, 0.5, 0.2], [0.3, 0.0, 1.5]])
+    model = StateSpaceModelDTDelay(2, nu=3, G=G)
+    assert model.n == 2 * 3  # nk * nu
+    assert model.nu == 3
+    assert model.ny == 2
+    assert model.G.shape == (2, 3)
+    assert np.allclose(np.array(model.G), np.array(G))
+
+
+def test_StateSpaceModelDTDelay_compare_with_TF():
+    """Compare StateSpaceModelDTDelay with StateSpaceModelDTTFSISO for pure delay."""
+    nk = 5
+
+    # Create delay model
+    model_delay = StateSpaceModelDTDelay(nk)
+
+    # Create equivalent TF model: G(z) = z^(-nk)
+    num = cas.DM([1])
+    den = cas.DM([1] + [0] * nk)
+    model_tf = StateSpaceModelDTTFSISO(num=num, den=den)
+
+    # Both should have same number of states
+    assert model_delay.n == model_tf.n == nk
+
+    # Simulate both with same input
+    x_delay = cas.DM.zeros(model_delay.n, 1)
+    x_tf = cas.DM.zeros(model_tf.n, 1)
+    u_val = 1.0
+    t_val = 0.0
+
+    for k in range(12):
+        y_delay = float(model_delay.H(t_val, x_delay, u_val))
+        y_tf = float(model_tf.H(t_val, x_tf, u_val))
+
+        # Outputs should match
+        assert np.isclose(y_delay, y_tf), (
+            f"At k={k}, delay model y={y_delay} but TF model y={y_tf}"
+        )
+
+        x_delay = model_delay.F(t_val, x_delay, u_val)
+        x_tf = model_tf.F(t_val, x_tf, u_val)
+        t_val += 1
