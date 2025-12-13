@@ -715,3 +715,136 @@ class SSModelCTFromSympySS(StateSpaceModelCTFromABCD):
             state_names=state_names,
             output_names=output_names,
         )
+
+
+# Derived using Sympy as follows
+#
+# import sympy
+# Kc, Ti, s = sympy.symbols("Kc, Ti, s")
+#
+# PI Controller
+# Gc = TransferFunction(Kc * (Ti * s + 1), Ti * s, var=s)
+# print(Gc.rewrite(StateSpace))
+# StateSpace(
+# Matrix([[0]]),
+# Matrix([[1]]),
+# Matrix([[Kc]]),
+# Matrix([[Kc*Ti]]))
+#
+
+
+class SSModelCTPIInt(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        Kc=None,
+        Ti=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+        name=None,
+    ):
+        """Construct a state space model of a continuous time
+        proportional-integral (PI) controller.
+
+        This PI is in interative (series) form with the following
+        transfer function:
+
+                    Kc (Ti s + 1) 
+            Gc(s) = -------------
+                        Ti s 
+
+        """
+        if input_name is None:
+            input_name = "e"
+        if output_name is None:
+            output_name = "u"
+        params = make_symbolic_vars_from_kwargs(Kc=Kc, Ti=Ti)
+        Kc = params["Kc"]
+        Ti = params["Ti"]
+        A = cas.sparsify(cas.SX(0))
+        B = cas.SX(1)
+        C = cas.SX(Kc)
+        D = cas.SX(Kc * Ti)
+
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            name=name,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )
+
+# Derived using Sympy as follows
+#
+# import sympy
+# Kc, Ti, Td, Tf, s = sympy.symbols("Kc, Ti, Td, Tf, s")
+#
+# PID Controller
+# Gc = TransferFunction(
+#     Kc * (Ti * s + 1) * (Td * s + 1),
+#     Ti * s * (Tf * s + 1),
+#     var=s
+# )
+# print(Gc.rewrite(StateSpace))
+# Matrix([
+# [0,     1],
+# [0, -1/Tf]]),
+# Matrix([
+# [0],
+# [1]]),
+# Matrix([[Kc, -Kc*Td*Ti**2 + Kc*Td + Kc*Ti]]),
+# Matrix([[Kc*Td*Ti]]))
+
+
+
+# TODO: Make a general controller class first
+class SSModelCTPIDInt(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        Kc=None,
+        Ti=None,
+        Td=None,
+        Tf=None,
+        input_name=None,
+        state_names=None,
+        output_name=None,
+        name=None,
+    ):
+        """Construct a state space model of a continuous time
+        proportional-integral-derivative (PID) controller.
+
+        This PID is in interative (series) form with the following
+        transfer function:
+
+                    Kc (Ti s + 1) (Td s + 1)
+            Gc(s) = ------------------------
+                       (Ti s (Tf s + 1))
+
+        """
+        if input_name is None:
+            input_name = "e"
+        if output_name is None:
+            output_name = "u"
+        params = make_symbolic_vars_from_kwargs(Kc=Kc, Ti=Ti, Td=Td, Tf=Tf)
+        Kc = params["Kc"]
+        Ti = params["Ti"]
+        Td = params["Td"]
+        Tf = params["Tf"]
+        A = cas.sparsify(cas.blockcat([[0, 1], [0, -1 / Tf]]))
+        B = cas.sparsify(cas.vertcat(0, 1))
+        C = cas.horzcat(Kc, -Kc * Td * Ti**2 + Kc * Td + Kc * Ti)
+        D = cas.SX(Kc * Td * Ti)
+
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            name=name,
+            input_name=input_name,
+            state_names=state_names,
+            output_name=output_name,
+        )

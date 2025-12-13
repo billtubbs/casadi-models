@@ -11,6 +11,7 @@ from cas_models.param_utils import (
     concatenate_lists_of_names,
     merge_param_dicts,
 )
+from cas_models.discrete_time.models import is_ss_dt, validate_equal_dt
 
 
 def block_diag(matrices, square=False):
@@ -207,6 +208,8 @@ def connect_nonlinear_systems_in_parallel(
         ...     [sys1, sys2], attr_names_dt, StateSpaceModelDT
         ... )
     """
+    validate_systems_are_compatible(systems)
+
     if keys is None:
         keys = [sys.name for sys in systems]
     keys = make_list_of_unique_names(keys, prefix=prefix)
@@ -377,6 +380,7 @@ def connect_nonlinear_systems_in_series(
         ...     [sys1, sys2], attr_names_ct, StateSpaceModelCT
         ... )
     """
+    validate_systems_are_compatible(systems)
     if keys is None:
         keys = [sys.name for sys in systems]
     keys = make_list_of_unique_names(keys, prefix=prefix)
@@ -457,7 +461,9 @@ def connect_nonlinear_systems_in_series(
             [attr_names["output_var"]],
         )
         combined_system = model_class(
-            state_function, output_function, n, nu, ny, params=params
+            state_function, output_function, n, nu, ny, params=params,
+            input_names=combined_system.input_names,
+            output_names=sys2.output_names
         )
 
     combined_system.state_names = concatenate_lists_of_names(
@@ -530,13 +536,26 @@ def _normalize_connections(connections):
     return connections_norm
 
 
-def _validate_connections(connections_norm, parallel_sys, systems):
+def validate_systems_are_compatible(systems):
+    """Check all systems are compatible. For this, they must all be continuous-time
+    systems or all discrete-time systems with equal time intervals, dt.
+    """
+    dt_systems = [is_ss_dt(sys) for sys in systems]
+    all_same = all(dt_systems) or not any(dt_systems)
+    if not all_same:
+        raise ValueError("Cannot combine discrete time and continuous time systems")
+    
+    # Check discrete-time systems have same time interval
+    if dt_systems[0]:
+        validate_equal_dt(systems)
+
+
+def _validate_connections(connections_norm, parallel_sys):
     """Validate connection specification.
 
     Args:
         connections_norm: Normalized connections dict
         parallel_sys: The parallel system
-        systems: Original list of systems (for dt checking)
 
     Raises:
         ValueError: If connections are invalid
@@ -559,15 +578,6 @@ def _validate_connections(connections_norm, parallel_sys, systems):
                     f"input '{input_name}') not found in parallel system. "
                     f"Available outputs: {parallel_sys.output_names}"
                 )
-
-    # For discrete-time systems, check all have same dt
-    if hasattr(systems[0], "dt") and systems[0].dt is not None:
-        dt_values = [sys.dt for sys in systems if hasattr(sys, "dt")]
-        if not all(dt == dt_values[0] for dt in dt_values):
-            raise ValueError(
-                f"All discrete-time systems must have the same dt. "
-                f"Found dt values: {dt_values}"
-            )
 
 
 def _extract_outputs(y_parallel, output_names, parallel_sys):
@@ -819,7 +829,7 @@ def connect_nonlinear_systems(
 
     # Step 2: Normalize and validate connections
     connections_norm = _normalize_connections(connections)
-    _validate_connections(connections_norm, parallel_sys, systems)
+    _validate_connections(connections_norm, parallel_sys)
 
     # Step 3: Determine external inputs and outputs
     if input_names is None:
@@ -961,3 +971,73 @@ def connect_nonlinear_systems(
         )
 
     return connected_sys
+
+
+def connect_feedback_systems(
+    sys1,
+    sys2,
+    attr_names,
+    model_class,
+    sign=-1,
+    input_names=None,
+    output_names=None,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
+    name=None,
+    sep="_",
+):
+    """Combine two systems with a feedback interconnection from the
+    output of the second system to the input of the first.
+
+    This function works for both continuous-time and discrete-time systems by
+    using an attr_names dictionary to specify the appropriate attribute and
+    variable names.
+    """
+    sys_comb_open_loop = connect_nonlinear_systems_in_series(
+        [sys1, sys2],
+        attr_names,
+        model_class,
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+        name=name,
+        sep=sep,
+    )
+    if sys_comb_open_loop.nu != sys_comb_open_loop.ny:
+        raise ValueError(
+            "sys1 must have same number of inputs as outputs from sys2"
+        )
+    if input_names is None:
+        input_names = [f"{name}_sp" for name in sys_comb_open_loop.output_names]
+    else:
+        if len(input_names) != sys_comb_open_loop.ny:
+            raise ValueError(
+                "Number of input names must match number of sys2 outputs"
+            )
+    if output_names is None:
+        output_names = sys_comb_open_loop.output_names
+    sys_name = sys_comb_open_loop.name
+    connections = {}
+    for sp_name, e_name, y_name in zip(
+        input_names,
+        sys_comb_open_loop.input_names,
+        sys_comb_open_loop.output_names,
+    ):
+        connections[f"{sys_name}_{e_name}"] = {
+            sp_name: 1.0,
+            f"{sys_name}_{y_name}": sign,
+        }
+    return connect_nonlinear_systems(
+        [sys_comb_open_loop],
+        connections,
+        attr_names,
+        model_class,
+        input_names=input_names,
+        output_names=output_names,
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+        name=name,
+        sep=sep,
+    )

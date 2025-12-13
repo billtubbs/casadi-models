@@ -249,7 +249,16 @@ def make_sim_step_function_integrator_fixed_dt(
 
     # Compute integration step with fixed dt
     xkp1 = _integrator_step_symbolic(
-        f, n, nu, t, xk, uk, dt, params, solver, integrator_opts,
+        f,
+        n,
+        nu,
+        t,
+        xk,
+        uk,
+        dt,
+        params,
+        solver,
+        integrator_opts,
     )
 
     # Return a CasADi Function without dt argument

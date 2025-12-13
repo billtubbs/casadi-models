@@ -73,6 +73,15 @@ def is_ss_dt(sys):
     return hasattr(sys, "F") and hasattr(sys, "H")
 
 
+def validate_equal_dt(systems):
+    """Check all hdiscrete-time systems have the same time interval."""
+    dt_values = [sys.dt for sys in systems]
+    if not all(dt == dt_values[0] for dt in dt_values):
+        raise ValueError(
+            f"All discrete-time systems must have the same dt. "
+            f"Found dt values: {dt_values}"
+        )
+
 @dataclass
 class StateSpaceModelDT:
     """A discrete-time state-space model of a dynamical system
