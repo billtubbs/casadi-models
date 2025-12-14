@@ -54,6 +54,8 @@ def make_list_of_unique_names(keys, prefix="sys"):
 
 
 def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
+    # TODO: Add a verbose_names option so that only non-unique names are
+    # prefixed with the system key
     if keys is None:
         keys = make_list_of_enumerated_names(prefix, len(lists_of_names))
     elif len(lists_of_names) > len(set(keys)):

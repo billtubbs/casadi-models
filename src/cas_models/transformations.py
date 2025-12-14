@@ -209,7 +209,6 @@ def connect_nonlinear_systems_in_parallel(
         ... )
     """
     validate_systems_are_compatible(systems)
-
     if keys is None:
         keys = [sys.name for sys in systems]
     keys = make_list_of_unique_names(keys, prefix=prefix)
@@ -461,9 +460,14 @@ def connect_nonlinear_systems_in_series(
             [attr_names["output_var"]],
         )
         combined_system = model_class(
-            state_function, output_function, n, nu, ny, params=params,
+            state_function,
+            output_function,
+            n,
+            nu,
+            ny,
+            params=params,
             input_names=combined_system.input_names,
-            output_names=sys2.output_names
+            output_names=sys2.output_names,
         )
 
     combined_system.state_names = concatenate_lists_of_names(
@@ -543,8 +547,10 @@ def validate_systems_are_compatible(systems):
     dt_systems = [is_ss_dt(sys) for sys in systems]
     all_same = all(dt_systems) or not any(dt_systems)
     if not all_same:
-        raise ValueError("Cannot combine discrete time and continuous time systems")
-    
+        raise ValueError(
+            "Cannot combine discrete time and continuous time systems"
+        )
+
     # Check discrete-time systems have same time interval
     if dt_systems[0]:
         validate_equal_dt(systems)
@@ -1009,7 +1015,9 @@ def connect_feedback_systems(
             "sys1 must have same number of inputs as outputs from sys2"
         )
     if input_names is None:
-        input_names = [f"{name}_sp" for name in sys_comb_open_loop.output_names]
+        input_names = [
+            f"{name}_sp" for name in sys_comb_open_loop.output_names
+        ]
     else:
         if len(input_names) != sys_comb_open_loop.ny:
             raise ValueError(
