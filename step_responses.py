@@ -97,4 +97,5 @@ for name in models:
     ax.grid(False)
     plt.tight_layout()
     plt.savefig(PLOT_DIR / f"{name}_sr.png", dpi=150)
+    plt.savefig(PLOT_DIR / f"{name}_sr.svg")
     plt.close()

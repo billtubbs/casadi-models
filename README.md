@@ -77,7 +77,7 @@ sys = sys_model * sys_model_2
 ## Examples: Simulation
 
 ```python
-from cas_models.disctete_time.models import StateSpaceModelDTFromCT
+from cas_models.discrete_time.models import StateSpaceModelDTFromCT
 from cas_models.discrete_time.simulate import make_n_step_simulation_function_from_model
 
 # Continuous time model
@@ -124,4 +124,17 @@ assert X.shape == (nT+1, sys_dt.nu)  # states
 assert Y.shape == (nT+1, sys_dt.ny)  # outputs
 ```
 
-Note that I prefer to use `cas` to refer to the casadi package rather than `ca`.
+
+```python
+# Make time-series plot
+fig, ax = plt.subplots(figsize=(4, 2.5))
+ax.plot(t, Y[:, 0])
+ax.set_xlabel("t")
+ax.set_ylabel("y")
+ax.grid(False)
+plt.tight_layout()
+plt.savefig(PLOT_DIR / f"example_sr.png", dpi=150)
+plt.savefig(PLOT_DIR / f"example_sr.svg")
+plt.close()
+```
+![Time series plot of step response of system](https://github.com/billtubbs/casadi-models/blob/main/plots/example_sr.svg)
