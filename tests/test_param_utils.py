@@ -1,5 +1,6 @@
 """Unit tests for src/cas_models/param_utils.py module"""
 
+import pytest
 import casadi as cas
 from casadi import SX
 from cas_models.param_utils import (
@@ -38,10 +39,23 @@ def test_make_list_of_unique_names():
 
 
 def test_concatenate_lists_of_names():
-    # Without custom system names
+    # Test 1: Default behavior (verbose_names=False) with conflicts
     sys1_param_names = ["K", "T1", "T2"]
     sys2_param_names = ["K", "T1", "theta"]
     names = concatenate_lists_of_names([sys1_param_names, sys2_param_names])
+    # K and T1 conflict, so both get prefixed. T2 and theta are unique.
+    assert names == ["sys1_K", "sys1_T1", "T2", "sys2_K", "sys2_T1", "theta"]
+
+    # Test 2: With custom system names (verbose_names=False)
+    names = concatenate_lists_of_names(
+        [sys1_param_names, sys2_param_names], keys=["G1", "G2"]
+    )
+    assert names == ["G1_K", "G1_T1", "T2", "G2_K", "G2_T1", "theta"]
+
+    # Test 3: With verbose_names=True (always prepend keys)
+    names = concatenate_lists_of_names(
+        [sys1_param_names, sys2_param_names], verbose_names=True
+    )
     assert names == [
         "sys1_K",
         "sys1_T1",
@@ -51,11 +65,52 @@ def test_concatenate_lists_of_names():
         "sys2_theta",
     ]
 
-    # With custom system names
+    # Test 4: With custom keys and verbose_names=True
     names = concatenate_lists_of_names(
-        [sys1_param_names, sys2_param_names], keys=["G1", "G2"]
+        [sys1_param_names, sys2_param_names], keys=["G1", "G2"], verbose_names=True
     )
     assert names == ["G1_K", "G1_T1", "G1_T2", "G2_K", "G2_T1", "G2_theta"]
+
+    # Test 5: No conflicts - all names should be kept as-is (verbose_names=False)
+    sys1_names = ["a", "b", "c"]
+    sys2_names = ["d", "e", "f"]
+    names = concatenate_lists_of_names([sys1_names, sys2_names], keys=["x", "y"])
+    assert names == ["a", "b", "c", "d", "e", "f"]
+
+    # Test 6: Same test with verbose_names=True - all get prefixed
+    names = concatenate_lists_of_names(
+        [sys1_names, sys2_names], keys=["x", "y"], verbose_names=True
+    )
+    assert names == ["x_a", "x_b", "x_c", "y_d", "y_e", "y_f"]
+
+    # Test 7: Partial conflicts - only conflicting names get prefixed
+    sys1_names = ["u1", "x", "y1"]
+    sys2_names = ["u2", "x", "y2"]
+    names = concatenate_lists_of_names([sys1_names, sys2_names], keys=["s1", "s2"])
+    # Only 'x' conflicts
+    assert names == ["u1", "s1_x", "y1", "u2", "s2_x", "y2"]
+
+    # Test 8: Three systems with various conflicts
+    sys1_names = ["a", "b"]
+    sys2_names = ["b", "c"]
+    sys3_names = ["c", "d"]
+    names = concatenate_lists_of_names(
+        [sys1_names, sys2_names, sys3_names], keys=["x", "y", "z"]
+    )
+    # 'a' is unique, 'b' conflicts (x,y), 'c' conflicts (y,z), 'd' is unique
+    assert names == ["a", "x_b", "y_b", "y_c", "z_c", "d"]
+
+    # Test 9: Error - duplicate keys
+    with pytest.raises(ValueError, match="not enough unique keys"):
+        concatenate_lists_of_names(
+            [sys1_names, sys2_names], keys=["x", "x"]
+        )
+
+    # Test 10: Error - not enough keys
+    with pytest.raises(ValueError, match="not enough unique keys"):
+        concatenate_lists_of_names(
+            [sys1_names, sys2_names, sys3_names], keys=["x", "y"]
+        )
 
 
 def test_merge_param_dicts():

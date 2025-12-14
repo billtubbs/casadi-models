@@ -284,16 +284,23 @@ def connect_nonlinear_systems_in_parallel(
         [sys.state_names for sys in systems],
         keys=keys,
         prefix=prefix,
+        verbose_names=verbose_names,
     )
     assert len(state_names) == n
 
     input_names = concatenate_lists_of_names(
-        [sys.input_names for sys in systems], keys=keys, prefix=prefix
+        [sys.input_names for sys in systems],
+        keys=keys,
+        prefix=prefix,
+        verbose_names=verbose_names,
     )
     assert len(input_names) == nu
 
     output_names = concatenate_lists_of_names(
-        [sys.output_names for sys in systems], keys=keys, prefix=prefix
+        [sys.output_names for sys in systems],
+        keys=keys,
+        prefix=prefix,
+        verbose_names=verbose_names,
     )
     assert len(output_names) == ny
 
@@ -459,6 +466,19 @@ def connect_nonlinear_systems_in_series(
             ],
             [attr_names["output_var"]],
         )
+        if verbose_names:
+            input_names = [
+                keys[0] + "_" + name for name in sys1.input_names
+            ]
+        else:
+            input_names = sys1.input_names
+        if verbose_names:
+            output_names = [
+                keys[-1] + "_" + name for name in sys2.output_names
+            ]
+        else:
+            output_names = sys2.output_names
+
         combined_system = model_class(
             state_function,
             output_function,
@@ -466,12 +486,14 @@ def connect_nonlinear_systems_in_series(
             nu,
             ny,
             params=params,
-            input_names=combined_system.input_names,
-            output_names=sys2.output_names,
+            input_names=input_names,
+            output_names=output_names,
         )
 
     combined_system.state_names = concatenate_lists_of_names(
-        list(reversed(state_name_lists)), keys=list(reversed(keys))
+        list(reversed(state_name_lists)),
+        keys=list(reversed(keys)),
+        verbose_names=verbose_names,
     )
 
     # Set combined system name

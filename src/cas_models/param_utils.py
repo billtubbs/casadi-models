@@ -53,18 +53,61 @@ def make_list_of_unique_names(keys, prefix="sys"):
     return new_names
 
 
-def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys"):
-    # TODO: Add a verbose_names option so that only non-unique names are
-    # prefixed with the system key
+def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys", verbose_names=False):
+    """Concatenate multiple lists of names into a single unique list.
+
+    Args:
+        lists_of_names: List of lists of name strings
+        keys: List of keys to use for prefixing (generated if None)
+        prefix: Prefix for auto-generated keys (default: "sys")
+        verbose_names: If True, always prepend keys to all names.
+                      If False (default), only prepend keys to conflicting names.
+
+    Returns:
+        List of unique names
+
+    Examples:
+        >>> concatenate_lists_of_names([['a', 'b'], ['c', 'd']], keys=['x', 'y'])
+        ['a', 'b', 'c', 'd']  # verbose_names=False (default), no conflicts
+
+        >>> concatenate_lists_of_names([['a', 'b'], ['a', 'c']], keys=['x', 'y'])
+        ['x_a', 'b', 'y_a', 'c']  # 'a' conflicts, so both get prefixed
+
+        >>> concatenate_lists_of_names([['a', 'b'], ['c', 'd']], keys=['x', 'y'],
+        ...                            verbose_names=True)
+        ['x_a', 'x_b', 'y_c', 'y_d']  # Always prepend keys
+    """
     if keys is None:
         keys = make_list_of_enumerated_names(prefix, len(lists_of_names))
     elif len(lists_of_names) > len(set(keys)):
         raise ValueError("not enough unique keys")
-    names = [
-        f"{key}_{name}"
-        for key, names in zip(keys, lists_of_names)
-        for name in names
-    ]
+
+    if verbose_names:
+        # Original behavior: always prepend keys
+        names = [
+            f"{key}_{name}"
+            for key, names in zip(keys, lists_of_names)
+            for name in names
+        ]
+    else:
+        # New behavior: only prepend keys when there are conflicts
+        # First, identify which names appear in multiple lists
+        name_to_keys = defaultdict(list)
+        for key, names_list in zip(keys, lists_of_names):
+            for name in names_list:
+                name_to_keys[name].append(key)
+
+        # Build the result list, prepending keys only for conflicting names
+        names = []
+        for key, names_list in zip(keys, lists_of_names):
+            for name in names_list:
+                if len(name_to_keys[name]) > 1:
+                    # Name appears in multiple lists - prepend key
+                    names.append(f"{key}_{name}")
+                else:
+                    # Name is unique - keep as-is
+                    names.append(name)
+
     if len(names) > len(set(names)):
         raise ValueError("non-unique names")
     return names

@@ -575,8 +575,7 @@ def test_mul_operator_series_connection():
         "n=4, nu=1, ny=1, "
         "params={'K': SX(K), 'sys1_T1': SX(T1), 'sys2_T1': SX(T1), "
         "'T1': SX(T1), 'T2': SX(T2)}, name='sys1_sys2_sys1', "
-        "input_names=['u'], "
-        "state_names=['sys1_x1', 'sys1_x2', 'sys1_sys2_sys2_x', 'sys1_sys2_sys1_x'], "
+        "input_names=['u'], state_names=['x1', 'x2', 'sys2_x', 'sys1_x'], "
         "output_names=['y'])"
     )
 
