@@ -5,7 +5,6 @@ import casadi as cas
 from cas_models.validation import validate_casadi_function_dims
 
 
-
 def test_validate_casadi_function_dims():
     args = {
         "t": cas.SX.sym("t"),
@@ -27,12 +26,12 @@ def test_validate_casadi_function_dims():
     validate_casadi_function_dims(f, arg_shapes, return_shapes)
 
     wrong_arg_shapes = arg_shapes.copy()
-    wrong_arg_shapes['t'] = (2, 1)
+    wrong_arg_shapes["t"] = (2, 1)
     with pytest.raises(AssertionError):
         validate_casadi_function_dims(f, wrong_arg_shapes, return_shapes)
 
     wrong_return_shapes = return_shapes.copy()
-    wrong_return_shapes['rhs'] = (1, 2)
+    wrong_return_shapes["rhs"] = (1, 2)
     with pytest.raises(AssertionError):
         validate_casadi_function_dims(f, arg_shapes, wrong_return_shapes)
 

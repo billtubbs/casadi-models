@@ -139,7 +139,6 @@ def linear_systems_in_series(
 
 def connect_nonlinear_systems_in_parallel(
     systems,
-    attr_names,
     model_class,
     keys=None,
     verbose_names=False,
@@ -150,22 +149,15 @@ def connect_nonlinear_systems_in_parallel(
     """Combine a collection of nonlinear systems into one large parallel
     system.
 
-    This function works for both continuous-time and discrete-time systems by
-    using an attr_names dictionary to specify the appropriate attribute and
-    variable names.
+    This function works for both continuous-time and discrete-time systems.
+    The attribute names are automatically determined from the model_class.
 
     Args:
         systems (list): List of state-space model objects to combine in
             parallel.
-        attr_names (dict): Dictionary specifying naming conventions with keys:
-            - 'state_func': Attribute name for state function ('f' or 'F')
-            - 'output_func': Attribute name for output function ('h' or 'H')
-            - 'state_var': Variable name for state ('x' or 'xk')
-            - 'input_var': Variable name for input ('u' or 'uk')
-            - 'state_output': Output name for state function ('rhs' or 'xkp1')
-            - 'output_var': Output name for output function ('y' or 'yk')
         model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT)
+            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
+            attribute determines the naming conventions.
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to [prefix + "1", prefix + "2", ...].
         verbose_names (bool, optional): If True, use verbose parameter naming.
@@ -183,32 +175,17 @@ def connect_nonlinear_systems_in_parallel(
 
     Example:
         >>> # For continuous-time models:
-        >>> attr_names_ct = {
-        ...     "state_func": "f",
-        ...     "output_func": "h",
-        ...     "state_var": "x",
-        ...     "input_var": "u",
-        ...     "state_output": "rhs",
-        ...     "output_var": "y",
-        ... }
         >>> combined = connect_nonlinear_systems_in_parallel(
-        ...     [sys1, sys2], attr_names_ct, StateSpaceModelCT
+        ...     [sys1, sys2], StateSpaceModelCT
         ... )
         >>>
         >>> # For discrete-time models:
-        >>> attr_names_dt = {
-        ...     "state_func": "F",
-        ...     "output_func": "H",
-        ...     "state_var": "xk",
-        ...     "input_var": "uk",
-        ...     "state_output": "xkp1",
-        ...     "output_var": "yk",
-        ... }
         >>> combined = connect_nonlinear_systems_in_parallel(
-        ...     [sys1, sys2], attr_names_dt, StateSpaceModelDT
+        ...     [sys1, sys2], StateSpaceModelDT
         ... )
     """
     validate_systems_are_compatible(systems)
+    attr_names = model_class._attr_names
     if keys is None:
         keys = [sys.name for sys in systems]
     keys = make_list_of_unique_names(keys, prefix=prefix)
@@ -330,7 +307,6 @@ def connect_nonlinear_systems_in_parallel(
 
 def connect_nonlinear_systems_in_series(
     systems,
-    attr_names,
     model_class,
     keys=None,
     verbose_names=False,
@@ -341,22 +317,15 @@ def connect_nonlinear_systems_in_series(
     """Combine a series of non-linear systems by connecting their inputs and
     outputs in series.
 
-    This function works for both continuous-time and discrete-time systems by
-    using an attr_names dictionary to specify the appropriate attribute and
-    variable names.
+    This function works for both continuous-time and discrete-time systems.
+    The attribute names are automatically determined from the model_class.
 
     Args:
         systems (list): List of state-space model objects to combine in series.
             The output of each system is connected to the input of the next.
-        attr_names (dict): Dictionary specifying naming conventions with keys:
-            - 'state_func': Attribute name for state function ('f' or 'F')
-            - 'output_func': Attribute name for output function ('h' or 'H')
-            - 'state_var': Variable name for state ('x' or 'xk')
-            - 'input_var': Variable name for input ('u' or 'uk')
-            - 'state_output': Output name for state function ('rhs' or 'xkp1')
-            - 'output_var': Output name for output function ('y' or 'yk')
         model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT)
+            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
+            attribute determines the naming conventions.
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to [prefix + "1", prefix + "2", ...].
         verbose_names (bool, optional): If True, use verbose parameter naming.
@@ -374,19 +343,12 @@ def connect_nonlinear_systems_in_series(
 
     Example:
         >>> # For continuous-time models:
-        >>> attr_names_ct = {
-        ...     "state_func": "f",
-        ...     "output_func": "h",
-        ...     "state_var": "x",
-        ...     "input_var": "u",
-        ...     "state_output": "rhs",
-        ...     "output_var": "y",
-        ... }
         >>> combined = connect_nonlinear_systems_in_series(
-        ...     [sys1, sys2], attr_names_ct, StateSpaceModelCT
+        ...     [sys1, sys2], StateSpaceModelCT
         ... )
     """
     validate_systems_are_compatible(systems)
+    attr_names = model_class._attr_names
     if keys is None:
         keys = [sys.name for sys in systems]
     keys = make_list_of_unique_names(keys, prefix=prefix)
@@ -467,9 +429,7 @@ def connect_nonlinear_systems_in_series(
             [attr_names["output_var"]],
         )
         if verbose_names:
-            input_names = [
-                keys[0] + "_" + name for name in sys1.input_names
-            ]
+            input_names = [keys[0] + "_" + name for name in sys1.input_names]
         else:
             input_names = sys1.input_names
         if verbose_names:
@@ -563,18 +523,27 @@ def _normalize_connections(connections):
 
 
 def validate_systems_are_compatible(systems):
-    """Check all systems are compatible. For this, they must all be continuous-time
-    systems or all discrete-time systems with equal time intervals, dt.
+    """Check all systems are compatible for connection.
+
+    Systems must have:
+    1. The same _attr_names (i.e., same system type)
+    2. For discrete-time systems, equal time intervals (dt)
     """
-    dt_systems = [is_ss_dt(sys) for sys in systems]
-    all_same = all(dt_systems) or not any(dt_systems)
-    if not all_same:
-        raise ValueError(
-            "Cannot combine discrete time and continuous time systems"
-        )
+    if not systems:
+        raise ValueError("Cannot validate empty system list")
+
+    # Check all systems have same attribute naming convention
+    expected_attrs = systems[0]._attr_names
+    for i, sys in enumerate(systems[1:], 1):
+        if sys._attr_names != expected_attrs:
+            raise ValueError(
+                f"Cannot combine systems with different types. "
+                f"System 0 has {expected_attrs}, "
+                f"but system {i} has {sys._attr_names}"
+            )
 
     # Check discrete-time systems have same time interval
-    if dt_systems[0]:
+    if hasattr(systems[0], "dt"):
         validate_equal_dt(systems)
 
 
@@ -723,7 +692,6 @@ def _build_internal_input_vector(
 def connect_nonlinear_systems(
     systems,
     connections,
-    attr_names,
     model_class,
     input_names=None,
     output_names=None,
@@ -751,11 +719,9 @@ def connect_nonlinear_systems(
                 - A string: 'sys2_y' (simple connection)
                 - A list: ['sys2_y', 'sys3_y'] (sum with unit gains)
                 - A dict: {'sys2_y': 1.0, 'sys3_y': -0.5} (weighted sum)
-        attr_names (dict): Naming conventions dict (CT or DT) with keys:
-            - 'state_func', 'output_func', 'state_var', 'input_var',
-            - 'state_output', 'output_var'
         model_class: Target model class (StateSpaceModelCT or
-            StateSpaceModelDT).
+            StateSpaceModelDT). The _attr_names class attribute determines
+            the naming conventions.
         input_names (list, optional): List of external input signal names to
             expose. If None, exposes all inputs that are not connected.
         output_names (list, optional): List of external output signal names
@@ -836,10 +802,11 @@ def connect_nonlinear_systems(
             connections
         connect_nonlinear_systems_in_series: Connect systems in series
     """
+    attr_names = model_class._attr_names
+
     # Step 1: Create parallel system
     parallel_sys = connect_nonlinear_systems_in_parallel(
         systems,
-        attr_names,
         model_class,
         keys=keys,
         verbose_names=verbose_names,

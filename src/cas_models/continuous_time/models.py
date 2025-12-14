@@ -84,6 +84,16 @@ class StateSpaceModelCT:
 
     """
 
+    # Class attribute defining the naming convention for CT systems
+    _attr_names = {
+        "state_func": "f",
+        "output_func": "h",
+        "state_var": "x",
+        "input_var": "u",
+        "state_output": "rhs",
+        "output_var": "y",
+    }
+
     f: cas.Function
     h: cas.Function
     n: int
@@ -210,7 +220,7 @@ class StateSpaceModelCT:
         )
 
         return connect_nonlinear_systems_in_series(
-            [self, other], ATTR_NAMES, model_class=StateSpaceModelCT
+            [self, other], model_class=StateSpaceModelCT
         )
 
 
@@ -749,9 +759,9 @@ class SSModelCTPIInt(SSModelCTFromABCDSISO):
         This PI is in interative (series) form with the following
         transfer function:
 
-                    Kc (Ti s + 1) 
+                    Kc (Ti s + 1)
             Gc(s) = -------------
-                        Ti s 
+                        Ti s
 
         """
         if input_name is None:
@@ -777,6 +787,7 @@ class SSModelCTPIInt(SSModelCTFromABCDSISO):
             output_name=output_name,
         )
 
+
 # Derived using Sympy as follows
 #
 # import sympy
@@ -797,7 +808,6 @@ class SSModelCTPIInt(SSModelCTFromABCDSISO):
 # [1]]),
 # Matrix([[Kc, -Kc*Td*Ti**2 + Kc*Td + Kc*Ti]]),
 # Matrix([[Kc*Td*Ti]]))
-
 
 
 # TODO: Make a general controller class first

@@ -15,7 +15,6 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearO2NoGainSISO,
     SSModelCTLinearO2UnderdampedSISO,
     is_ss_ct,
-    ATTR_NAMES,
 )
 from cas_models.discrete_time.models import is_ss_dt
 from cas_models.transformations import block_diag

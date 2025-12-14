@@ -82,6 +82,7 @@ def validate_equal_dt(systems):
             f"Found dt values: {dt_values}"
         )
 
+
 @dataclass
 class StateSpaceModelDT:
     """A discrete-time state-space model of a dynamical system
@@ -91,6 +92,16 @@ class StateSpaceModelDT:
             y(k) = H(t, x(k), u(k), *params.values())
 
     """
+
+    # Class attribute defining the naming convention for DT systems
+    _attr_names = {
+        "state_func": "F",
+        "output_func": "H",
+        "state_var": "xk",
+        "input_var": "uk",
+        "state_output": "xkp1",
+        "output_var": "yk",
+    }
 
     F: cas.Function
     H: cas.Function

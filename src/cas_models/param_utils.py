@@ -53,7 +53,9 @@ def make_list_of_unique_names(keys, prefix="sys"):
     return new_names
 
 
-def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys", verbose_names=False):
+def concatenate_lists_of_names(
+    lists_of_names, keys=None, prefix="sys", verbose_names=False
+):
     """Concatenate multiple lists of names into a single unique list.
 
     Args:
@@ -67,14 +69,19 @@ def concatenate_lists_of_names(lists_of_names, keys=None, prefix="sys", verbose_
         List of unique names
 
     Examples:
-        >>> concatenate_lists_of_names([['a', 'b'], ['c', 'd']], keys=['x', 'y'])
+        >>> concatenate_lists_of_names(
+        ...     [["a", "b"], ["c", "d"]], keys=["x", "y"]
+        ... )
         ['a', 'b', 'c', 'd']  # verbose_names=False (default), no conflicts
 
-        >>> concatenate_lists_of_names([['a', 'b'], ['a', 'c']], keys=['x', 'y'])
+        >>> concatenate_lists_of_names(
+        ...     [["a", "b"], ["a", "c"]], keys=["x", "y"]
+        ... )
         ['x_a', 'b', 'y_a', 'c']  # 'a' conflicts, so both get prefixed
 
-        >>> concatenate_lists_of_names([['a', 'b'], ['c', 'd']], keys=['x', 'y'],
-        ...                            verbose_names=True)
+        >>> concatenate_lists_of_names(
+        ...     [["a", "b"], ["c", "d"]], keys=["x", "y"], verbose_names=True
+        ... )
         ['x_a', 'x_b', 'y_c', 'y_d']  # Always prepend keys
     """
     if keys is None:

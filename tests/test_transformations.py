@@ -8,7 +8,6 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearFONoGainSISO,
     SSModelCTLinearFOSISO,
     is_ss_ct,
-    ATTR_NAMES,
 )
 from cas_models.transformations import (
     connect_nonlinear_systems,
@@ -27,7 +26,7 @@ def test_connect_nonlinear_systems_in_parallel():
 
     # With defaults - using new generalized function
     sys_combined = connect_nonlinear_systems_in_parallel(
-        [sys1, sys2], ATTR_NAMES, StateSpaceModelCT
+        [sys1, sys2], StateSpaceModelCT
     )
 
     assert str(sys_combined) == (
@@ -46,7 +45,7 @@ def test_connect_nonlinear_systems_in_parallel():
         input_name="u3", state_names=["x3"], output_name="y3"
     )
     sys_combined = connect_nonlinear_systems_in_parallel(
-        [sys1, sys2, sys3], ATTR_NAMES, StateSpaceModelCT, keys=["a", "b", "c"]
+        [sys1, sys2, sys3], StateSpaceModelCT, keys=["a", "b", "c"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -65,7 +64,7 @@ def test_connect_nonlinear_systems_in_parallel():
     sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys3 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys_combined = connect_nonlinear_systems_in_parallel(
-        [sys1, sys2, sys3], ATTR_NAMES, StateSpaceModelCT, keys=["a", "b", "c"]
+        [sys1, sys2, sys3], StateSpaceModelCT, keys=["a", "b", "c"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -80,15 +79,15 @@ def test_connect_nonlinear_systems_in_parallel():
 
 def test_connect_nonlinear_systems_in_series():
     sys1 = SSModelCTLinearFOSISO(
-        input_name="u1", state_names=['x1'], output_name="y1"
+        input_name="u1", state_names=["x1"], output_name="y1"
     )
     sys2 = SSModelCTLinearFONoGainSISO(
-        input_name="u2", state_names=['x2'], output_name="y2"
+        input_name="u2", state_names=["x2"], output_name="y2"
     )
 
     # With defaults
     sys_combined = connect_nonlinear_systems_in_series(
-        [sys1, sys2], ATTR_NAMES, StateSpaceModelCT
+        [sys1, sys2], StateSpaceModelCT
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -103,7 +102,7 @@ def test_connect_nonlinear_systems_in_series():
 
     # With custom keys
     sys_combined = connect_nonlinear_systems_in_series(
-        [sys1, sys2], ATTR_NAMES, StateSpaceModelCT, keys=["in", "out"]
+        [sys1, sys2], StateSpaceModelCT, keys=["in", "out"]
     )
     assert str(sys_combined) == (
         "StateSpaceModelCT("
@@ -119,7 +118,6 @@ def test_connect_nonlinear_systems_in_series():
     # With verbose names
     sys_combined = connect_nonlinear_systems_in_series(
         [sys1, sys2],
-        ATTR_NAMES,
         StateSpaceModelCT,
         keys=["in", "out"],
         verbose_names=True,
@@ -140,7 +138,6 @@ def test_connect_nonlinear_systems_in_series():
     sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
     sys_combined = connect_nonlinear_systems_in_series(
         [sys1, sys2],
-        ATTR_NAMES,
         StateSpaceModelCT,
         keys=["in", "out"],
         verbose_names=True,
@@ -165,7 +162,6 @@ def test_connect_vs_series():
     connected_via_connect = connect_nonlinear_systems(
         [sys1, sys2],
         connections={"sys2_u": "sys1_y"},  # sys1 output to sys2 input
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
         input_names=["sys1_u"],
         output_names=["sys2_y"],
@@ -174,7 +170,6 @@ def test_connect_vs_series():
     # Connect using series function
     connected_via_series = connect_nonlinear_systems_in_series(
         [sys1, sys2],
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
     )
 
@@ -203,7 +198,6 @@ def test_connect_connection_formats():
     connected_list = connect_nonlinear_systems(
         [sys1, sys2],
         connections=[("sys2_y", "sys1_u")],
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
     )
     assert connected_list.n == 2
@@ -214,7 +208,6 @@ def test_connect_connection_formats():
     connected_dict = connect_nonlinear_systems(
         [sys1, sys2],
         connections={"sys1_u": "sys2_y"},
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
     )
     assert connected_dict.n == 2
@@ -234,7 +227,6 @@ def test_connect_summing_junction():
         connections={
             "sys1_u": {"sys2_y": 1.0, "sys3_y": -0.5},  # Weighted sum
         },
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
     )
     assert connected_weighted.n == 3
@@ -247,7 +239,6 @@ def test_connect_summing_junction():
         connections={
             "sys1_u": ["sys2_y", "sys3_y"],  # Sum with unit gains
         },
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
     )
     assert connected_unit.n == 3
@@ -264,7 +255,6 @@ def test_connect_trimming():
     connected = connect_nonlinear_systems(
         [sys1, sys2],
         connections={"sys1_u": "sys2_y"},
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
         input_names=["sys2_u"],  # Only expose sys2_u
         output_names=["sys1_y"],  # Only expose sys1_y
@@ -285,7 +275,6 @@ def test_connect_feedback_and_empty():
     parallel = connect_nonlinear_systems(
         [sys1, sys2],
         connections=[],
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
     )
     assert parallel.n == 2
@@ -296,7 +285,6 @@ def test_connect_feedback_and_empty():
     feedback_dict = connect_nonlinear_systems(
         [sys1, sys2],
         connections={"sys1_u": "sys2_y", "sys2_u": "sys1_y"},
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
     )
     assert feedback_dict.n == 2
@@ -308,7 +296,6 @@ def test_connect_feedback_and_empty():
     feedback_list = connect_nonlinear_systems(
         [sys1, sys2],
         connections=[("sys2_y", "sys1_u"), ("sys1_y", "sys2_u")],
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
     )
     assert feedback_list.n == 2
@@ -328,7 +315,6 @@ def test_connect_error_handling():
         connect_nonlinear_systems(
             [sys1, sys2],
             connections={"sys3_u": "sys1_y"},
-            attr_names=ATTR_NAMES,
             model_class=StateSpaceModelCT,
         )
 
@@ -337,7 +323,6 @@ def test_connect_error_handling():
         connect_nonlinear_systems(
             [sys1, sys2],
             connections={"sys1_u": "sys3_y"},
-            attr_names=ATTR_NAMES,
             model_class=StateSpaceModelCT,
         )
 
@@ -351,7 +336,6 @@ def test_connect_error_handling():
                 ("sys2_y", "sys1_u"),
                 ("sys1_y", "sys1_u"),  # Duplicate target
             ],
-            attr_names=ATTR_NAMES,
             model_class=StateSpaceModelCT,
         )
 
@@ -369,7 +353,6 @@ def test_connect_complex_example():
             "sys1_u": {"sys2_y": 1.0, "sys3_y": -0.5},  # Summing junction
             "sys2_u": "sys1_y",  # Feedback from sys1
         },
-        attr_names=ATTR_NAMES,
         model_class=StateSpaceModelCT,
         input_names=["sys3_u"],  # Only sys3 input is external
         output_names=["sys1_y", "sys2_y"],  # Expose sys1 and sys2 outputs
