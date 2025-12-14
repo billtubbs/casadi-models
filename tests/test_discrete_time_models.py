@@ -446,7 +446,6 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
     )
 
 
-
 # TODO: Introduce this class as an intermediate step to state space models.
 # def test_StateSpaceModelDTFromABCD_FO_SISO(symbolic_FO_SISO):
 #     _, _, _, A, B, C, D, _, _, _, _ = symbolic_FO_SISO
@@ -521,10 +520,12 @@ def test_StateSpaceModelDTFromCTRK4():
     rhs = -a * x + b * u
     y = x
 
-    f = cas.Function("f", [t, x, u, a, b], [rhs],
-                     ["t", "x", "u", "a", "b"], ["rhs"])
-    h = cas.Function("h", [t, x, u, a, b], [y],
-                     ["t", "x", "u", "a", "b"], ["y"])
+    f = cas.Function(
+        "f", [t, x, u, a, b], [rhs], ["t", "x", "u", "a", "b"], ["rhs"]
+    )
+    h = cas.Function(
+        "h", [t, x, u, a, b], [y], ["t", "x", "u", "a", "b"], ["y"]
+    )
 
     model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
 
@@ -584,10 +585,12 @@ def test_StateSpaceModelDTFromCT():
     rhs = -a * x + b * u
     y = x
 
-    f = cas.Function("f", [t, x, u, a, b], [rhs],
-                     ["t", "x", "u", "a", "b"], ["rhs"])
-    h = cas.Function("h", [t, x, u, a, b], [y],
-                     ["t", "x", "u", "a", "b"], ["y"])
+    f = cas.Function(
+        "f", [t, x, u, a, b], [rhs], ["t", "x", "u", "a", "b"], ["rhs"]
+    )
+    h = cas.Function(
+        "h", [t, x, u, a, b], [y], ["t", "x", "u", "a", "b"], ["y"]
+    )
 
     model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
 
@@ -638,10 +641,12 @@ def test_StateSpaceModelDTFromCT_compare_solvers():
     rhs = -a * x + b * u
     y = x
 
-    f = cas.Function("f", [t, x, u, a, b], [rhs],
-                     ["t", "x", "u", "a", "b"], ["rhs"])
-    h = cas.Function("h", [t, x, u, a, b], [y],
-                     ["t", "x", "u", "a", "b"], ["y"])
+    f = cas.Function(
+        "f", [t, x, u, a, b], [rhs], ["t", "x", "u", "a", "b"], ["rhs"]
+    )
+    h = cas.Function(
+        "h", [t, x, u, a, b], [y], ["t", "x", "u", "a", "b"], ["y"]
+    )
 
     model_ct = StateSpaceModelCT(f, h, n, nu, ny, params=params)
 
@@ -649,8 +654,10 @@ def test_StateSpaceModelDTFromCT_compare_solvers():
     dt = 0.1
     model_rk4 = StateSpaceModelDTFromCTRK4(model_ct, dt)
     model_cvodes = StateSpaceModelDTFromCT(
-        model_ct, dt, solver='cvodes',
-        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+        model_ct,
+        dt,
+        solver="cvodes",
+        integrator_opts={"abstol": 1e-10, "reltol": 1e-10},
     )
 
     # Test with numeric values
@@ -669,8 +676,10 @@ def test_StateSpaceModelDTFromCT_compare_solvers():
 
     # Test with RK integrator as well
     model_rk = StateSpaceModelDTFromCT(
-        model_ct, dt, solver='rk',
-        integrator_opts={'number_of_finite_elements': 4}
+        model_ct,
+        dt,
+        solver="rk",
+        integrator_opts={"number_of_finite_elements": 4},
     )
     x1_rk = model_rk.F(t_val, x0, u_val, a_val, b_val)
 
@@ -701,9 +710,13 @@ def test_StateSpaceModelDTDelay_SISO():
 
         # Output should be 0 before delay, 1 after delay
         if k < nk:
-            assert float(y) == 0.0, f"At k={k}, expected y=0 but got {float(y)}"
+            assert float(y) == 0.0, (
+                f"At k={k}, expected y=0 but got {float(y)}"
+            )
         else:
-            assert float(y) == 1.0, f"At k={k}, expected y=1 but got {float(y)}"
+            assert float(y) == 1.0, (
+                f"At k={k}, expected y=1 but got {float(y)}"
+            )
 
         x = model.F(t_val, x, u_val)
         t_val += 1
@@ -733,9 +746,13 @@ def test_StateSpaceModelDTDelay_MIMO_identity():
 
         # Outputs should be delayed versions of inputs
         if k < nk:
-            assert np.allclose(y, [0.0, 0.0]), f"At k={k}, expected y=[0, 0] but got {y}"
+            assert np.allclose(y, [0.0, 0.0]), (
+                f"At k={k}, expected y=[0, 0] but got {y}"
+            )
         else:
-            assert np.allclose(y, [1.0, 2.0]), f"At k={k}, expected y=[1, 2] but got {y}"
+            assert np.allclose(y, [1.0, 2.0]), (
+                f"At k={k}, expected y=[1, 2] but got {y}"
+            )
 
         x = model.F(t_val, x, u_val)
         t_val += 1
@@ -772,9 +789,13 @@ def test_StateSpaceModelDTDelay_MIMO_custom_gain():
 
         # Outputs should be zero before delay, G*u after delay
         if k < nk:
-            assert np.allclose(y, [0.0, 0.0]), f"At k={k}, expected y=[0, 0] but got {y}"
+            assert np.allclose(y, [0.0, 0.0]), (
+                f"At k={k}, expected y=[0, 0] but got {y}"
+            )
         else:
-            assert np.allclose(y, y_expected), f"At k={k}, expected y={y_expected} but got {y}"
+            assert np.allclose(y, y_expected), (
+                f"At k={k}, expected y={y_expected} but got {y}"
+            )
 
         x = model.F(t_val, x, u_val)
         t_val += 1
@@ -801,7 +822,9 @@ def test_StateSpaceModelDTDelay_varying_input():
         else:
             y_expected = float(k - nk)
 
-        assert np.isclose(y, y_expected), f"At k={k}, expected y={y_expected} but got {y}"
+        assert np.isclose(y, y_expected), (
+            f"At k={k}, expected y={y_expected} but got {y}"
+        )
 
         x = model.F(t_val, x, u_val)
         t_val += 1
@@ -864,3 +887,52 @@ def test_StateSpaceModelDTDelay_compare_with_TF():
         x_delay = model_delay.F(t_val, x_delay, u_val)
         x_tf = model_tf.F(t_val, x_tf, u_val)
         t_val += 1
+
+
+def test_mul_operator_series_connection():
+    """Test the * operator for connecting discrete-time systems in series"""
+    sys1 = StateSpaceModelDTTFSISO(num=cas.DM([0, 1.0]), den=cas.DM([1, -0.5]))
+    sys2 = StateSpaceModelDTTFSISO(num=cas.DM([0, 2.0]), den=cas.DM([1, -0.3]))
+
+    # Use * operator to connect in series
+    sys_combined = sys1 * sys2
+
+    # Verify it creates a combined system
+    assert sys_combined.n == 2  # Combined states from both systems
+    assert sys_combined.nu == 1  # Single input (from sys1)
+    assert sys_combined.ny == 1  # Single output (from sys2)
+    assert sys_combined.input_names == ["u"]  # No prefix (no conflict)
+    assert sys_combined.output_names == ["y"]  # No prefix (no conflict)
+    assert "x" in sys_combined.state_names[0]
+    assert "x" in sys_combined.state_names[1]
+
+    # Test chaining multiple systems: sys1 * sys2 * sys3
+    sys3 = StateSpaceModelDTTFSISO(num=cas.DM([0, 0.5]), den=cas.DM([1, -0.2]))
+    sys_combined_3 = sys1 * sys2 * sys3
+
+    # Verify three-system chain
+    assert sys_combined_3.n == 3  # All three states
+    assert sys_combined_3.nu == 1  # Single input
+    assert sys_combined_3.ny == 1  # Single output
+    assert sys_combined_3.input_names == ["u"]  # No prefix (no conflict)
+    assert sys_combined_3.output_names == ["y"]  # No prefix (no conflict)
+
+    # Verify functionality: output of combined system equals
+    # output of sys3 when fed sys2's output, fed sys1's output
+    t_val = 0.0
+    x1 = cas.DM([0.0])
+    x2 = cas.DM([0.0])
+    x3 = cas.DM([0.0])
+    x_combined = cas.DM.zeros(3, 1)
+    u_val = cas.DM([1.0])
+
+    # Single step through individual systems
+    y1 = sys1.H(t_val, x1, u_val)
+    y2 = sys2.H(t_val, x2, y1)  # sys2 input is sys1 output
+    y3 = sys3.H(t_val, x3, y2)  # sys3 input is sys2 output
+
+    # Single step through combined system
+    y_combined = sys_combined_3.H(t_val, x_combined, u_val)
+
+    # Outputs should match
+    assert np.isclose(float(y3), float(y_combined))

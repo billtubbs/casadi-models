@@ -15,9 +15,9 @@ from cas_models.discrete_time.models import (
     is_ss_dt,
 )
 from cas_models.transformations import (
-    connect_nonlinear_systems,
-    connect_nonlinear_systems_in_parallel,
-    connect_nonlinear_systems_in_series,
+    connect_systems,
+    connect_systems_in_parallel,
+    connect_systems_in_series,
 )
 
 
@@ -167,14 +167,14 @@ def test_connect_nonlinear_systems_in_parallel(
 ):
     """Test parallel connection for both CT and DT systems"""
     # With defaults - using new generalized function
-    sys_combined = connect_nonlinear_systems_in_parallel(
+    sys_combined = connect_systems_in_parallel(
         [sys1_with_gain, sys2_no_gain], model_class
     )
 
     assert str(sys_combined) == expected_parallel_default
 
     # With custom keys
-    sys_combined = connect_nonlinear_systems_in_parallel(
+    sys_combined = connect_systems_in_parallel(
         [sys1_with_gain, sys2_no_gain, sys3_no_gain],
         model_class,
         keys=["a", "b", "c"],
@@ -193,7 +193,7 @@ def test_connect_nonlinear_systems_in_parallel(
         sys1 = SSModelCTLinearFOSISO(K=2)
         sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
         sys3 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
-        sys_combined = connect_nonlinear_systems_in_parallel(
+        sys_combined = connect_systems_in_parallel(
             [sys1, sys2, sys3], StateSpaceModelCT, keys=["a", "b", "c"]
         )
         assert str(sys_combined) == (
@@ -212,7 +212,7 @@ def test_connect_nonlinear_systems_in_series(
 ):
     """Test series connection for both CT and DT systems"""
     # With defaults
-    sys_combined = connect_nonlinear_systems_in_series(
+    sys_combined = connect_systems_in_series(
         [sys1_with_gain, sys2_no_gain], model_class
     )
 
@@ -225,7 +225,7 @@ def test_connect_nonlinear_systems_in_series(
     assert "x2" in sys_combined.state_names
 
     # With custom keys
-    sys_combined = connect_nonlinear_systems_in_series(
+    sys_combined = connect_systems_in_series(
         [sys1_with_gain, sys2_no_gain], model_class, keys=["in", "out"]
     )
     assert sys_combined.n == 2
@@ -241,7 +241,7 @@ def test_connect_nonlinear_systems_in_series(
         sys2 = SSModelCTLinearFONoGainSISO(
             input_name="u2", state_names=["x2"], output_name="y2"
         )
-        sys_combined = connect_nonlinear_systems_in_series(
+        sys_combined = connect_systems_in_series(
             [sys1, sys2],
             StateSpaceModelCT,
             keys=["in", "out"],
@@ -261,7 +261,7 @@ def test_connect_nonlinear_systems_in_series(
         # With one constant and a shared parameter
         sys1 = SSModelCTLinearFOSISO(K=2)
         sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
-        sys_combined = connect_nonlinear_systems_in_series(
+        sys_combined = connect_systems_in_series(
             [sys1, sys2],
             StateSpaceModelCT,
             keys=["in", "out"],
@@ -292,7 +292,7 @@ def test_connect_vs_series(system_type, model_class):
         )
 
     # Connect in series using connect_nonlinear_systems
-    connected_via_connect = connect_nonlinear_systems(
+    connected_via_connect = connect_systems(
         [sys1, sys2],
         connections={"sys2_u": "sys1_y"},  # sys1 output to sys2 input
         model_class=model_class,
@@ -301,7 +301,7 @@ def test_connect_vs_series(system_type, model_class):
     )
 
     # Connect using series function
-    connected_via_series = connect_nonlinear_systems_in_series(
+    connected_via_series = connect_systems_in_series(
         [sys1, sys2],
         model_class=model_class,
     )
@@ -340,7 +340,7 @@ def test_connect_connection_formats(system_type, model_class):
         )
 
     # Test list of tuples format
-    connected_list = connect_nonlinear_systems(
+    connected_list = connect_systems(
         [sys1, sys2],
         connections=[("sys2_y", "sys1_u")],
         model_class=model_class,
@@ -350,7 +350,7 @@ def test_connect_connection_formats(system_type, model_class):
     assert "sys2_u" in connected_list.input_names
 
     # Test dictionary format
-    connected_dict = connect_nonlinear_systems(
+    connected_dict = connect_systems(
         [sys1, sys2],
         connections={"sys1_u": "sys2_y"},
         model_class=model_class,
@@ -378,7 +378,7 @@ def test_connect_summing_junction(system_type, model_class):
         )
 
     # Test weighted sum with dict format
-    connected_weighted = connect_nonlinear_systems(
+    connected_weighted = connect_systems(
         [sys1, sys2, sys3],
         connections={
             "sys1_u": {"sys2_y": 1.0, "sys3_y": -0.5},  # Weighted sum
@@ -390,7 +390,7 @@ def test_connect_summing_junction(system_type, model_class):
     assert "sys1_u" not in connected_weighted.input_names
 
     # Test unit gains with list format
-    connected_unit = connect_nonlinear_systems(
+    connected_unit = connect_systems(
         [sys1, sys2, sys3],
         connections={
             "sys1_u": ["sys2_y", "sys3_y"],  # Sum with unit gains
@@ -416,7 +416,7 @@ def test_connect_trimming(system_type, model_class):
         )
 
     # Connect with explicit input/output selection
-    connected = connect_nonlinear_systems(
+    connected = connect_systems(
         [sys1, sys2],
         connections={"sys1_u": "sys2_y"},
         model_class=model_class,
@@ -444,7 +444,7 @@ def test_connect_feedback_and_empty(system_type, model_class):
         )
 
     # Test no connections (parallel case)
-    parallel = connect_nonlinear_systems(
+    parallel = connect_systems(
         [sys1, sys2],
         connections=[],
         model_class=model_class,
@@ -454,7 +454,7 @@ def test_connect_feedback_and_empty(system_type, model_class):
     assert parallel.ny == 2
 
     # Test closed-loop feedback (all inputs connected)
-    feedback_dict = connect_nonlinear_systems(
+    feedback_dict = connect_systems(
         [sys1, sys2],
         connections={"sys1_u": "sys2_y", "sys2_u": "sys1_y"},
         model_class=model_class,
@@ -465,7 +465,7 @@ def test_connect_feedback_and_empty(system_type, model_class):
     assert feedback_dict.input_names == []
 
     # Test feedback with list format
-    feedback_list = connect_nonlinear_systems(
+    feedback_list = connect_systems(
         [sys1, sys2],
         connections=[("sys2_y", "sys1_u"), ("sys1_y", "sys2_u")],
         model_class=model_class,
@@ -497,7 +497,7 @@ def test_connect_error_handling(system_type, model_class):
     with pytest.raises(
         ValueError, match="Connection target input 'sys3_u' not found"
     ):
-        connect_nonlinear_systems(
+        connect_systems(
             [sys1, sys2],
             connections={"sys3_u": "sys1_y"},
             model_class=model_class,
@@ -505,7 +505,7 @@ def test_connect_error_handling(system_type, model_class):
 
     # Test error on non-existent output
     with pytest.raises(ValueError, match="Connection source output 'sys3_y'"):
-        connect_nonlinear_systems(
+        connect_systems(
             [sys1, sys2],
             connections={"sys1_u": "sys3_y"},
             model_class=model_class,
@@ -515,7 +515,7 @@ def test_connect_error_handling(system_type, model_class):
     with pytest.raises(
         ValueError, match="Duplicate connection target 'sys1_u'"
     ):
-        connect_nonlinear_systems(
+        connect_systems(
             [sys1, sys2],
             connections=[
                 ("sys2_y", "sys1_u"),
@@ -543,7 +543,7 @@ def test_connect_complex_example(system_type, model_class):
         )
 
     # Complex connections with summing junction, feedback, and I/O trimming
-    connected = connect_nonlinear_systems(
+    connected = connect_systems(
         [sys1, sys2, sys3],
         connections={
             "sys1_u": {"sys2_y": 1.0, "sys3_y": -0.5},  # Summing junction
@@ -577,25 +577,21 @@ def test_mixed_ct_dt_systems_error():
         ValueError,
         match="Cannot combine systems with different types",
     ):
-        connect_nonlinear_systems_in_parallel(
-            [ct_sys1, dt_sys1], StateSpaceModelCT
-        )
+        connect_systems_in_parallel([ct_sys1, dt_sys1], StateSpaceModelCT)
 
     # Test series connection with mixed systems
     with pytest.raises(
         ValueError,
         match="Cannot combine systems with different types",
     ):
-        connect_nonlinear_systems_in_series(
-            [ct_sys1, dt_sys1], StateSpaceModelCT
-        )
+        connect_systems_in_series([ct_sys1, dt_sys1], StateSpaceModelCT)
 
     # Test general connection with mixed systems
     with pytest.raises(
         ValueError,
         match="Cannot combine systems with different types",
     ):
-        connect_nonlinear_systems(
+        connect_systems(
             [ct_sys1, dt_sys1],
             connections={"sys2_u": "sys1_y"},
             model_class=StateSpaceModelCT,
@@ -608,7 +604,7 @@ def test_mixed_ct_dt_systems_error():
         ValueError,
         match="Cannot combine systems with different types",
     ):
-        connect_nonlinear_systems(
+        connect_systems(
             [dt_sys1, ct_sys2],
             connections=[],
             model_class=StateSpaceModelDT,

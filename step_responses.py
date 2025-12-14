@@ -1,16 +1,14 @@
-
 from pathlib import Path
 import numpy as np
 import casadi as cas
 import matplotlib.pyplot as plt
 
 from cas_models.continuous_time.models import (
-    SSModelCTLinearFOSISO, 
+    SSModelCTLinearFOSISO,
     SSModelCTLinearO2SISO,
     SSModelCTLinearO2UnderdampedSISO,
-    StateSpaceModelCTStaticNonlinearity
+    StateSpaceModelCTStaticNonlinearity,
 )
-from cas_models.transformations import connect_nonlinear_systems_in_series
 from cas_models.continuous_time.simulate import (
     make_step_function,
     make_sim_step_function_RK4_fixed_dt,
@@ -23,7 +21,7 @@ Path.mkdir(PLOT_DIR, exist_ok=True)
 models = {
     "fo": SSModelCTLinearFOSISO(K=1, T1=2),
     "o2": SSModelCTLinearO2SISO(K=1, T1=2, T2=2),
-    "o2ud": SSModelCTLinearO2UnderdampedSISO(K=1, zeta=0.6, omega_n=1.0)
+    "o2ud": SSModelCTLinearO2UnderdampedSISO(K=1, zeta=0.6, omega_n=1.0),
 }
 
 step_function = make_step_function(mag=1.0, t_step=1.0)
@@ -36,17 +34,17 @@ def make_source_from_time_function(f, name=None, ny=1, params=None):
         params = {}
     n = 0  # no states
     nu = 0  # no inputs
-    t = cas.SX.sym('t')
-    x = cas.SX.sym('x', n)
-    u = cas.SX.sym('u', nu)
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", n)
+    u = cas.SX.sym("u", nu)
     y = f(t)
     assert y.shape[0] == ny
     h = cas.Function(
-        name, 
-        [t, x, u, *params.values()], 
+        name,
+        [t, x, u, *params.values()],
         [y],
-        ['t', 'x', 'u', *params.keys()], 
-        ['y']
+        ["t", "x", "u", *params.keys()],
+        ["y"],
     )
     sys = StateSpaceModelCTStaticNonlinearity(h, nu=nu, ny=ny)
     return sys
@@ -79,7 +77,7 @@ for name, model in models.items():
     sim_functions[name] = simulate
 
 # Sample times
-t = Ts * np.arange(nT+1)
+t = Ts * np.arange(nT + 1)
 
 # Make output response plots
 for name in models:

@@ -74,7 +74,7 @@ def is_ss_dt(sys):
 
 
 def validate_equal_dt(systems):
-    """Check all hdiscrete-time systems have the same time interval."""
+    """Check all discrete-time systems have the same time interval."""
     dt_values = [sys.dt for sys in systems]
     if not all(dt == dt_values[0] for dt in dt_values):
         raise ValueError(
@@ -205,6 +205,38 @@ class StateSpaceModelDT:
         if output_names is None:
             output_names = make_list_of_enumerated_names("y", ny)
         self.output_names = output_names
+
+    def __mul__(self, other):
+        """Connect two discrete-time systems in series using the * operator.
+
+        This allows for intuitive composition of systems where the output of
+        self is connected to the input of other.
+
+        Args:
+            other: Another StateSpaceModelDT instance to connect in series.
+
+        Returns:
+            StateSpaceModelDT: Combined system where self -> other.
+
+        Example:
+            >>> sys1 = StateSpaceModelDTTFSISO(
+            ...     num=cas.DM([0, 1.0]), den=cas.DM([1, -0.5])
+            ... )
+            >>> sys2 = StateSpaceModelDTTFSISO(
+            ...     num=cas.DM([0, 2.0]), den=cas.DM([1, -0.3])
+            ... )
+            >>> sys_combined = sys1 * sys2  # Connect in series
+
+        Note:
+            The output dimension of self must match the input dimension of
+            other (self.ny == other.nu).
+        """
+        # Import here to avoid circular imports
+        from cas_models.transformations import connect_systems_in_series
+
+        return connect_systems_in_series(
+            [self, other], model_class=StateSpaceModelDT
+        )
 
 
 class StateSpaceModelDTFromCTRK4(StateSpaceModelDT):

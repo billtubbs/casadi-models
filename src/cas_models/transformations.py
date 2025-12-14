@@ -137,7 +137,7 @@ def linear_systems_in_series(
     }
 
 
-def connect_nonlinear_systems_in_parallel(
+def connect_systems_in_parallel(
     systems,
     model_class,
     keys=None,
@@ -305,7 +305,7 @@ def connect_nonlinear_systems_in_parallel(
     return combined_system
 
 
-def connect_nonlinear_systems_in_series(
+def connect_systems_in_series(
     systems,
     model_class,
     keys=None,
@@ -689,7 +689,7 @@ def _build_internal_input_vector(
     return cas.vertcat(*u_internal_parts)
 
 
-def connect_nonlinear_systems(
+def connect_systems(
     systems,
     connections,
     model_class,
@@ -805,7 +805,7 @@ def connect_nonlinear_systems(
     attr_names = model_class._attr_names
 
     # Step 1: Create parallel system
-    parallel_sys = connect_nonlinear_systems_in_parallel(
+    parallel_sys = connect_systems_in_parallel(
         systems,
         model_class,
         keys=keys,
@@ -971,7 +971,6 @@ def connect_nonlinear_systems(
 def connect_feedback_systems(
     sys1,
     sys2,
-    attr_names,
     model_class,
     sign=-1,
     input_names=None,
@@ -989,9 +988,8 @@ def connect_feedback_systems(
     using an attr_names dictionary to specify the appropriate attribute and
     variable names.
     """
-    sys_comb_open_loop = connect_nonlinear_systems_in_series(
+    sys_comb_open_loop = connect_systems_in_series(
         [sys1, sys2],
-        attr_names,
         model_class,
         keys=keys,
         verbose_names=verbose_names,
@@ -1025,10 +1023,9 @@ def connect_feedback_systems(
             sp_name: 1.0,
             f"{sys_name}_{y_name}": sign,
         }
-    return connect_nonlinear_systems(
+    return connect_systems(
         [sys_comb_open_loop],
         connections,
-        attr_names,
         model_class,
         input_names=input_names,
         output_names=output_names,

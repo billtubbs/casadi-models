@@ -215,11 +215,9 @@ class StateSpaceModelCT:
             other (self.ny == other.nu).
         """
         # Import here to avoid circular imports
-        from cas_models.transformations import (
-            connect_nonlinear_systems_in_series,
-        )
+        from cas_models.transformations import connect_systems_in_series
 
-        return connect_nonlinear_systems_in_series(
+        return connect_systems_in_series(
             [self, other], model_class=StateSpaceModelCT
         )
 
