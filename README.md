@@ -16,14 +16,13 @@ tools to identify and simulate simple dynamical systems for my projects.
 Note this is a work-in-progress and only a small subset of possible models have been
 implemented.
 
-## Example
+## Examples: Building Models
 
 ```python
 from cas_models.continuous_time.models import (
-    SSModelCTLinearFOSISO, 
-    SSModelCTLinearO2NoGainSISO, 
-    connect_nonlinear_systems_in_series
+    StateSpaceModelCT, SSModelCTLinearFOSISO, SSModelCTLinearO2NoGainSISO
 )
+from cas_models.transformations import connect_systems_in_series
 
 # First order, single-input, single-output, continuous-time
 # state-space model with symbolic parameters
@@ -61,13 +60,68 @@ h:(t,x[2],u,T1,T2)->(y) SXFunction
 
 ```python
 # Combine both systems by connecting in series
-sys = connect_nonlinear_systems_in_series([sys_model, sys_model_2])
+sys = connect_systems_in_series([sys_model, sys_model_2], model_class=StateSpaceModelCT)
 print(sys.f)
 print(sys.h)
 ```
 ```lang-none
 f:(t,x[3],u,sys1_T1,sys2_T1,T2)->(rhs[3]) SXFunction
 h:(t,x[3],u,sys1_T1,sys2_T1,T2)->(y) SXFunction
+```
+
+```python
+# Series connections can also be made with the '*' operator
+sys = sys_model * sys_model_2
+```
+
+## Examples: Simulation
+
+```python
+from cas_models.disctete_time.models import StateSpaceModelDTFromCT
+from cas_models.discrete_time.simulate import make_n_step_simulation_function_from_model
+
+# Continuous time model
+sys_ct = SSModelCTLinearFOSISO(K=1, T1=2)
+
+# Convert to discrete-time with dt=0.1
+dt = 0.1
+sys_dt = StateSpaceModelDTFromCT(sys_ct, dt)
+print(sys_dt.F)
+print(sys_dt.H)
+```
+```lang-none
+F:(t,xk,uk)->(xkp1) SXFunction
+H:(t,xk,uk)->(yk) SXFunction
+```
+
+```python
+# Number of time-steps to simulate
+nT = 100
+simulate = make_n_step_simulation_function_from_model(sys_dt, nT)
+print(simulate)
+```
+```lang-none
+F_sim_100_steps:(t_eval[101],U[100],x0)->(X[101],Y[101]) SXFunction
+```
+
+```python
+import numpy as np
+
+# Simualtion time
+# Note: Simulation outputs include values for nT+1 time instants
+t = dt * np.arange(nT+1)
+t_in = t[:-1]
+
+# Simulation inputs
+U = np.zeros((nT, 1))
+U[t_in >= 1] = 1.0
+
+# Initial condition
+x0 = np.zeros(sys_dt.n)
+X, Y =  simulate(t, U, x0)
+
+assert X.shape == (nT+1, sys_dt.nu)  # states
+assert Y.shape == (nT+1, sys_dt.ny)  # outputs
 ```
 
 Note that I prefer to use `cas` to refer to the casadi package rather than `ca`.
