@@ -11,7 +11,10 @@ This exercises the iterative connection-filling logic in connect_systems.
 import pytest
 import numpy as np
 import casadi as cas
-from cas_models.discrete_time.models import StateSpaceModelDT, StateSpaceModelDTFromCTRK4
+from cas_models.discrete_time.models import (
+    StateSpaceModelDT,
+    StateSpaceModelDTFromCTRK4,
+)
 from cas_models.continuous_time.models import StateSpaceModelCT
 from cas_models.transformations import connect_systems
 
@@ -67,10 +70,16 @@ def test_four_tank_network_with_mixer():
             h = cas.Function("h", [t, x, u], [y], ["t", "x", "u"], ["y"])
 
             super().__init__(
-                f=f, h=h, n=2, nu=3, ny=3, params=None, name=name,
+                f=f,
+                h=h,
+                n=2,
+                nu=3,
+                ny=3,
+                params=None,
+                name=name,
                 input_names=["v_dot_in", "conc_in", "v_dot_out"],
                 state_names=["L", "m"],
-                output_names=["L", "m", "conc_out"]
+                output_names=["L", "m", "conc_out"],
             )
 
     # Create stateless mixer
@@ -90,19 +99,33 @@ def test_four_tank_network_with_mixer():
             v_dot_out = cas.sum1(flows)
             conc_out = cas.sum1(flows * concs) / v_dot_out
 
-            F = cas.Function("F", [t, xk, uk], [xk], ["t", "xk", "uk"], ["xkp1"])
-            H = cas.Function("H", [t, xk, uk], [cas.vertcat(v_dot_out, conc_out)],
-                           ["t", "xk", "uk"], ["yk"])
+            F = cas.Function(
+                "F", [t, xk, uk], [xk], ["t", "xk", "uk"], ["xkp1"]
+            )
+            H = cas.Function(
+                "H",
+                [t, xk, uk],
+                [cas.vertcat(v_dot_out, conc_out)],
+                ["t", "xk", "uk"],
+                ["yk"],
+            )
 
             input_names = []
             for i in range(n_in):
-                input_names.extend([f"v_dot_in_{i+1}", f"conc_in_{i+1}"])
+                input_names.extend([f"v_dot_in_{i + 1}", f"conc_in_{i + 1}"])
 
             super().__init__(
-                F=F, H=H, n=0, nu=2*n_in, ny=2, dt=dt, params=None, name=name,
+                F=F,
+                H=H,
+                n=0,
+                nu=2 * n_in,
+                ny=2,
+                dt=dt,
+                params=None,
+                name=name,
                 input_names=input_names,
                 state_names=[],
-                output_names=["v_dot_out", "conc_out"]
+                output_names=["v_dot_out", "conc_out"],
             )
 
     # Setup parameters
@@ -120,30 +143,39 @@ def test_four_tank_network_with_mixer():
 
     # Define connections
     connections = {
-        'tank_1_v_dot_out': ['tank_2_v_dot_in', 'tank_3_v_dot_in'],  # Input-to-input
-        'tank_2_conc_in': 'tank_1_conc_out',  # Output-to-input
-        'tank_3_conc_in': 'tank_1_conc_out',
-        'mixer_v_dot_in_1': 'tank_2_v_dot_out',  # External input-to-input
-        'mixer_v_dot_in_2': 'tank_3_v_dot_out',
-        'mixer_conc_in_1': 'tank_2_conc_out',  # Output-to-input (critical!)
-        'mixer_conc_in_2': 'tank_3_conc_out',
-        'tank_4_v_dot_in': 'mixer_v_dot_out',  # Mixer output-to-tank input
-        'tank_4_conc_in': 'mixer_conc_out',
+        "tank_1_v_dot_out": [
+            "tank_2_v_dot_in",
+            "tank_3_v_dot_in",
+        ],  # Input-to-input
+        "tank_2_conc_in": "tank_1_conc_out",  # Output-to-input
+        "tank_3_conc_in": "tank_1_conc_out",
+        "mixer_v_dot_in_1": "tank_2_v_dot_out",  # External input-to-input
+        "mixer_v_dot_in_2": "tank_3_v_dot_out",
+        "mixer_conc_in_1": "tank_2_conc_out",  # Output-to-input (critical!)
+        "mixer_conc_in_2": "tank_3_conc_out",
+        "tank_4_v_dot_in": "mixer_v_dot_out",  # Mixer output-to-tank input
+        "tank_4_conc_in": "mixer_conc_out",
     }
 
     # Connect systems
     connected = connect_systems(
-        systems, connections, StateSpaceModelDT,
-        name="tank_network", verbose_names=True
+        systems,
+        connections,
+        StateSpaceModelDT,
+        name="tank_network",
+        verbose_names=True,
     )
 
     # Verify external inputs
     assert connected.nu == 7
     assert set(connected.input_names) == {
-        'tank_1_v_dot_in', 'tank_1_conc_in',
-        'tank_2_v_dot_in', 'tank_2_v_dot_out',
-        'tank_3_v_dot_in', 'tank_3_v_dot_out',
-        'tank_4_v_dot_out'
+        "tank_1_v_dot_in",
+        "tank_1_conc_in",
+        "tank_2_v_dot_in",
+        "tank_2_v_dot_out",
+        "tank_3_v_dot_in",
+        "tank_3_v_dot_out",
+        "tank_4_v_dot_out",
     }
 
     # Test steady-state operation
@@ -151,23 +183,31 @@ def test_four_tank_network_with_mixer():
     t = 0.0
 
     # States: all tanks at steady concentration
-    xk = np.array([
-        1.0, density * A * 1.0,  # tank_1: L=1m, m consistent
-        2.0, density * A * 2.0,  # tank_2
-        3.0, density * A * 3.0,  # tank_3
-        4.0, density * A * 4.0,  # tank_4
-    ])
+    xk = np.array(
+        [
+            1.0,
+            density * A * 1.0,  # tank_1: L=1m, m consistent
+            2.0,
+            density * A * 2.0,  # tank_2
+            3.0,
+            density * A * 3.0,  # tank_3
+            4.0,
+            density * A * 4.0,  # tank_4
+        ]
+    )
 
     # Inputs: equal flows in/out for steady state
-    uk = np.array([
-        2.0,  # tank_1_v_dot_in
-        density,  # tank_1_conc_in
-        1.0,  # tank_2_v_dot_in (half of tank_1 output)
-        1.0,  # tank_2_v_dot_out
-        1.0,  # tank_3_v_dot_in (other half)
-        1.0,  # tank_3_v_dot_out
-        2.0,  # tank_4_v_dot_out (mixer combines both streams)
-    ])
+    uk = np.array(
+        [
+            2.0,  # tank_1_v_dot_in
+            density,  # tank_1_conc_in
+            1.0,  # tank_2_v_dot_in (half of tank_1 output)
+            1.0,  # tank_2_v_dot_out
+            1.0,  # tank_3_v_dot_in (other half)
+            1.0,  # tank_3_v_dot_out
+            2.0,  # tank_4_v_dot_out (mixer combines both streams)
+        ]
+    )
 
     # Compute next state
     xkp1 = connected.F(t, xk, uk)
@@ -175,24 +215,29 @@ def test_four_tank_network_with_mixer():
 
     # Check steady state: all states should be unchanged
     assert xkp1.shape == xk.shape
-    np.testing.assert_allclose(xkp1, xk, rtol=1e-10, atol=1e-10,
-                               err_msg="States changed in steady-state operation")
+    np.testing.assert_allclose(
+        xkp1,
+        xk,
+        rtol=1e-10,
+        atol=1e-10,
+        err_msg="States changed in steady-state operation",
+    )
 
     # Verify outputs
     yk = connected.H(t, xk, uk)
     yk = np.array(yk).flatten()
 
     # Check mixer output flow
-    mixer_v_dot_out_idx = connected.output_names.index('mixer_v_dot_out')
+    mixer_v_dot_out_idx = connected.output_names.index("mixer_v_dot_out")
     assert yk[mixer_v_dot_out_idx] == pytest.approx(2.0)
 
     # Check mixer output concentration
-    mixer_conc_out_idx = connected.output_names.index('mixer_conc_out')
+    mixer_conc_out_idx = connected.output_names.index("mixer_conc_out")
     assert yk[mixer_conc_out_idx] == pytest.approx(density)
 
     # Check tank 4 outputs
-    tank_4_L_idx = connected.output_names.index('tank_4_L')
-    tank_4_m_idx = connected.output_names.index('tank_4_m')
+    tank_4_L_idx = connected.output_names.index("tank_4_L")
+    tank_4_m_idx = connected.output_names.index("tank_4_m")
     assert yk[tank_4_L_idx] == pytest.approx(4.0)
     assert yk[tank_4_m_idx] == pytest.approx(density * A * 4.0)
 

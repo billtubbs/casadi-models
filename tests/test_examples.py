@@ -2,12 +2,15 @@
 
 from pathlib import Path
 from cas_models.continuous_time.models import (
-    StateSpaceModelCT, SSModelCTLinearFOSISO, SSModelCTLinearO2NoGainSISO
+    StateSpaceModelCT,
+    SSModelCTLinearFOSISO,
+    SSModelCTLinearO2NoGainSISO,
 )
 from cas_models.transformations import connect_systems_in_series
 
 PLOT_DIR = Path("plots")
 Path.mkdir(PLOT_DIR, exist_ok=True)
+
 
 def test_example_build_models():
     # First order, single-input, single-output, continuous-time
@@ -36,7 +39,9 @@ def test_example_build_models():
     assert str(sys_model_2.h) == "h:(t,x[2],u,T1,T2)->(y) SXFunction"
 
     # Combine both systems by connecting in series
-    sys = connect_systems_in_series([sys_model, sys_model_2], model_class=StateSpaceModelCT)
+    sys = connect_systems_in_series(
+        [sys_model, sys_model_2], model_class=StateSpaceModelCT
+    )
     print(sys.f)
     print(sys.h)
 
@@ -50,7 +55,10 @@ def test_example_build_models():
 
 
 from cas_models.discrete_time.models import StateSpaceModelDTFromCT
-from cas_models.discrete_time.simulate import make_n_step_simulation_function_from_model
+from cas_models.discrete_time.simulate import (
+    make_n_step_simulation_function_from_model,
+)
+
 
 def test_example_discrete_time_simulation():
     # Continuous time model
@@ -70,14 +78,17 @@ def test_example_discrete_time_simulation():
     simulate = make_n_step_simulation_function_from_model(sys_dt, nT)
     print(simulate)
 
-    assert str(simulate) == "F_sim_100_steps:(t_eval[101],U[100],x0)->(X[101],Y[101]) SXFunction"
+    assert (
+        str(simulate)
+        == "F_sim_100_steps:(t_eval[101],U[100],x0)->(X[101],Y[101]) SXFunction"
+    )
 
     import numpy as np
     import matplotlib.pyplot as plt
 
     # Simualtion time
     # Note: Simulation outputs include values for nT+1 time instants
-    t = dt * np.arange(nT+1)
+    t = dt * np.arange(nT + 1)
     t_in = t[:-1]
 
     # Simulation inputs
@@ -88,8 +99,8 @@ def test_example_discrete_time_simulation():
     x0 = np.zeros(sys_dt.n)
     X, Y = simulate(t, U, x0)
 
-    assert X.shape == (nT+1, sys_dt.nu)  # states
-    assert Y.shape == (nT+1, sys_dt.ny)  # outputs
+    assert X.shape == (nT + 1, sys_dt.nu)  # states
+    assert Y.shape == (nT + 1, sys_dt.ny)  # outputs
 
     # Make time-series plot
     fig, ax = plt.subplots(figsize=(4, 2.5))

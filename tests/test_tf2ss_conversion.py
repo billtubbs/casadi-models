@@ -11,8 +11,13 @@ from cas_models.discrete_time.models import (
 
 @pytest.mark.parametrize(
     "test_case_fixture",
-    ["tf_test_case_1", "tf_test_case_2", "tf_test_case_3",
-     "tf_test_case_4", "tf_test_case_5"]
+    [
+        "tf_test_case_1",
+        "tf_test_case_2",
+        "tf_test_case_3",
+        "tf_test_case_4",
+        "tf_test_case_5",
+    ],
 )
 def test_tf_to_ss_obs_np(test_case_fixture, request):
     """Test tf_to_ss_obs_np against Octave's tf2ss output (NumPy version).
@@ -35,8 +40,13 @@ def test_tf_to_ss_obs_np(test_case_fixture, request):
 
 @pytest.mark.parametrize(
     "test_case_fixture",
-    ["tf_test_case_1", "tf_test_case_2", "tf_test_case_3",
-     "tf_test_case_4", "tf_test_case_5"]
+    [
+        "tf_test_case_1",
+        "tf_test_case_2",
+        "tf_test_case_3",
+        "tf_test_case_4",
+        "tf_test_case_5",
+    ],
 )
 def test_tf_to_ss_obs_cas(test_case_fixture, request):
     """Test tf_to_ss_obs_cas against Octave's tf2ss output (CasADi version).
