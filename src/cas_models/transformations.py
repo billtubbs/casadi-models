@@ -650,10 +650,56 @@ def _build_internal_input_vector(
                         ext_idx = external_input_map[temp_input_name]
                         u_temp[temp_idx] = u_ext[ext_idx]
 
-                # Evaluate parallel system output with this temporary input
-                output_func_attr = getattr(
-                    parallel_sys, attr_names["output_func"]
-                )
+                # Fill in connected inputs iteratively to handle multi-stage connections
+                # (e.g., external inputs → mixer inputs → mixer outputs → tank inputs)
+                max_iterations = len(parallel_sys.input_names)  # Upper bound
+                for iteration in range(max_iterations):
+                    changed = False
+
+                    # First pass: Fill inputs from external inputs
+                    for temp_input_name in parallel_sys.input_names:
+                        if temp_input_name in connections_norm:
+                            sources = connections_norm[temp_input_name]
+                            if all(src in external_inputs for src in sources.keys()):
+                                temp_idx = parallel_sys.input_names.index(temp_input_name)
+                                sum_expr = 0
+                                for source_name, gain in sources.items():
+                                    ext_idx = external_inputs.index(source_name)
+                                    sum_expr += gain * u_ext[ext_idx]
+                                # Only update if not already filled
+                                if cas.is_equal(u_temp[temp_idx], 0):
+                                    u_temp[temp_idx] = sum_expr
+                                    changed = True
+
+                    # Evaluate outputs with current u_temp
+                    output_func_attr = getattr(
+                        parallel_sys, attr_names["output_func"]
+                    )
+                    y_parallel = output_func_attr(
+                        t, x, u_temp, *parallel_sys.params.values()
+                    )
+
+                    # Second pass: Fill inputs from outputs
+                    for temp_input_name in parallel_sys.input_names:
+                        if temp_input_name in connections_norm:
+                            sources = connections_norm[temp_input_name]
+                            # Check if all sources are outputs
+                            if all(src in parallel_sys.output_names for src in sources.keys()):
+                                temp_idx = parallel_sys.input_names.index(temp_input_name)
+                                sum_expr = 0
+                                for source_name, gain in sources.items():
+                                    out_idx = parallel_sys.output_names.index(source_name)
+                                    sum_expr += gain * y_parallel[out_idx]
+                                # Only update if not already filled
+                                if cas.is_equal(u_temp[temp_idx], 0):
+                                    u_temp[temp_idx] = sum_expr
+                                    changed = True
+
+                    # If nothing changed, we're done
+                    if not changed:
+                        break
+
+                # Final evaluation after all iterations
                 y_parallel = output_func_attr(
                     t, x, u_temp, *parallel_sys.params.values()
                 )
@@ -669,6 +715,21 @@ def _build_internal_input_vector(
                         )
                         ext_idx = external_input_map[temp_input_name]
                         u_temp[temp_idx] = u_ext[ext_idx]
+
+                # Fill in connected inputs that only depend on external inputs
+                # This allows stateless systems (like mixers) to produce correct outputs
+                for temp_input_name in parallel_sys.input_names:
+                    if temp_input_name in connections_norm:
+                        sources = connections_norm[temp_input_name]
+                        # Check if all sources are external inputs
+                        if all(src in external_inputs for src in sources.keys()):
+                            # Compute weighted sum from external inputs
+                            temp_idx = parallel_sys.input_names.index(temp_input_name)
+                            sum_expr = 0
+                            for source_name, gain in sources.items():
+                                ext_idx = external_inputs.index(source_name)
+                                sum_expr += gain * u_ext[ext_idx]
+                            u_temp[temp_idx] = sum_expr
 
                 output_func_attr = getattr(
                     parallel_sys, attr_names["output_func"]
