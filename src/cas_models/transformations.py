@@ -566,14 +566,17 @@ def _validate_connections(connections_norm, parallel_sys):
                 f"{parallel_sys.input_names}"
             )
 
-    # Check all output names exist
-    for input_name, output_sources in connections_norm.items():
-        for output_name in output_sources.keys():
-            if output_name not in parallel_sys.output_names:
+    # Check all source names exist (can be outputs or inputs)
+    for input_name, source_dict in connections_norm.items():
+        for source_name in source_dict.keys():
+            is_output = source_name in parallel_sys.output_names
+            is_input = source_name in parallel_sys.input_names
+            if not is_output and not is_input:
                 raise ValueError(
-                    f"Connection source output '{output_name}' (for "
-                    f"input '{input_name}') not found in parallel system. "
-                    f"Available outputs: {parallel_sys.output_names}"
+                    f"Connection source '{source_name}' (for input "
+                    f"'{input_name}') not found in parallel system. "
+                    f"Available outputs: {parallel_sys.output_names}, "
+                    f"available inputs: {parallel_sys.input_names}"
                 )
 
 
@@ -674,11 +677,25 @@ def _build_internal_input_vector(
                     t, x, u_temp, *parallel_sys.params.values()
                 )
 
-            # Compute weighted sum of connected outputs
+            # Compute weighted sum of connected sources
+            # (outputs or external inputs)
             sum_expr = 0
-            for output_name, gain in connections_norm[input_name].items():
-                output_idx = parallel_sys.output_names.index(output_name)
-                sum_expr += gain * y_parallel[output_idx]
+            for source_name, gain in connections_norm[input_name].items():
+                if source_name in parallel_sys.output_names:
+                    # Source is an output - extract from output vector
+                    idx = parallel_sys.output_names.index(source_name)
+                    sum_expr += gain * y_parallel[idx]
+                elif source_name in external_inputs:
+                    # Source is an external input - extract from
+                    # external input vector
+                    ext_idx = external_inputs.index(source_name)
+                    sum_expr += gain * u_ext[ext_idx]
+                else:
+                    # This should never happen if validation is correct
+                    raise ValueError(
+                        f"Connection source '{source_name}' is neither an "
+                        f"output nor an external input"
+                    )
 
             u_internal_parts.append(sum_expr)
         else:
@@ -712,13 +729,24 @@ def connect_systems(
     Args:
         systems (list): List of state-space model objects to connect.
         connections (list or dict): Connection specification:
-            - List format: [(output_name, input_name), ...] for simple
-                one-to-one connections.
-            - Dict format: {input_name: output_spec, ...} where output_spec
+            - List format: [(source_name, input_name), ...] for simple
+                one-to-one connections where source_name is an output name
+                or external input name.
+            - Dict format: {input_name: source_spec, ...} where source_spec
                 can be:
-                - A string: 'sys2_y' (simple connection)
+                - A string: 'sys2_y' (simple connection from output or input)
                 - A list: ['sys2_y', 'sys3_y'] (sum with unit gains)
                 - A dict: {'sys2_y': 1.0, 'sys3_y': -0.5} (weighted sum)
+
+            Source names can be either:
+                - Output names from any of the systems in the parallel
+                  connection
+                - External input names (inputs that are NOT themselves
+                  connected)
+
+            Note: If an input name appears as a source, it must be an
+            external input (not connected). This prevents circular
+            dependencies.
         model_class: Target model class (StateSpaceModelCT or
             StateSpaceModelDT). The _attr_names class attribute determines
             the naming conventions.
@@ -789,6 +817,22 @@ def connect_systems(
         ...     model_class=StateSpaceModelCT,
         ...     input_names=[],  # No external inputs
         ...     output_names=["sys1_y"],
+        ... )
+        >>>
+        >>> # Example 4: Input-to-input connections (e.g., tank network)
+        >>> # Connect one external input to multiple system inputs
+        >>> connected = connect_nonlinear_systems(
+        ...     [sys1, sys2, sys3],
+        ...     connections={
+        ...         # sys1_u gets sum of sys2_u and sys3_u
+        ...         "sys1_u": ["sys2_u", "sys3_u"],
+        ...         # sys2 has another input from sys1 output
+        ...         "sys2_v": "sys1_y",
+        ...     },
+        ...     attr_names=ATTR_NAMES,
+        ...     model_class=StateSpaceModelCT,
+        ...     input_names=["sys2_u", "sys3_u"],  # These must be external
+        ...     output_names=["sys3_y"],
         ... )
 
     Note:
@@ -862,6 +906,18 @@ def connect_systems(
                     f"External output '{name}' not found in parallel system. "
                     f"Available: {parallel_sys.output_names}"
                 )
+
+    # Validate that input names in connection sources are external
+    for input_name, source_dict in connections_norm.items():
+        for source_name in source_dict.keys():
+            if source_name in parallel_sys.input_names:
+                # Source is an input name - must be external
+                if source_name not in external_inputs:
+                    raise ValueError(
+                        f"Connection source input '{source_name}' (for input "
+                        f"'{input_name}') must be an external input (not "
+                        f"connected). Currently it is connected."
+                    )
 
     # Step 4: Build connected state function
     t = cas.SX.sym("t")

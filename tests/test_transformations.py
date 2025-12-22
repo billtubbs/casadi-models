@@ -503,8 +503,8 @@ def test_connect_error_handling(system_type, model_class):
             model_class=model_class,
         )
 
-    # Test error on non-existent output
-    with pytest.raises(ValueError, match="Connection source output 'sys3_y'"):
+    # Test error on non-existent source (output or input)
+    with pytest.raises(ValueError, match="Connection source 'sys3_y'"):
         connect_systems(
             [sys1, sys2],
             connections={"sys1_u": "sys3_y"},
@@ -559,6 +559,136 @@ def test_connect_complex_example(system_type, model_class):
     assert connected.ny == 2  # sys1_y and sys2_y
     assert connected.input_names == ["sys3_u"]
     assert connected.output_names == ["sys1_y", "sys2_y"]
+
+
+def test_connect_input_to_input(system_type, model_class):
+    """Test input-to-input connections (external inputs on RHS)."""
+    if system_type == "ct":
+        sys1 = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="sys1")
+        sys2 = SSModelCTLinearFOSISO(K=2.0, T1=0.5, name="sys2")
+        sys3 = SSModelCTLinearFOSISO(K=0.5, T1=0.25, name="sys3")
+    else:
+        sys1 = StateSpaceModelDTTFSISO(
+            num=cas.DM([0, 1.0]), den=cas.DM([1, -0.5]), name="sys1"
+        )
+        sys2 = StateSpaceModelDTTFSISO(
+            num=cas.DM([0, 2.0]), den=cas.DM([1, -0.3]), name="sys2"
+        )
+        sys3 = StateSpaceModelDTTFSISO(
+            num=cas.DM([0, 0.5]), den=cas.DM([1, -0.2]), name="sys3"
+        )
+
+    # Test simple input-to-input connection
+    # sys1_u gets its value from external input sys2_u
+    connected = connect_systems(
+        [sys1, sys2, sys3],
+        connections={
+            "sys1_u": "sys2_u",  # Input from another external input
+        },
+        model_class=model_class,
+    )
+    assert connected.n == 3
+    assert connected.nu == 2  # sys2_u and sys3_u are external
+    assert "sys2_u" in connected.input_names
+    assert "sys3_u" in connected.input_names
+    assert "sys1_u" not in connected.input_names  # Connected
+
+    # Test input-to-input with summing junction
+    # sys1_u gets sum of two external inputs
+    connected = connect_systems(
+        [sys1, sys2, sys3],
+        connections={
+            "sys1_u": ["sys2_u", "sys3_u"],  # Sum of two inputs
+        },
+        model_class=model_class,
+    )
+    assert connected.n == 3
+    assert connected.nu == 2
+    assert "sys2_u" in connected.input_names
+    assert "sys3_u" in connected.input_names
+    assert "sys1_u" not in connected.input_names
+
+    # Test weighted sum of inputs
+    connected = connect_systems(
+        [sys1, sys2, sys3],
+        connections={
+            "sys1_u": {"sys2_u": 1.0, "sys3_u": -0.5},  # Weighted sum
+        },
+        model_class=model_class,
+    )
+    assert connected.n == 3
+    assert connected.nu == 2
+    assert "sys1_u" not in connected.input_names
+
+    # Test mixed output and input sources
+    connected = connect_systems(
+        [sys1, sys2, sys3],
+        connections={
+            "sys1_u": {"sys2_y": 1.0, "sys3_u": 0.5},  # Mix output & input
+            "sys2_u": "sys3_u",  # Input from external input
+        },
+        model_class=model_class,
+    )
+    assert connected.n == 3
+    assert connected.nu == 1  # Only sys3_u is external
+    assert connected.input_names == ["sys3_u"]
+
+    # Verify the functions actually execute
+    t_val = 0.0
+    x_val = cas.DM.zeros(3, 1)
+    u_val = cas.DM([1.0])
+
+    if system_type == "ct":
+        y_result = connected.h(t_val, x_val, u_val)
+        f_result = connected.f(t_val, x_val, u_val)
+    else:
+        y_result = connected.H(t_val, x_val, u_val)
+        f_result = connected.F(t_val, x_val, u_val)
+
+    assert y_result.shape == (3, 1)  # All outputs
+    assert f_result.shape == (3, 1)  # All states
+
+
+def test_connect_input_to_input_errors(system_type, model_class):
+    """Test error handling for invalid input-to-input connections."""
+    if system_type == "ct":
+        sys1 = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="sys1")
+        sys2 = SSModelCTLinearFOSISO(K=2.0, T1=0.5, name="sys2")
+    else:
+        sys1 = StateSpaceModelDTTFSISO(
+            num=cas.DM([0, 1.0]), den=cas.DM([1, -0.5]), name="sys1"
+        )
+        sys2 = StateSpaceModelDTTFSISO(
+            num=cas.DM([0, 2.0]), den=cas.DM([1, -0.3]), name="sys2"
+        )
+
+    # Test error when trying to use a connected input as a source
+    # sys1_u is connected, so it can't be used as a source for sys2_u
+    with pytest.raises(
+        ValueError,
+        match="Connection source input 'sys1_u' .* must be an external input",
+    ):
+        connect_systems(
+            [sys1, sys2],
+            connections={
+                "sys1_u": "sys2_y",  # sys1_u is now connected
+                "sys2_u": "sys1_u",  # ERROR: Can't use sys1_u as source
+            },
+            model_class=model_class,
+        )
+
+    # Test error when source input doesn't exist
+    with pytest.raises(
+        ValueError,
+        match="Connection source 'sys3_u' .* not found",
+    ):
+        connect_systems(
+            [sys1, sys2],
+            connections={
+                "sys1_u": "sys3_u",  # sys3_u doesn't exist
+            },
+            model_class=model_class,
+        )
 
 
 def test_mixed_ct_dt_systems_error():
