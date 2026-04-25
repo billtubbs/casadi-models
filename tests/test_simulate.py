@@ -43,7 +43,7 @@ def cart_pole_system():
         tuple: (n, nu, ny, f, h, params, param_values)
     """
     # System dimensions
-    n = 4   # number of states
+    n = 4  # number of states
     nu = 1  # number of inputs
     ny = 2  # number of outputs
 
@@ -60,7 +60,7 @@ def cart_pole_system():
         "M": 1.0,  # kg
         "m": 0.1,  # kg
         "L": 0.5,  # m
-        "g": 9.81  # m/s^2
+        "g": 9.81,  # m/s^2
     }
 
     # State and input variables
@@ -69,9 +69,9 @@ def cart_pole_system():
     u = cas.SX.sym("u", nu)
 
     # Unpack states
-    x_pos = x[0]      # cart position
-    x_dot = x[1]      # cart velocity
-    theta = x[2]      # pole angle
+    x_pos = x[0]  # cart position
+    x_dot = x[1]  # cart velocity
+    theta = x[2]  # pole angle
     theta_dot = x[3]  # pole angular velocity
 
     # System dynamics (inverted pendulum equations)
@@ -90,8 +90,11 @@ def cart_pole_system():
     x_ddot = (u + m * sin_theta * (L * theta_dot**2 + g * cos_theta)) / denom
 
     # Pole angular acceleration
-    theta_ddot = (-u * cos_theta - m * L * theta_dot**2 * cos_theta *
-                  sin_theta + m_total * g * sin_theta) / (L * denom)
+    theta_ddot = (
+        -u * cos_theta
+        - m * L * theta_dot**2 * cos_theta * sin_theta
+        + m_total * g * sin_theta
+    ) / (L * denom)
 
     # State derivatives: [x_dot, x_ddot, theta_dot, theta_ddot]
     rhs = cas.vertcat(x_dot, x_ddot, theta_dot, theta_ddot)
@@ -102,7 +105,7 @@ def cart_pole_system():
         [t, x, u, M, m, L, g],
         [rhs],
         ["t", "x", "u", "M", "m", "L", "g"],
-        ["rhs"]
+        ["rhs"],
     )
 
     # Output function: y = [x, theta]
@@ -113,7 +116,7 @@ def cart_pole_system():
         [t, x, u, M, m, L, g],
         [y],
         ["t", "x", "u", "M", "m", "L", "g"],
-        ["y"]
+        ["y"],
     )
 
     return n, nu, ny, f, h, params, param_values
@@ -175,8 +178,13 @@ def test_make_sim_step_function_integrator_rk(cart_pole_system):
 
     # Create integrator with RK solver
     F_rk = make_sim_step_function_integrator(
-        f, n, nu, params=params, name="F_rk", solver='rk',
-        integrator_opts={'number_of_finite_elements': 4}
+        f,
+        n,
+        nu,
+        params=params,
+        name="F_rk",
+        solver="rk",
+        integrator_opts={"number_of_finite_elements": 4},
     )
 
     # Check function signature
@@ -208,8 +216,13 @@ def test_make_sim_step_function_integrator_cvodes(cart_pole_system):
 
     # Create integrator with CVodes solver
     F_cvodes = make_sim_step_function_integrator(
-        f, n, nu, params=params, name="F_cvodes", solver='cvodes',
-        integrator_opts={'abstol': 1e-8, 'reltol': 1e-6}
+        f,
+        n,
+        nu,
+        params=params,
+        name="F_cvodes",
+        solver="cvodes",
+        integrator_opts={"abstol": 1e-8, "reltol": 1e-6},
     )
 
     # Check function signature
@@ -243,13 +256,21 @@ def test_integrator_comparison(cart_pole_system):
     F_rk4 = make_sim_step_function_RK4(f, n, nu, params=params)
 
     F_rk = make_sim_step_function_integrator(
-        f, n, nu, params=params, solver='rk',
-        integrator_opts={'number_of_finite_elements': 4}
+        f,
+        n,
+        nu,
+        params=params,
+        solver="rk",
+        integrator_opts={"number_of_finite_elements": 4},
     )
 
     F_cvodes = make_sim_step_function_integrator(
-        f, n, nu, params=params, solver='cvodes',
-        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+        f,
+        n,
+        nu,
+        params=params,
+        solver="cvodes",
+        integrator_opts={"abstol": 1e-10, "reltol": 1e-10},
     )
 
     # Initial condition
@@ -382,11 +403,11 @@ def test_multi_step_integrator_comparison(cart_pole_system):
     t_eval = np.linspace(0, nT * dt, nT + 1)
 
     # Initial state: pole at 45 degrees
-    x0 = np.array([0.0, 0.0, np.pi/4, 0.0])
+    x0 = np.array([0.0, 0.0, np.pi / 4, 0.0])
 
     # Control input: step force applied halfway through
     U = np.zeros((nT, nu))
-    U[nT//2:, 0] = 10.0  # Apply 10N force in second half
+    U[nT // 2 :, 0] = 10.0  # Apply 10N force in second half
 
     # Create RK4 integrator
     sim_step_rk4 = make_sim_step_function_RK4(f, n, nu, params=params)
@@ -406,8 +427,12 @@ def test_multi_step_integrator_comparison(cart_pole_system):
 
     # Create CasADi RK integrator
     sim_step_rk = make_sim_step_function_integrator(
-        f, n, nu, params=params, solver='rk',
-        integrator_opts={'number_of_finite_elements': 4}
+        f,
+        n,
+        nu,
+        params=params,
+        solver="rk",
+        integrator_opts={"number_of_finite_elements": 4},
     )
 
     xkp1_rk = sim_step_rk(t_sym, xk_sym, uk_sym, dt, *params.values())
@@ -435,7 +460,7 @@ def test_multi_step_integrator_comparison(cart_pole_system):
 
     # System should respond to the step input
     # Position should change when force is applied
-    pos_before_step = Y_rk4[nT//2, 0]
+    pos_before_step = Y_rk4[nT // 2, 0]
     pos_after_step = Y_rk4[-1, 0]
     assert abs(pos_after_step - pos_before_step) > 0.01
 
@@ -450,16 +475,20 @@ def test_cvodes_integrator_multi_step(cart_pole_system):
     t_eval = np.linspace(0, nT * dt, nT + 1)
 
     # Initial state: pole at 45 degrees
-    x0 = np.array([0.0, 0.0, np.pi/4, 0.0])
+    x0 = np.array([0.0, 0.0, np.pi / 4, 0.0])
 
     # Control input: step force applied halfway through
     U = np.zeros((nT, nu))
-    U[nT//2:, 0] = 10.0  # Apply 10N force in second half
+    U[nT // 2 :, 0] = 10.0  # Apply 10N force in second half
 
     # Create CVodes integrator
     sim_step_cvodes = make_sim_step_function_integrator(
-        f, n, nu, params=params, solver='cvodes',
-        integrator_opts={'abstol': 1e-8, 'reltol': 1e-8}
+        f,
+        n,
+        nu,
+        params=params,
+        solver="cvodes",
+        integrator_opts={"abstol": 1e-8, "reltol": 1e-8},
     )
 
     t_sym = cas.SX.sym("t")
@@ -486,7 +515,7 @@ def test_cvodes_integrator_multi_step(cart_pole_system):
 
     # System should respond to the step input
     # Position should change when force is applied
-    pos_before_step = Y_cvodes[nT//2, 0]
+    pos_before_step = Y_cvodes[nT // 2, 0]
     pos_after_step = Y_cvodes[-1, 0]
     assert abs(pos_after_step - pos_before_step) > 0.01
 
@@ -520,12 +549,16 @@ def test_integrator_numerical_stability(cart_pole_system):
 
     # Create CVodes integrator with tight tolerances
     F = make_sim_step_function_integrator(
-        f, n, nu, params=params, solver='cvodes',
-        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+        f,
+        n,
+        nu,
+        params=params,
+        solver="cvodes",
+        integrator_opts={"abstol": 1e-10, "reltol": 1e-10},
     )
 
     # Initial state: pole at 30 degrees with no velocity
-    x0 = np.array([0.0, 0.0, np.pi/6, 0.0])
+    x0 = np.array([0.0, 0.0, np.pi / 6, 0.0])
 
     # Simulate without control for moderate time
     u = 0.0
@@ -537,7 +570,7 @@ def test_integrator_numerical_stability(cart_pole_system):
     x = x0
     states = [x0]
     for k in range(nT):
-        x = np.array(F(t + k*dt, x, u, dt, *param_values.values())).flatten()
+        x = np.array(F(t + k * dt, x, u, dt, *param_values.values())).flatten()
         states.append(x)
 
     # Check that states don't blow up (remain bounded)
@@ -625,8 +658,14 @@ def test_make_sim_step_function_integrator_fixed_dt_rk(cart_pole_system):
     # Create fixed-dt RK integrator
     dt = 0.01
     F_fixed = make_sim_step_function_integrator_fixed_dt(
-        f, n, nu, dt, params=params, name="F_fixed_rk", solver='rk',
-        integrator_opts={'number_of_finite_elements': 4}
+        f,
+        n,
+        nu,
+        dt,
+        params=params,
+        name="F_fixed_rk",
+        solver="rk",
+        integrator_opts={"number_of_finite_elements": 4},
     )
 
     # Verify function signature using validate_F_function
@@ -646,8 +685,12 @@ def test_make_sim_step_function_integrator_fixed_dt_rk(cart_pole_system):
 
     # Compare with variable-dt version using same dt
     F_variable = make_sim_step_function_integrator(
-        f, n, nu, params=params, solver='rk',
-        integrator_opts={'number_of_finite_elements': 4}
+        f,
+        n,
+        nu,
+        params=params,
+        solver="rk",
+        integrator_opts={"number_of_finite_elements": 4},
     )
     x1_variable = F_variable(t, x0, u, dt, *param_values.values())
 
@@ -662,9 +705,14 @@ def test_make_sim_step_function_integrator_fixed_dt_cvodes(cart_pole_system):
     # Create fixed-dt CVodes integrator
     dt = 0.01
     F_fixed = make_sim_step_function_integrator_fixed_dt(
-        f, n, nu, dt, params=params, name="F_fixed_cvodes",
-        solver='cvodes',
-        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+        f,
+        n,
+        nu,
+        dt,
+        params=params,
+        name="F_fixed_cvodes",
+        solver="cvodes",
+        integrator_opts={"abstol": 1e-10, "reltol": 1e-10},
     )
 
     # Verify function signature using validate_F_function
@@ -684,8 +732,12 @@ def test_make_sim_step_function_integrator_fixed_dt_cvodes(cart_pole_system):
 
     # Compare with variable-dt version using same dt
     F_variable = make_sim_step_function_integrator(
-        f, n, nu, params=params, solver='cvodes',
-        integrator_opts={'abstol': 1e-10, 'reltol': 1e-10}
+        f,
+        n,
+        nu,
+        params=params,
+        solver="cvodes",
+        integrator_opts={"abstol": 1e-10, "reltol": 1e-10},
     )
     x1_variable = F_variable(t, x0, u, dt, *param_values.values())
 
@@ -716,10 +768,10 @@ def test_fixed_dt_functions_with_n_step_simulation(cart_pole_system):
 
     # Control inputs
     U = np.zeros((nT, nu))
-    U[nT//2:, 0] = 5.0  # Apply force in second half
+    U[nT // 2 :, 0] = 5.0  # Apply force in second half
 
     # Initial state
-    x0 = np.array([0.0, 0.0, np.pi/4, 0.0])
+    x0 = np.array([0.0, 0.0, np.pi / 4, 0.0])
 
     # Run simulation
     X, Y = sim_func(t_eval, U, x0, *param_values.values())

@@ -23,19 +23,19 @@ def test_make_list_of_enumerated_names():
 def test_make_list_of_unique_names():
     keys = [None, None, None]
     names = make_list_of_unique_names(keys)
-    assert names == ['sys1', 'sys2', 'sys3']
+    assert names == ["sys1", "sys2", "sys3"]
 
     keys = [None, None, "out"]
     names = make_list_of_unique_names(keys)
-    assert names == ['sys1', 'sys2', 'out']
+    assert names == ["sys1", "sys2", "out"]
 
-    keys = make_list_of_enumerated_names("sys", 3, sep='_')
+    keys = make_list_of_enumerated_names("sys", 3, sep="_")
     names = make_list_of_unique_names(keys)
-    assert names == ['sys_1', 'sys_2', 'sys_3']
+    assert names == ["sys_1", "sys_2", "sys_3"]
 
     keys = [None, None, "sys1"]
     names = make_list_of_unique_names(keys)
-    assert names == ['sys2', 'sys3', 'sys1']
+    assert names == ["sys2", "sys3", "sys1"]
 
 
 def test_concatenate_lists_of_names():
@@ -67,14 +67,18 @@ def test_concatenate_lists_of_names():
 
     # Test 4: With custom keys and verbose_names=True
     names = concatenate_lists_of_names(
-        [sys1_param_names, sys2_param_names], keys=["G1", "G2"], verbose_names=True
+        [sys1_param_names, sys2_param_names],
+        keys=["G1", "G2"],
+        verbose_names=True,
     )
     assert names == ["G1_K", "G1_T1", "G1_T2", "G2_K", "G2_T1", "G2_theta"]
 
     # Test 5: No conflicts - all names should be kept as-is (verbose_names=False)
     sys1_names = ["a", "b", "c"]
     sys2_names = ["d", "e", "f"]
-    names = concatenate_lists_of_names([sys1_names, sys2_names], keys=["x", "y"])
+    names = concatenate_lists_of_names(
+        [sys1_names, sys2_names], keys=["x", "y"]
+    )
     assert names == ["a", "b", "c", "d", "e", "f"]
 
     # Test 6: Same test with verbose_names=True - all get prefixed
@@ -86,7 +90,9 @@ def test_concatenate_lists_of_names():
     # Test 7: Partial conflicts - only conflicting names get prefixed
     sys1_names = ["u1", "x", "y1"]
     sys2_names = ["u2", "x", "y2"]
-    names = concatenate_lists_of_names([sys1_names, sys2_names], keys=["s1", "s2"])
+    names = concatenate_lists_of_names(
+        [sys1_names, sys2_names], keys=["s1", "s2"]
+    )
     # Only 'x' conflicts
     assert names == ["u1", "s1_x", "y1", "u2", "s2_x", "y2"]
 
@@ -102,9 +108,7 @@ def test_concatenate_lists_of_names():
 
     # Test 9: Error - duplicate keys
     with pytest.raises(ValueError, match="not enough unique keys"):
-        concatenate_lists_of_names(
-            [sys1_names, sys2_names], keys=["x", "x"]
-        )
+        concatenate_lists_of_names([sys1_names, sys2_names], keys=["x", "x"])
 
     # Test 10: Error - not enough keys
     with pytest.raises(ValueError, match="not enough unique keys"):
