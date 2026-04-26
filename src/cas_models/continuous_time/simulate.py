@@ -1,5 +1,7 @@
 import casadi as cas
 
+from cas_models.discrete_time.simulate import make_n_step_simulation_function
+
 
 def make_step_function(mag=1.0, t_step=0.0):
     u0 = cas.DM(0.0)
@@ -138,7 +140,7 @@ def _integrator_step_symbolic(
     dt_param = cas.SX.sym("dt_param")
     t_param = cas.SX.sym("t_param")
     u_param = cas.SX.sym("u_param", nu)
-    params_dae = [cas.SX.sym(f"{key}_param") for key in params.keys()]
+    params_dae = [cas.SX.sym(f"{key}_param", *v.shape) for key, v in params.items()]
 
     # Current time in original coordinates
     t_current = t_param + s * dt_param
@@ -268,4 +270,67 @@ def make_sim_step_function_integrator_fixed_dt(
         [xkp1],
         ["t", "xk", "uk", *params.keys()],
         ["xkp1"],
+    )
+
+
+def make_n_step_simulation_function_from_model(
+    model, dt, nT, solver="cvodes", integrator_opts=None, name=None
+):
+    """Create a multi-step simulation function from a continuous-time model.
+
+    Builds a fixed-dt integration step using CasADi's integrator framework,
+    then wraps it in an nT-step simulation function.  Analogous to
+    ``make_n_step_simulation_function_from_model`` in
+    ``cas_models.discrete_time.simulate``, but starts from a continuous-time
+    model and requires ``dt`` and ``solver`` for the integration step.
+
+    Args:
+        model: A continuous-time state-space model with attributes f, h,
+            n, nu, ny, and params.
+        dt (float): Fixed integration step size.
+        nT (int): Number of time steps to simulate.
+        solver (str, optional): CasADi integrator solver ('cvodes', 'rk',
+            'idas').  Default 'cvodes'.
+        integrator_opts (dict, optional): Options passed to the CasADi
+            integrator.
+        name (str, optional): Name for the compiled CasADi function.  If
+            None, defaults to "{model.f.name()}_sim_{nT}_steps".
+
+    Returns:
+        cas.Function: A CasADi Function with signature
+            (t_eval, U, x0, *params) -> (X, Y) where:
+            - t_eval: Time vector of length nT+1
+            - U: Input matrix of shape (nT, nu)
+            - x0: Initial state vector of length n
+            - X: State trajectory matrix of shape (nT+1, n)
+            - Y: Output trajectory matrix of shape (nT+1, ny)
+
+    Example:
+        >>> model = build_cola_lv_ct_model()
+        >>> sim = make_n_step_simulation_function_from_model(model, dt=1.0, nT=300)
+        >>> X, Y = sim(t_eval, U, x0, *param_values.values())
+    """
+    if name is None:
+        name = f"{model.f.name()}_sim_{nT}_steps"
+
+    F_step = make_sim_step_function_integrator_fixed_dt(
+        model.f,
+        model.n,
+        model.nu,
+        dt,
+        params=model.params,
+        solver=solver,
+        integrator_opts=integrator_opts or {},
+        name="F",
+    )
+
+    return make_n_step_simulation_function(
+        F_step,
+        model.h,
+        model.n,
+        model.nu,
+        model.ny,
+        nT,
+        params=model.params,
+        name=name,
     )
