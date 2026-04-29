@@ -502,7 +502,6 @@ class SSModelCTLinearIntegratorSISO(SSModelCTFromABCDSISO):
     def __init__(
         self,
         K=None,
-        T1=None,
         name=None,
         input_name=None,
         state_names=None,
@@ -514,7 +513,7 @@ class SSModelCTLinearIntegratorSISO(SSModelCTFromABCDSISO):
             G(s) = K / s
 
         """
-        params = make_symbolic_vars_from_kwargs(K=K, T1=T1)
+        params = make_symbolic_vars_from_kwargs(K=K)
         K = params["K"]
         A = cas.sparsify(cas.SX(0))
         B = cas.SX(1)
@@ -594,7 +593,6 @@ class SSModelCTLinearO2SISO(SSModelCTFromABCDSISO):
         B = cas.sparsify(cas.blockcat([[0], [1]]))
         C = cas.sparsify(cas.blockcat([[K / (T1 * T2), 0]]))
         D = cas.sparsify(cas.DM(0))
-        params = {"K": K, "T1": T1, "T2": T2}
         super().__init__(
             A,
             B,
@@ -632,7 +630,6 @@ class SSModelCTLinearO2NoGainSISO(SSModelCTFromABCDSISO):
         B = cas.sparsify(cas.blockcat([[0], [1]]))
         C = cas.sparsify(cas.blockcat([[1 / (T1 * T2), 0]]))
         D = cas.sparsify(cas.DM(0))
-        params = {"T1": T1, "T2": T2}
         super().__init__(
             A,
             B,
