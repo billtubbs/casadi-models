@@ -1,4 +1,5 @@
 import casadi as cas
+import numpy as np
 
 from cas_models.discrete_time.simulate import make_n_step_simulation_function
 
@@ -334,3 +335,78 @@ def make_n_step_simulation_function_from_model(
         params=model.params,
         name=name,
     )
+
+
+def make_steady_state_solver(
+    model, name="ss_solver", method="newton", opts=None
+):
+    """Build a steady-state solver for a continuous-time state-space model.
+
+    Compiles a CasADi rootfinder that solves ``f(0, x, u, *params) = 0``
+    for ``x``.  The solver is compiled once; the returned callable may then
+    be called repeatedly with different inputs, parameter values, or initial
+    guesses.
+
+    Parameters
+    ----------
+    model : StateSpaceModelCT
+        Continuous-time model with attributes ``f``, ``h``, ``n``, ``nu``,
+        ``ny``, and ``params``.
+    name : str, optional
+        Name for the compiled CasADi rootfinder function.
+    method : str, optional
+        CasADi rootfinder algorithm.  ``"newton"`` (default) is fast with
+        a good initial guess; ``"fast_newton"`` trades robustness for speed;
+        ``"nlpsol"`` (wraps an NLP solver) is the most robust option for
+        difficult problems.
+    opts : dict, optional
+        Options forwarded verbatim to ``cas.rootfinder``.
+
+    Returns
+    -------
+    callable
+        A function ``(x0, u, param_vals) -> (x_ss, y_ss)`` where:
+
+        - ``x0`` : array-like, shape ``(n,)`` — initial state guess
+        - ``u``  : array-like, shape ``(nu,)`` — input vector
+        - ``param_vals`` : dict — values keyed by ``model.params``;
+          extra keys are silently ignored
+        - ``x_ss`` : ``np.ndarray``, shape ``(n,)`` — steady-state state
+        - ``y_ss`` : ``np.ndarray``, shape ``(ny,)`` — steady-state output
+
+    Notes
+    -----
+    For sweeps over an input range, pass the previous solution as ``x0``
+    at each step (warm-starting).  Converging from a nearby point typically
+    takes only a handful of Newton iterations.
+    """
+    if opts is None:
+        opts = {}
+
+    # Build SX variables matching model.params shapes.
+    x_sx = cas.SX.sym("x", model.n)
+    u_sx = cas.SX.sym("u", model.nu)
+    p_sxs = [cas.SX.sym(k, *v.shape) for k, v in model.params.items()]
+
+    # Residual: dx/dt at t=0 (steady state is time-invariant).
+    rhs = model.f(cas.SX(0), x_sx, u_sx, *p_sxs)
+
+    # Pack u and all params into a single parameter vector for the rootfinder.
+    p_sx = cas.vertcat(u_sx, *p_sxs)
+    g = cas.Function("g", [x_sx, p_sx], [rhs])
+    rf = cas.rootfinder(name, method, g, opts)
+
+    def solve(x0, u, param_vals):
+        p_val = cas.vertcat(cas.DM(u), *[param_vals[k] for k in model.params])
+        x_ss = np.array(rf(cas.DM(x0), p_val)).flatten()
+        y_ss = np.array(
+            model.h(
+                cas.DM(0),
+                cas.DM(x_ss),
+                cas.DM(u),
+                *[param_vals[k] for k in model.params],
+            )
+        ).flatten()
+        return x_ss, y_ss
+
+    return solve
