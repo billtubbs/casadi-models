@@ -842,6 +842,52 @@ def cascaded_nonlinear_system():
     return n, nu, ny, f, h, params, param_values
 
 
+def test_make_steady_state_solver_raises_on_free_states(cart_pole_system):
+    """A clear ValueError is raised when the model has structurally free states.
+
+    The cart-pole has x[0] (cart position) absent from all rhs components,
+    making the Jacobian rank-deficient.  The error should name the offending
+    index and suggest auto_reduce=True.
+    """
+    n, nu, ny, f, h, params, param_values = cart_pole_system
+    model = StateSpaceModelCT(f=f, h=h, n=n, nu=nu, ny=ny, params=params)
+
+    with pytest.raises(ValueError, match=r"indices \[0\]"):
+        make_steady_state_solver(model)
+
+    # The message should also mention auto_reduce.
+    with pytest.raises(ValueError, match="auto_reduce=True"):
+        make_steady_state_solver(model)
+
+
+def test_make_steady_state_solver_auto_reduce_cart_pole(cart_pole_system):
+    """auto_reduce=True solves for the constrained states and pins the free ones.
+
+    For the cart-pole with u=0, the upright equilibrium is
+    x=[x0_pos, 0, 0, 0]: cart position unchanged from x0, all others zero.
+    """
+    n, nu, ny, f, h, params, param_values = cart_pole_system
+    model = StateSpaceModelCT(f=f, h=h, n=n, nu=nu, ny=ny, params=params)
+    solve_ss = make_steady_state_solver(model, auto_reduce=True)
+
+    u = np.array([0.0])
+    x_pos_init = 2.5  # arbitrary non-zero cart position
+    x0 = np.array([x_pos_init, 0.05, 0.1, 0.0])
+    x_ss, y_ss = solve_ss(x0, u, param_values)
+
+    # Free state (cart position) is returned unchanged from x0.
+    assert x_ss[0] == pytest.approx(x_pos_init)
+
+    # Constrained states converge to the upright equilibrium.
+    assert x_ss[1] == pytest.approx(0.0, abs=1e-8)  # x_dot
+    assert x_ss[2] == pytest.approx(0.0, abs=1e-8)  # theta
+    assert x_ss[3] == pytest.approx(0.0, abs=1e-8)  # theta_dot
+
+    # Output y_ss should match h(x_ss, u).
+    y_check = np.array(h(0, x_ss, u, *param_values.values())).flatten()
+    assert np.allclose(y_ss, y_check, atol=1e-10)
+
+
 def test_make_steady_state_solver_known_ss(cascaded_nonlinear_system):
     """Solver recovers the analytical steady state of a nonlinear system.
 
