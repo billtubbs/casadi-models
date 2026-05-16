@@ -120,7 +120,7 @@ U[t_in >= 1] = 1.0
 x0 = np.zeros(sys_dt.n)
 X, Y =  simulate(t, U, x0)
 
-assert X.shape == (nT+1, sys_dt.nu)  # states
+assert X.shape == (nT+1, sys_dt.n)  # states
 assert Y.shape == (nT+1, sys_dt.ny)  # outputs
 ```
 
