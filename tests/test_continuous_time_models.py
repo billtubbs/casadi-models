@@ -617,6 +617,20 @@ def test_add_operator_parallel_connection():
     assert str(sys_combined) == str(sys_via_func)
 
 
+def test_describe(capsys):
+    """Test describe() prints a human-readable summary of a CT model."""
+    sys = SSModelCTLinearFOSISO(K=2.0, T1=1.0, name="plant")
+    sys.describe()
+    out = capsys.readouterr().out
+    assert "SSModelCTLinearFOSISO" in out
+    assert "Name: plant" in out
+    assert "States (n=1)" in out
+    assert "Inputs (nu=1)" in out
+    assert "Outputs (ny=1)" in out
+    assert "Parameters" in out
+    assert "dt" not in out
+
+
 def test_tf_models():
     sys1 = SSModelCTLinearFONoGainSISO(T1=1)
     sys2 = SSModelCTLinearFOSISO(K=2, T1=2.5)

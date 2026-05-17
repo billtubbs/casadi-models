@@ -28,45 +28,35 @@ from cas_models.transformations import connect_systems_in_series
 # state-space model with symbolic parameters
 sys_model = SSModelCTLinearFOSISO()
 print(sys_model.f)
+# f:(t,x,u,K,T1)->(rhs) SXFunction
 print(sys_model.h)
-```
-```lang-none
-f:(t,x,u,K,T1)->(rhs) SXFunction
-h:(t,x,u,K,T1)->(y) SXFunction
+# h:(t,x,u,K,T1)->(y) SXFunction
 ```
 
 Alternatively, some or all model parameters can be set to constants.
 ```python
-# First order SISO system with fixed gain
 sys_model = SSModelCTLinearFOSISO(K=2.5)
 print(sys_model.f)
+# f:(t,x,u,T1)->(rhs) SXFunction
 print(sys_model.h)
-```
-```lang-none
-f:(t,x,u,T1)->(rhs) SXFunction
-h:(t,x,u,T1)->(y) SXFunction
+# h:(t,x,u,T1)->(y) SXFunction
 ```
 
 ```python
-# Second-order system with gain = 1
 sys_model_2 = SSModelCTLinearO2NoGainSISO()
 print(sys_model_2.f)
+# f:(t,x[2],u,T1,T2)->(rhs[2]) SXFunction
 print(sys_model_2.h)
-```
-```lang-none
-f:(t,x[2],u,T1,T2)->(rhs[2]) SXFunction
-h:(t,x[2],u,T1,T2)->(y) SXFunction
+# h:(t,x[2],u,T1,T2)->(y) SXFunction
 ```
 
 ```python
 # Combine both systems by connecting in series
 sys = connect_systems_in_series([sys_model, sys_model_2], model_class=StateSpaceModelCT)
 print(sys.f)
+# f:(t,x[3],u,sys1_T1,sys2_T1,T2)->(rhs[3]) SXFunction
 print(sys.h)
-```
-```lang-none
-f:(t,x[3],u,sys1_T1,sys2_T1,T2)->(rhs[3]) SXFunction
-h:(t,x[3],u,sys1_T1,sys2_T1,T2)->(y) SXFunction
+# h:(t,x[3],u,sys1_T1,sys2_T1,T2)->(y) SXFunction
 ```
 
 ```python
@@ -91,11 +81,9 @@ sys_ct = SSModelCTLinearFOSISO(K=1, T1=2)
 dt = 0.1
 sys_dt = StateSpaceModelDTFromCT(sys_ct, dt)
 print(sys_dt.F)
+# F:(t,xk,uk)->(xkp1) SXFunction
 print(sys_dt.H)
-```
-```lang-none
-F:(t,xk,uk)->(xkp1) SXFunction
-H:(t,xk,uk)->(yk) SXFunction
+# H:(t,xk,uk)->(yk) SXFunction
 ```
 
 ```python
@@ -103,9 +91,7 @@ H:(t,xk,uk)->(yk) SXFunction
 nT = 100
 simulate = make_n_step_simulation_function_from_model(sys_dt, nT)
 print(simulate)
-```
-```lang-none
-F_sim_100_steps:(t_eval[101],U[100],x0)->(X[101],Y[101]) SXFunction
+# F_sim_100_steps:(t_eval[101],U[100],x0)->(X[101],Y[101]) SXFunction
 ```
 
 ```python
@@ -122,10 +108,9 @@ U[t_in >= 1] = 1.0
 x0 = np.zeros(sys_dt.n)
 X, Y = simulate(t, U, x0)
 
-assert X.shape == (nT + 1, sys_dt.n)  # states
+assert X.shape == (nT + 1, sys_dt.n)   # states
 assert Y.shape == (nT + 1, sys_dt.ny)  # outputs
 ```
-
 
 ```python
 # Make time-series plot
@@ -147,30 +132,56 @@ from cas_models.transformations import connect_feedback_system
 
 # First-order plant: G(s) = 1 / (2s + 1)
 plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
+plant.describe()
+# SSModelCTLinearFOSISO:
+#   Name: plant
+#   f:(t,x,u)->(rhs) SXFunction
+#   h:(t,x,u)->(y) SXFunction
+#   States (n=1): ['x']
+#   Inputs (nu=1): ['u']
+#   Outputs (ny=1): ['y']
+#   Parameters: []
+```
 
-# PI controller in interactive form: Gc(s) = Kc * (Ti*s + 1) / (Ti*s)
-ctrl = SSModelCTPIInt(Kc=1, Ti=2, name="ctrl")
+```python
+# PI controller: Gc(s) = Kc * (Ti*s + 1) / (Ti*s)
+ctrl = SSModelCTPIInt(name="ctrl")
+ctrl.describe()
+# SSModelCTPIInt:
+#   Name: ctrl
+#   f:(t,x,u,Kc,Ti)->(rhs) SXFunction
+#   h:(t,x,u,Kc,Ti)->(y) SXFunction
+#   States (n=1): ['x']
+#   Inputs (nu=1): ['e']
+#   Outputs (ny=1): ['u']
+#   Parameters: ['Kc', 'Ti']
 ```
 
 ```python
 # Negative feedback loop: reference -> ctrl -> plant -> (feedback) -> ctrl
 sys1 = ctrl * plant
-print(sys1.name, sys1.input_names, sys1.output_names)
-```
-```lang-none
-ctrl_plant ['e'] ['y']
+sys1.describe()
+# StateSpaceModelCT:
+#   Name: ctrl_plant
+#   f:(t,x[2],u,Kc,Ti)->(rhs[2]) SXFunction
+#   h:(t,x[2],u,Kc,Ti)->(y) SXFunction
+#   States (n=2): ['plant_x', 'ctrl_x']
+#   Inputs (nu=1): ['e']
+#   Outputs (ny=1): ['y']
+#   Parameters: ['Kc', 'Ti']
 ```
 
 ```python
 sys_cl = connect_feedback_system(sys1, model_class=StateSpaceModelCT)
-print(f"Inputs:  {sys_cl.input_names}")
-print(f"Outputs: {sys_cl.output_names}")
-print(f"States:  {sys_cl.state_names}")
-```
-```lang-none
-Inputs:  ['y_sp']
-Outputs: ['y']
-States:  ['plant_x', 'ctrl_x']
+sys_cl.describe()
+# StateSpaceModelCT:
+#   Name: fbk ctrl_plant
+#   f:(t,x[2],u,Kc,Ti)->(rhs[2]) SXFunction
+#   h:(t,x[2],u,Kc,Ti)->(y) SXFunction
+#   States (n=2): ['plant_x', 'ctrl_x']
+#   Inputs (nu=1): ['y_sp']
+#   Outputs (ny=1): ['y']
+#   Parameters: ['Kc', 'Ti']
 ```
 
 ```python
@@ -180,13 +191,18 @@ sys_cl_dt = StateSpaceModelDTFromCT(sys_cl, dt)
 
 nT = 200
 simulate_cl = make_n_step_simulation_function_from_model(sys_cl_dt, nT)
+# Function(F_sim_200_steps:(t_eval[201],U[200],x0[2],Kc,Ti)->(X[201x2],Y[201]) SXFunction)
+```
 
+```python
 t = dt * np.arange(nT + 1)
 R_full = np.where(t >= 1, 1.0, 0.0)      # reference at all nT+1 time instants
 R = R_full[:-1].reshape(-1, 1)            # inputs at nT steps
 
+# Set parameters for simulation
+Kc, Ti = 1, 2
 x0 = np.zeros(sys_cl_dt.n)
-X, Y = simulate_cl(t, R, x0)
+X, Y = simulate_cl(t, R, x0, Kc, Ti)
 
 assert X.shape == (nT + 1, sys_cl_dt.n)
 assert Y.shape == (nT + 1, sys_cl_dt.ny)

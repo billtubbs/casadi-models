@@ -986,3 +986,19 @@ def test_add_operator_parallel_connection():
     # + is equivalent to sum_systems
     sys_via_func = sum_systems([sys1, sys2], model_class=StateSpaceModelDT)
     assert str(sys_combined) == str(sys_via_func)
+
+
+def test_describe(capsys):
+    """Test describe() prints a human-readable summary of a DT model."""
+    sys = StateSpaceModelDTTFSISO(
+        num=cas.DM([0, 1.0]), den=cas.DM([1, -0.5]), name="controller"
+    )
+    sys.describe()
+    out = capsys.readouterr().out
+    assert "StateSpaceModelDTTFSISO" in out
+    assert "Name: controller" in out
+    assert "dt:" in out
+    assert "States (n=1)" in out
+    assert "Inputs (nu=1)" in out
+    assert "Outputs (ny=1)" in out
+    assert "Parameters" in out

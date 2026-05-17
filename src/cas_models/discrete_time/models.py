@@ -252,6 +252,19 @@ class StateSpaceModelDT:
         """
         return sum_systems([self, other], model_class=StateSpaceModelDT)
 
+    def describe(self):
+        """Print a human-readable summary of the system."""
+        attr = self._attr_names
+        print(f"{type(self).__name__}:")
+        print(f"  Name: {self.name}")
+        print(f"  dt: {self.dt}")
+        print(f"  {getattr(self, attr['state_func'])}")
+        print(f"  {getattr(self, attr['output_func'])}")
+        print(f"  States (n={self.n}): {self.state_names}")
+        print(f"  Inputs (nu={self.nu}): {self.input_names}")
+        print(f"  Outputs (ny={self.ny}): {self.output_names}")
+        print(f"  Parameters: {list(self.params.keys())}")
+
 
 class StateSpaceModelDTFromCTRK4(StateSpaceModelDT):
     """A discrete-time state-space model of a dynamical system
