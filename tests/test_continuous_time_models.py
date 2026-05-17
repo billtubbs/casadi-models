@@ -16,7 +16,7 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearO2UnderdampedSISO,
 )
 from cas_models.validation import is_ss_ct, is_ss_dt
-from cas_models.transformations import block_diag
+from cas_models.transformations import block_diag, sum_systems
 
 
 @pytest.fixture
@@ -582,6 +582,39 @@ def test_mul_operator_series_connection():
     assert sys_combined_3.ny == 1  # Output dimension
     assert is_ss_ct(sys_combined_3) is True
     assert is_ss_dt(sys_combined_3) is False
+
+
+def test_add_operator_parallel_connection():
+    """Test the + operator connects continuous-time systems with shared input and summed outputs."""
+    sys1 = SSModelCTLinearFOSISO(K=2.0, T1=1.0)
+    sys2 = SSModelCTLinearFONoGainSISO(T1=0.5)
+
+    sys_combined = sys1 + sys2
+
+    # States stacked, nu and ny unchanged
+    assert sys_combined.n == 2
+    assert sys_combined.nu == 1
+    assert sys_combined.ny == 1
+    assert sys_combined.input_names == sys1.input_names
+    assert sys_combined.output_names == sys1.output_names
+    assert is_ss_ct(sys_combined) is True
+    assert is_ss_dt(sys_combined) is False
+
+    # Output must equal sum of individual outputs
+    # K and T1 are baked in as numeric so h(t, x, u) takes no extra args
+    t_val = cas.DM(0.0)
+    x1 = cas.DM([1.5])
+    x2 = cas.DM([0.8])
+    x = cas.vertcat(x1, x2)
+    u = cas.DM([1.0])
+    y1 = float(sys1.h(t_val, x1, u))
+    y2 = float(sys2.h(t_val, x2, u))
+    y_combined = float(sys_combined.h(t_val, x, u))
+    assert np.isclose(y_combined, y1 + y2)
+
+    # + is equivalent to sum_systems
+    sys_via_func = sum_systems([sys1, sys2], model_class=StateSpaceModelCT)
+    assert str(sys_combined) == str(sys_via_func)
 
 
 def test_tf_models():

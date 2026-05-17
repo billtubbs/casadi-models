@@ -52,7 +52,7 @@ from cas_models.sympy_conversion import (
     make_casadi_vars_from_sympy_vars,
 )
 from cas_models.validation import validate_casadi_function_dims
-from cas_models.transformations import connect_systems_in_series
+from cas_models.transformations import connect_systems_in_series, sum_systems
 
 # Attribute names for continuous-time state-space models
 ATTR_NAMES = {
@@ -241,6 +241,23 @@ class StateSpaceModelCT:
         return connect_systems_in_series(
             [self, other], model_class=StateSpaceModelCT
         )
+
+    def __add__(self, other):
+        """Connect two continuous-time systems in parallel using the + operator.
+
+        Both systems receive the same input and their outputs are summed,
+        giving a combined system with the same input and output dimensions.
+
+        Args:
+            other: Another StateSpaceModelCT instance to connect in parallel.
+
+        Returns:
+            StateSpaceModelCT: Combined system where y = y_self + y_other.
+
+        Note:
+            Both systems must have the same nu and ny.
+        """
+        return sum_systems([self, other], model_class=StateSpaceModelCT)
 
 
 class StateSpaceModelCTSISO(StateSpaceModelCT):

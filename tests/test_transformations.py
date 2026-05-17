@@ -23,6 +23,7 @@ from cas_models.transformations import (
     connect_systems,
     connect_systems_in_parallel,
     connect_systems_in_series,
+    sum_systems,
 )
 from cas_models.validation import is_ss_ct, is_ss_dt
 
@@ -211,6 +212,66 @@ def test_connect_nonlinear_systems_in_parallel(
             "state_names=['a_x', 'b_x', 'c_x'], "
             "output_names=['a_y', 'b_y', 'c_y'])"
         )
+
+
+def test_sum_systems(
+    system_type, sys1_with_gain, sys2_no_gain, sys3_no_gain, model_class
+):
+    """Test sum_systems (shared input, summed outputs) for CT and DT systems."""
+    sys_combined = sum_systems([sys1_with_gain, sys2_no_gain], model_class)
+
+    # Dimensions: states stacked, but nu and ny are unchanged
+    assert sys_combined.n == 2
+    assert sys_combined.nu == 1
+    assert sys_combined.ny == 1
+    assert sys_combined.input_names == sys1_with_gain.input_names
+    assert sys_combined.output_names == sys1_with_gain.output_names
+    assert "x1" in sys_combined.state_names
+    assert "x2" in sys_combined.state_names
+
+    # Three systems
+    sys_combined_3 = sum_systems(
+        [sys1_with_gain, sys2_no_gain, sys3_no_gain], model_class
+    )
+    assert sys_combined_3.n == 3
+    assert sys_combined_3.nu == 1
+    assert sys_combined_3.ny == 1
+
+    # Numeric check: output equals sum of individual outputs
+    if system_type == "ct":
+        K_val = 2.0
+        T1_val = 1.0
+        T2_val = 0.5
+        x1 = cas.DM([1.5])
+        x2 = cas.DM([0.8])
+        x = cas.vertcat(x1, x2)
+        u = cas.DM([1.0])
+        t = cas.DM(0.0)
+        y1 = float(sys1_with_gain.h(t, x1, u, K_val, T1_val))
+        y2 = float(sys2_no_gain.h(t, x2, u, T2_val))
+        y_combined = float(sys_combined.h(t, x, u, K_val, T1_val, T2_val))
+        assert np.isclose(y_combined, y1 + y2)
+    else:
+        K_val = 2.0
+        a_val = 0.5
+        b_val = 0.3
+        x1 = cas.DM([1.5])
+        x2 = cas.DM([0.8])
+        x = cas.vertcat(x1, x2)
+        u = cas.DM([1.0])
+        t = cas.DM(0.0)
+        y1 = float(sys1_with_gain.H(t, x1, u, K_val, a_val))
+        y2 = float(sys2_no_gain.H(t, x2, u, b_val))
+        y_combined = float(sys_combined.H(t, x, u, K_val, a_val, b_val))
+        assert np.isclose(y_combined, y1 + y2)
+
+    # Mismatched dimensions should raise
+    if system_type == "ct":
+        sys_mimo = connect_systems_in_parallel(
+            [sys1_with_gain, sys2_no_gain], model_class
+        )
+        with pytest.raises(ValueError):
+            sum_systems([sys1_with_gain, sys_mimo], model_class)
 
 
 def test_connect_nonlinear_systems_in_series(

@@ -14,6 +14,7 @@ from cas_models.discrete_time.models import (
 )
 from cas_models.continuous_time.models import StateSpaceModelCT
 from cas_models.validation import is_ss_ct, is_ss_dt
+from cas_models.transformations import sum_systems
 from pathlib import Path
 
 
@@ -953,3 +954,35 @@ def test_mul_operator_series_connection():
 
     # Outputs should match
     assert np.isclose(float(y3), float(y_combined))
+
+
+def test_add_operator_parallel_connection():
+    """Test the + operator connects discrete-time systems with shared input and summed outputs."""
+    sys1 = StateSpaceModelDTTFSISO(num=cas.DM([0, 2.0]), den=cas.DM([1, -0.5]))
+    sys2 = StateSpaceModelDTTFSISO(num=cas.DM([0, 1.0]), den=cas.DM([1, -0.3]))
+
+    sys_combined = sys1 + sys2
+
+    # States stacked, nu and ny unchanged
+    assert sys_combined.n == 2
+    assert sys_combined.nu == 1
+    assert sys_combined.ny == 1
+    assert sys_combined.input_names == sys1.input_names
+    assert sys_combined.output_names == sys1.output_names
+    assert is_ss_ct(sys_combined) is False
+    assert is_ss_dt(sys_combined) is True
+
+    # Output must equal sum of individual outputs
+    t_val = cas.DM(0.0)
+    x1 = cas.DM([1.5])
+    x2 = cas.DM([0.8])
+    x = cas.vertcat(x1, x2)
+    u = cas.DM([1.0])
+    y1 = float(sys1.H(t_val, x1, u))
+    y2 = float(sys2.H(t_val, x2, u))
+    y_combined = float(sys_combined.H(t_val, x, u))
+    assert np.isclose(y_combined, y1 + y2)
+
+    # + is equivalent to sum_systems
+    sys_via_func = sum_systems([sys1, sys2], model_class=StateSpaceModelDT)
+    assert str(sys_combined) == str(sys_via_func)

@@ -45,7 +45,7 @@ from cas_models.param_utils import (
     make_list_of_enumerated_names,
 )
 from cas_models.validation import validate_casadi_function_dims
-from cas_models.transformations import connect_systems_in_series
+from cas_models.transformations import connect_systems_in_series, sum_systems
 
 # Attribute names for discrete-time state-space models
 ATTR_NAMES = {
@@ -243,6 +243,23 @@ class StateSpaceModelDT:
         return connect_systems_in_series(
             [self, other], model_class=StateSpaceModelDT
         )
+
+    def __add__(self, other):
+        """Connect two discrete-time systems in parallel using the + operator.
+
+        Both systems receive the same input and their outputs are summed,
+        giving a combined system with the same input and output dimensions.
+
+        Args:
+            other: Another StateSpaceModelDT instance to connect in parallel.
+
+        Returns:
+            StateSpaceModelDT: Combined system where y = y_self + y_other.
+
+        Note:
+            Both systems must have the same nu and ny.
+        """
+        return sum_systems([self, other], model_class=StateSpaceModelDT)
 
 
 class StateSpaceModelDTFromCTRK4(StateSpaceModelDT):

@@ -7,6 +7,8 @@ Functions
 ---------
 connect_systems_in_parallel
     Combine a list of models with independent inputs and outputs side by side.
+sum_systems
+    Combine a list of models with shared inputs and summed outputs.
 connect_systems_in_series
     Connect models end-to-end, feeding each output into the next input.
 connect_systems
@@ -322,6 +324,147 @@ def connect_systems_in_parallel(
     )
 
     return combined_system
+
+
+def sum_systems(
+    systems,
+    model_class,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
+    name=None,
+    sep="+",
+):
+    """Combine a list of systems with shared inputs and summed outputs.
+
+    Each system receives the same input u and the outputs are summed,
+    giving a combined system with the same input and output dimensions
+    as each individual system. This is the classical parallel connection
+    used by control toolboxes (Matlab parallel(), Octave sys1 + sys2, etc.).
+
+    This function works for both continuous-time and discrete-time systems.
+
+    Args:
+        systems (list): List of state-space model objects to combine. All
+            must have the same nu and ny.
+        model_class: Class to instantiate for the combined system
+            (StateSpaceModelCT or StateSpaceModelDT).
+        keys (list, optional): Custom keys for naming subsystems. If None,
+            defaults to system names or [prefix + "1", prefix + "2", ...].
+        verbose_names (bool, optional): If True, use verbose parameter naming.
+            Default: False.
+        prefix (str, optional): Prefix for auto-generated subsystem keys.
+            Default: "sys".
+        name (str, optional): Name for the combined system. If None,
+            auto-generates by joining system names with sep.
+        sep (str, optional): Separator for joining system names when
+            auto-generating the combined system name. Default: "+".
+
+    Returns:
+        StateSpaceModelCT or StateSpaceModelDT: Combined system with shared
+            inputs and summed outputs.
+
+    Raises:
+        ValueError: If systems do not all have the same nu or ny.
+
+    Example:
+        >>> sys_combined = sum_systems([sys1, sys2], model_class=StateSpaceModelCT)
+        >>> # Equivalent to sys1 + sys2 via the __add__ operator.
+    """
+    validate_systems_are_compatible(systems)
+    nu = systems[0].nu
+    ny = systems[0].ny
+    for sys in systems[1:]:
+        if sys.nu != nu:
+            raise ValueError(
+                f"All systems must have the same nu for sum_systems. "
+                f"Got nu={sys.nu}, expected nu={nu}."
+            )
+        if sys.ny != ny:
+            raise ValueError(
+                f"All systems must have the same ny for sum_systems. "
+                f"Got ny={sys.ny}, expected ny={ny}."
+            )
+
+    attr_names = model_class._attr_names
+    if keys is None:
+        keys = [sys.name for sys in systems]
+    keys = make_list_of_unique_names(keys, prefix=prefix)
+    params = merge_param_dicts(
+        [sys.params for sys in systems],
+        keys,
+        verbose_names=verbose_names,
+    )
+
+    t = cas.SX.sym("t")
+    u = cas.SX.sym(attr_names["input_var"], nu)
+
+    x_states = []
+    state_outputs = []
+    y_sum = None
+
+    for sys in systems:
+        x = cas.SX.sym(attr_names["state_var"], sys.n)
+        x_states.append(x)
+
+        state_func = getattr(sys, attr_names["state_func"])
+        state_out = state_func(t, x, u, *sys.params.values())
+        state_outputs.append(state_out)
+
+        output_func = getattr(sys, attr_names["output_func"])
+        y = output_func(t, x, u, *sys.params.values())
+        y_sum = y if y_sum is None else y_sum + y
+
+    x = cas.vcat(x_states)
+    n = x.shape[0]
+    state_combined = cas.vcat(state_outputs)
+    assert state_combined.shape == x.shape
+
+    state_function = cas.Function(
+        attr_names["state_func"],
+        [t, x, u, *params.values()],
+        [state_combined],
+        ["t", attr_names["state_var"], attr_names["input_var"], *params.keys()],
+        [attr_names["state_output"]],
+    )
+
+    output_function = cas.Function(
+        attr_names["output_func"],
+        [t, x, u, *params.values()],
+        [y_sum],
+        ["t", attr_names["state_var"], attr_names["input_var"], *params.keys()],
+        [attr_names["output_var"]],
+    )
+
+    state_names = concatenate_lists_of_names(
+        [sys.state_names for sys in systems],
+        keys=keys,
+        prefix=prefix,
+        verbose_names=verbose_names,
+    )
+    assert len(state_names) == n
+
+    input_names = systems[0].input_names
+    output_names = systems[0].output_names
+
+    if name is None:
+        system_names = make_list_of_unique_names(
+            [sys.name for sys in systems], prefix=prefix
+        )
+        name = sep.join(system_names)
+
+    return model_class(
+        state_function,
+        output_function,
+        n,
+        nu,
+        ny,
+        params=params,
+        name=name,
+        input_names=input_names,
+        state_names=state_names,
+        output_names=output_names,
+    )
 
 
 def connect_systems_in_series(
