@@ -77,6 +77,10 @@ sys = sys_model * sys_model_2
 ## Examples: Simulation
 
 ```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+from cas_models.continuous_time.models import SSModelCTLinearFOSISO
 from cas_models.discrete_time.models import StateSpaceModelDTFromCT
 from cas_models.discrete_time.simulate import make_n_step_simulation_function_from_model
 
@@ -105,11 +109,9 @@ F_sim_100_steps:(t_eval[101],U[100],x0)->(X[101],Y[101]) SXFunction
 ```
 
 ```python
-import numpy as np
-
-# Simualtion time
+# Simulation time
 # Note: Simulation outputs include values for nT+1 time instants
-t = dt * np.arange(nT+1)
+t = dt * np.arange(nT + 1)
 t_in = t[:-1]
 
 # Simulation inputs
@@ -118,10 +120,10 @@ U[t_in >= 1] = 1.0
 
 # Initial condition
 x0 = np.zeros(sys_dt.n)
-X, Y =  simulate(t, U, x0)
+X, Y = simulate(t, U, x0)
 
-assert X.shape == (nT+1, sys_dt.n)  # states
-assert Y.shape == (nT+1, sys_dt.ny)  # outputs
+assert X.shape == (nT + 1, sys_dt.n)  # states
+assert Y.shape == (nT + 1, sys_dt.ny)  # outputs
 ```
 
 
@@ -135,4 +137,69 @@ ax.grid(False)
 plt.tight_layout()
 plt.show()
 ```
-![Time series plot of step response of system](https://github.com/billtubbs/casadi-models/blob/main/plots/example_sr.svg)
+![Time series plot of step response of system](plots/example_sr.svg)
+
+## Examples: Simulating a Feedback Loop
+
+```python
+from cas_models.continuous_time.regulators import SSModelCTPIInt
+from cas_models.transformations import connect_feedback_system
+
+# First-order plant: G(s) = 1 / (2s + 1)
+plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
+
+# PI controller in interactive form: Gc(s) = Kc * (Ti*s + 1) / (Ti*s)
+ctrl = SSModelCTPIInt(Kc=1, Ti=2, name="ctrl")
+```
+
+```python
+# Negative feedback loop: reference -> ctrl -> plant -> (feedback) -> ctrl
+sys1 = ctrl * plant
+print(sys1.name, sys1.input_names, sys1.output_names)
+```
+```lang-none
+ctrl_plant ['e'] ['y']
+```
+
+```python
+sys_cl = connect_feedback_system(sys1, model_class=StateSpaceModelCT)
+print(f"Inputs:  {sys_cl.input_names}")
+print(f"Outputs: {sys_cl.output_names}")
+print(f"States:  {sys_cl.state_names}")
+```
+```lang-none
+Inputs:  ['y_sp']
+Outputs: ['ctrl_plant_y']
+States:  ['plant_x', 'ctrl_x']
+```
+
+```python
+# Convert to discrete-time and simulate step response
+dt = 0.1
+sys_cl_dt = StateSpaceModelDTFromCT(sys_cl, dt)
+
+nT = 200
+simulate_cl = make_n_step_simulation_function_from_model(sys_cl_dt, nT)
+
+t = dt * np.arange(nT + 1)
+R_full = np.where(t >= 1, 1.0, 0.0)      # reference at all nT+1 time instants
+R = R_full[:-1].reshape(-1, 1)            # inputs at nT steps
+
+x0 = np.zeros(sys_cl_dt.n)
+X, Y = simulate_cl(t, R, x0)
+
+assert X.shape == (nT + 1, sys_cl_dt.n)
+assert Y.shape == (nT + 1, sys_cl_dt.ny)
+```
+
+```python
+fig, ax = plt.subplots(figsize=(4, 2.5))
+ax.step(t, R_full, "k--", where="post", label="reference")
+ax.plot(t, Y[:, 0], label="output y")
+ax.set_xlabel("t")
+ax.set_ylabel("y")
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+![Time series plot of closed-loop step response](plots/example_cl_sr.svg)

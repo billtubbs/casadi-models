@@ -547,16 +547,24 @@ def validate_systems_are_compatible(systems):
         validate_equal_dt(systems)
 
 
-def _validate_connections(connections_norm, parallel_sys):
+def _validate_connections(
+    connections_norm, parallel_sys, external_inputs=None
+):
     """Validate connection specification.
 
     Args:
         connections_norm: Normalized connections dict
         parallel_sys: The parallel system
+        external_inputs: List of external input names, including any new
+            signals not already in the parallel system (e.g. a setpoint
+            injected via input_names).
 
     Raises:
         ValueError: If connections are invalid
     """
+    if external_inputs is None:
+        external_inputs = []
+
     # Check all input names exist
     for input_name in connections_norm.keys():
         if input_name not in parallel_sys.input_names:
@@ -566,12 +574,13 @@ def _validate_connections(connections_norm, parallel_sys):
                 f"{parallel_sys.input_names}"
             )
 
-    # Check all source names exist (can be outputs or inputs)
+    # Check all source names exist (can be outputs, inputs, or new externals)
     for input_name, source_dict in connections_norm.items():
         for source_name in source_dict.keys():
             is_output = source_name in parallel_sys.output_names
             is_input = source_name in parallel_sys.input_names
-            if not is_output and not is_input:
+            is_new_external = source_name in external_inputs
+            if not is_output and not is_input and not is_new_external:
                 raise ValueError(
                     f"Connection source '{source_name}' (for input "
                     f"'{input_name}') not found in parallel system. "
@@ -646,10 +655,14 @@ def _build_internal_input_vector(
             u_temp = cas.SX.zeros(len(parallel_sys.input_names), 1)
             filled_inputs = set()  # Track which inputs have been filled
 
-            # Fill external inputs
+            # Fill external inputs that correspond to parallel system inputs.
+            # New external signals (not in the parallel system) are only
+            # used as sources in the final weighted sum, not as pass-through
+            # inputs here.
             for name, idx in external_input_map.items():
-                temp_idx = input_name_to_idx[name]
-                u_temp[temp_idx] = u_ext[idx]
+                if name in input_name_to_idx:
+                    temp_idx = input_name_to_idx[name]
+                    u_temp[temp_idx] = u_ext[idx]
                 filled_inputs.add(name)
 
             # Iteratively fill connected inputs (handles multi-stage
@@ -892,9 +905,8 @@ def connect_systems(
     if not connections:
         connections = {}
 
-    # Step 2: Normalize and validate connections
+    # Step 2: Normalize connections and determine external inputs
     connections_norm = _normalize_connections(connections)
-    _validate_connections(connections_norm, parallel_sys)
 
     # Step 3: Determine external inputs and outputs
     if input_names is None:
@@ -913,13 +925,11 @@ def connect_systems(
                 f"Inputs cannot be both external and connected. "
                 f"Found in both: {overlap}"
             )
-        # Validate all exist in parallel system
-        for name in external_inputs:
-            if name not in parallel_sys.input_names:
-                raise ValueError(
-                    f"External input '{name}' not found in parallel system. "
-                    f"Available: {parallel_sys.input_names}"
-                )
+        # Names not in the parallel system are treated as new external signals
+        # (e.g. a setpoint injected into a summing junction). They are valid
+        # as connection sources but not as connection targets.
+
+    _validate_connections(connections_norm, parallel_sys, external_inputs)
 
     if output_names is None:
         external_outputs = parallel_sys.output_names  # All outputs
@@ -1048,10 +1058,10 @@ def connect_systems(
     return connected_sys
 
 
-def connect_feedback_systems(
+def connect_feedback_system(
     sys1,
-    sys2,
-    model_class,
+    sys2=None,
+    model_class=None,
     sign=-1,
     input_names=None,
     output_names=None,
@@ -1061,50 +1071,105 @@ def connect_feedback_systems(
     name=None,
     sep="_",
 ):
-    """Combine two systems with a feedback interconnection from the
-    output of the second system to the input of the first.
+    """Combine two systems in a feedback loop as shown below.
+
+                +
+        y_sp -----( )-- e ---> sys1 -----+-----> y
+                   | -                   |
+                   |                     |
+                   +------- sys2 <-------+
+
+    sys2 defaults to None, which gives unity feedback (static gain of 1).
+    A scalar int or float may also be passed for sys2, in which case it is
+    treated as a SISO static gain.
 
     This function works for both continuous-time and discrete-time systems by
     using an attr_names dictionary to specify the appropriate attribute and
     variable names.
     """
-    sys_comb_open_loop = connect_systems_in_series(
-        [sys1, sys2],
-        model_class,
-        keys=keys,
-        verbose_names=verbose_names,
-        prefix=prefix,
-        name=name,
-        sep=sep,
-    )
-    if sys_comb_open_loop.nu != sys_comb_open_loop.ny:
+    if model_class is None:
+        raise ValueError("model_class must be specified")
+    if sys2 is None:
+        sys2 = 1.0
+    unity_feedback = isinstance(sys2, (int, float)) and sys2 == 1
+    if isinstance(sys2, (int, float)):
+        if model_class._attr_names["state_func"] != "f":
+            raise NotImplementedError(
+                "Scalar sys2 is not yet supported for discrete-time systems"
+            )
+        from cas_models.continuous_time.models import (
+            SSModelCTDirectTransmission,
+        )
+
+        sys2 = SSModelCTDirectTransmission(
+            D=cas.SX([[float(sys2)]]), name="gain"
+        )
+    if sys1.ny != sys2.nu:
+        raise ValueError(
+            "sys2 must have same number of inputs as outputs from sys1"
+        )
+    if sys2.ny != sys1.nu:
         raise ValueError(
             "sys1 must have same number of inputs as outputs from sys2"
         )
+
+    # Mirror the key and name computation that connect_systems_in_parallel
+    # will apply, so that connection signal names match the parallel system.
+    effective_keys = make_list_of_unique_names(
+        [sys1.name, sys2.name] if keys is None else keys,
+        prefix=prefix,
+    )
+    parallel_input_names = concatenate_lists_of_names(
+        [sys1.input_names, sys2.input_names],
+        keys=effective_keys,
+        prefix=prefix,
+        verbose_names=verbose_names,
+    )
+    parallel_output_names = concatenate_lists_of_names(
+        [sys1.output_names, sys2.output_names],
+        keys=effective_keys,
+        prefix=prefix,
+        verbose_names=verbose_names,
+    )
+    sys1_par_inputs = parallel_input_names[: sys1.nu]
+    sys1_par_outputs = parallel_output_names[: sys1.ny]
+    sys2_par_inputs = parallel_input_names[sys1.nu :]
+    sys2_par_outputs = parallel_output_names[sys1.ny :]
+
     if input_names is None:
-        input_names = [
-            f"{name}_sp" for name in sys_comb_open_loop.output_names
-        ]
+        input_names = [f"{n}_sp" for n in sys2.output_names]
     else:
-        if len(input_names) != sys_comb_open_loop.ny:
+        if len(input_names) != sys1.nu:
             raise ValueError(
-                "Number of input names must match number of sys2 outputs"
+                "Number of input names must match number of sys1 inputs"
             )
     if output_names is None:
-        output_names = sys_comb_open_loop.output_names
-    sys_name = sys_comb_open_loop.name
+        output_names = sys1_par_outputs
+    else:
+        if len(output_names) != sys1.ny:
+            raise ValueError(
+                "Number of output names must match number of sys1 outputs"
+            )
+    if name is None:
+        name_keys = [effective_keys[0]] if unity_feedback else effective_keys
+        name = " ".join(["fbk"] + name_keys)
+
+    # Define feedback loop connections using parallel-system signal names
     connections = {}
-    for sp_name, e_name, y_name in zip(
+    for sp_name, sys1_u, sys1_y, sys2_u, sys2_y in zip(
         input_names,
-        sys_comb_open_loop.input_names,
-        sys_comb_open_loop.output_names,
+        sys1_par_inputs,
+        sys1_par_outputs,
+        sys2_par_inputs,
+        sys2_par_outputs,
     ):
-        connections[f"{sys_name}_{e_name}"] = {
-            sp_name: 1.0,
-            f"{sys_name}_{y_name}": sign,
-        }
+        # y_sp - sys2_y → sys1
+        connections[sys1_u] = {sp_name: 1.0, sys2_y: sign}
+        # sys1_y → sys2
+        connections[sys2_u] = sys1_y
+
     return connect_systems(
-        [sys_comb_open_loop],
+        [sys1, sys2],
         connections,
         model_class,
         input_names=input_names,

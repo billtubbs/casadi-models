@@ -9,12 +9,16 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearFOSISO,
     is_ss_ct,
 )
+from cas_models.continuous_time.regulators import SSModelCTPIInt
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
+    StateSpaceModelDTFromCT,
     StateSpaceModelDTTFSISO,
     is_ss_dt,
 )
+from cas_models.discrete_time.simulate import make_n_step_simulation_function_from_model
 from cas_models.transformations import (
+    connect_feedback_system,
     connect_systems,
     connect_systems_in_parallel,
     connect_systems_in_series,
@@ -739,3 +743,109 @@ def test_mixed_ct_dt_systems_error():
             connections=[],
             model_class=StateSpaceModelDT,
         )
+
+
+# --- Tests for connect_feedback_system ---
+
+
+def test_connect_feedback_system_unity_properties():
+    """Unity negative feedback: structural properties (names, dimensions)."""
+    plant = SSModelCTLinearFOSISO(K=2.0, T1=1.0, name="plant")
+    sys_cl = connect_feedback_system(plant, model_class=StateSpaceModelCT)
+
+    assert sys_cl.n == 1
+    assert sys_cl.nu == 1
+    assert sys_cl.ny == 1
+    assert sys_cl.input_names == ["y_sp"]
+    assert sys_cl.output_names == ["plant_y"]
+    assert sys_cl.state_names == ["x"]
+    assert sys_cl.name == "fbk plant"
+    assert is_ss_ct(sys_cl)
+
+
+def test_connect_feedback_system_pi_plant():
+    """PI controller + first-order plant — the README/notebook example."""
+    plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
+    ctrl = SSModelCTPIInt(Kc=1, Ti=2, name="ctrl")
+    sys_cl = connect_feedback_system(ctrl * plant, model_class=StateSpaceModelCT)
+
+    assert sys_cl.n == 2
+    assert sys_cl.nu == 1
+    assert sys_cl.ny == 1
+    assert sys_cl.input_names == ["y_sp"]
+    assert sys_cl.output_names == ["ctrl_plant_y"]
+    assert "plant_x" in sys_cl.state_names
+    assert "ctrl_x" in sys_cl.state_names
+    assert repr(sys_cl) == (
+        "StateSpaceModelCT("
+        "f=Function(f:(t,x[2],u)->(rhs[2]) SXFunction), "
+        "h=Function(h:(t,x[2],u)->(y) SXFunction), "
+        "n=2, nu=1, ny=1, params={}, name='fbk ctrl_plant', "
+        "input_names=['y_sp'], state_names=['plant_x', 'ctrl_x'], "
+        "output_names=['ctrl_plant_y'])"
+    )
+
+
+def test_connect_feedback_system_simulation():
+    """Verify closed-loop steady-state via discrete-time simulation."""
+    dt = 0.01
+
+    # Unity feedback, K=2, T1=1 → closed-loop y_ss = K/(1+K) = 2/3 for r=1
+    plant = SSModelCTLinearFOSISO(K=2.0, T1=1.0, name="plant")
+    sys_cl = connect_feedback_system(plant, model_class=StateSpaceModelCT)
+    sys_dt = StateSpaceModelDTFromCT(sys_cl, dt)
+    nT = 1000
+    simulate = make_n_step_simulation_function_from_model(sys_dt, nT)
+    t = dt * np.arange(nT + 1)
+    _, Y = simulate(t, np.ones((nT, 1)), np.zeros(sys_dt.n))
+    assert abs(float(Y[-1]) - 2.0 / 3.0) < 1e-4
+
+    # PI controller eliminates steady-state offset → y_ss → 1.0
+    plant2 = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
+    ctrl = SSModelCTPIInt(Kc=1, Ti=2, name="ctrl")
+    sys_cl2 = connect_feedback_system(ctrl * plant2, model_class=StateSpaceModelCT)
+    sys_dt2 = StateSpaceModelDTFromCT(sys_cl2, dt)
+    nT2 = 2000
+    simulate2 = make_n_step_simulation_function_from_model(sys_dt2, nT2)
+    t2 = dt * np.arange(nT2 + 1)
+    _, Y2 = simulate2(t2, np.ones((nT2, 1)), np.zeros(sys_dt2.n))
+    assert abs(float(Y2[-1]) - 1.0) < 1e-3
+
+
+def test_connect_feedback_system_custom_input_names():
+    """Custom reference signal name via input_names."""
+    plant = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="plant")
+    sys_cl = connect_feedback_system(
+        plant, model_class=StateSpaceModelCT, input_names=["r"]
+    )
+    assert sys_cl.input_names == ["r"]
+    assert sys_cl.output_names == ["plant_y"]
+
+
+def test_connect_feedback_system_scalar_gain():
+    """Non-unity scalar gain in the feedback path."""
+    plant = SSModelCTLinearFOSISO(K=2.0, T1=1.0, name="plant")
+    sys_cl = connect_feedback_system(plant, sys2=2.0, model_class=StateSpaceModelCT)
+
+    assert sys_cl.n == 1
+    assert sys_cl.nu == 1
+    assert sys_cl.ny == 1
+    assert sys_cl.input_names == ["y_sp"]
+    assert sys_cl.name == "fbk plant gain"
+
+
+def test_connect_feedback_system_errors():
+    """Error handling for invalid arguments."""
+    plant = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="plant")
+
+    with pytest.raises(ValueError, match="model_class must be specified"):
+        connect_feedback_system(plant, model_class=None)
+
+    # sys2 dimension mismatch: use a two-output system as feedback for a SISO forward path
+    plant_a = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="a")
+    plant_b = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="b")
+    mimo_feedback = connect_systems_in_parallel(
+        [plant_a, plant_b], StateSpaceModelCT
+    )  # ny=2, nu=2
+    with pytest.raises(ValueError, match="sys2 must have same number of inputs"):
+        connect_feedback_system(plant, sys2=mimo_feedback, model_class=StateSpaceModelCT)

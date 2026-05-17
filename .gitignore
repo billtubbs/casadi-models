@@ -1,5 +1,6 @@
 plots/*
 !plots/example_sr.svg
+!plots/example_cl_sr.svg
 __pycache__/
 *.pyc
 *.egg-info/
