@@ -1,7 +1,26 @@
 """Transformations for combining state-space models.
 
-This module provides generalized functions for combining both
-continuous-time and discrete-time state-space models.
+Provides functions for combining continuous-time and discrete-time
+state-space models in parallel, series, and feedback configurations.
+
+Functions
+---------
+connect_systems_in_parallel
+    Combine a list of models with independent inputs and outputs side by side.
+connect_systems_in_series
+    Connect models end-to-end, feeding each output into the next input.
+connect_systems
+    Connect models with arbitrary named signal connections.
+connect_feedback_system
+    Close a feedback loop around a forward-path model.
+validate_systems_are_compatible
+    Raise if a list of models are not all the same type (CT vs DT).
+block_diag
+    Construct a block-diagonal CasADi SX matrix from a list of matrices.
+linear_systems_in_parallel
+    Combine linear systems in A, B, C, D dict form side by side.
+linear_systems_in_series
+    Combine linear systems in A, B, C, D dict form end-to-end.
 """
 
 from functools import reduce

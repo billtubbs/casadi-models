@@ -1,3 +1,44 @@
+"""Continuous-time state-space model classes.
+
+Classes
+-------
+StateSpaceModelCT
+    Base class for continuous-time state-space models.
+StateSpaceModelCTSISO
+    Base class for SISO continuous-time models.
+StateSpaceModelCTStaticNonlinearity
+    Model with a static nonlinearity applied to each output.
+StateSpaceModelCTFromABCD
+    Continuous-time model built from A, B, C, D matrices.
+SSModelCTDirectTransmission
+    Static gain (no dynamics): y = D * u.
+SSModelCTFromABCDSISO
+    SISO model built from A, B, C, D matrices.
+SSModelCTLinearFONoGainSISO
+    First-order SISO: G(s) = 1 / (T1*s + 1).
+SSModelCTLinearIntegratorSISO
+    Integrator: G(s) = 1 / s.
+SSModelCTLinearFOSISO
+    First-order SISO with gain: G(s) = K / (T1*s + 1).
+SSModelCTLinearO2SISO
+    Second-order SISO with gain: G(s) = K / ((T1*s+1)*(T2*s+1)).
+SSModelCTLinearO2NoGainSISO
+    Second-order SISO (gain=1): G(s) = 1 / ((T1*s+1)*(T2*s+1)).
+SSModelCTLinearO2UnderdampedSISO
+    Second-order underdamped SISO: G(s) = wn^2 / (s^2 + 2*z*wn*s + wn^2).
+SSModelCTFromSympySS
+    Continuous-time model built from a SymPy state-space representation.
+
+Functions
+---------
+is_ss_ct
+    Return True if an object is a continuous-time state-space model.
+validate_f_function
+    Check that a CasADi function is a valid continuous-time state function.
+validate_h_function
+    Check that a CasADi function is a valid continuous-time output function.
+"""
+
 from collections import OrderedDict
 from dataclasses import dataclass
 

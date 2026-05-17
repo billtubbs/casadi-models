@@ -1,3 +1,26 @@
+"""Simulation and steady-state utilities for continuous-time models.
+
+Simulation is performed by discretising the model (RK4 or CasADi's integrator)
+and then calling the resulting discrete-time step function.
+
+Functions
+---------
+make_step_function
+    Create a CasADi function for a unit-step or scaled-step input signal.
+make_sim_step_function_RK4
+    Create a single-step RK4 integrator for a continuous-time model.
+make_sim_step_function_RK4_fixed_dt
+    Create a fixed-timestep single-step RK4 integrator.
+make_sim_step_function_integrator
+    Create a single-step integrator using CasADi's built-in integrator.
+make_sim_step_function_integrator_fixed_dt
+    Create a fixed-timestep single-step CasADi integrator.
+make_n_step_simulation_function_from_model
+    Build an n-step simulation function directly from a CT model.
+make_steady_state_solver
+    Build a CasADi function that solves for steady-state (x_ss, y_ss).
+"""
+
 import casadi as cas
 import numpy as np
 

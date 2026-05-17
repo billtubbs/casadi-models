@@ -1,4 +1,12 @@
-"""Simulation functions for discrete-time models."""
+"""Simulation functions for discrete-time models.
+
+Functions
+---------
+make_n_step_simulation_function
+    Build a CasADi n-step simulation function from state and output functions.
+make_n_step_simulation_function_from_model
+    Build an n-step simulation function directly from a DT model object.
+"""
 
 import casadi as cas
 

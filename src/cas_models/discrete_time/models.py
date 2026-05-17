@@ -1,3 +1,40 @@
+"""Discrete-time state-space model classes and transfer-function utilities.
+
+Classes
+-------
+StateSpaceModelDT
+    Base class for discrete-time state-space models.
+StateSpaceModelDTFromCTRK4
+    Discrete-time model obtained by discretising a CT model with RK4.
+StateSpaceModelDTFromCT
+    Discrete-time model obtained by discretising a CT model (CasADi integrator).
+StateSpaceModelDTSISO
+    Base class for SISO discrete-time models.
+StateSpaceModelDTTFSISO
+    Discrete-time SISO model defined by a transfer function (num/den).
+StateSpaceModelDTDelay
+    Discrete-time model with an explicit integer input or output delay.
+StateSpaceModelDTARXSISO
+    ARX (auto-regressive with exogenous input) SISO model.
+
+Functions
+---------
+is_ss_dt
+    Return True if an object is a discrete-time state-space model.
+validate_equal_dt
+    Raise if a list of discrete-time models do not share the same dt.
+validate_F_function
+    Check that a CasADi function is a valid discrete-time state function.
+validate_H_function
+    Check that a CasADi function is a valid discrete-time output function.
+tf_to_ss_obs_np
+    Convert a transfer function (num/den) to observer-canonical SS form (NumPy).
+tf_to_ss_con_cas
+    Convert a transfer function (num/den) to controller-canonical SS form (CasADi).
+tf_to_ss_obs_cas
+    Convert a transfer function (num/den) to observer-canonical SS form (CasADi).
+"""
+
 from collections import OrderedDict
 from dataclasses import dataclass
 
