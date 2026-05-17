@@ -970,11 +970,14 @@ def connect_systems(
                     f"Available: {parallel_sys.output_names}"
                 )
 
-    # Validate that input names in connection sources are external
+    # Validate that input names in connection sources are external.
+    # If a name exists in both output_names and input_names, it is resolved
+    # as an output (the computation code already does this), so skip the check.
     for input_name, source_dict in connections_norm.items():
         for source_name in source_dict.keys():
-            if source_name in parallel_sys.input_names:
-                # Source is an input name - must be external
+            is_also_output = source_name in parallel_sys.output_names
+            if source_name in parallel_sys.input_names and not is_also_output:
+                # Source is an input-only name - must be external
                 if source_name not in external_inputs:
                     raise ValueError(
                         f"Connection source input '{source_name}' (for input "
