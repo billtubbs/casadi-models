@@ -3,11 +3,13 @@
 import pytest
 import numpy as np
 import casadi as cas
+from cas_models.continuous_time.models import StateSpaceModelCT
 from cas_models.continuous_time.simulate import (
     make_sim_step_function_RK4,
     make_sim_step_function_RK4_fixed_dt,
     make_sim_step_function_integrator,
     make_sim_step_function_integrator_fixed_dt,
+    make_steady_state_solver,
     make_step_function,
 )
 from cas_models.discrete_time.simulate import (
@@ -785,3 +787,157 @@ def test_fixed_dt_functions_with_n_step_simulation(cart_pole_system):
 
     # Position should change due to force
     assert abs(float(Y[-1, 0])) > 0.01
+
+
+@pytest.fixture
+def cascaded_nonlinear_system():
+    """A simple 2-state cascaded nonlinear system with a known analytical SS.
+
+    Dynamics:
+        dx1/dt = -a*(x1 - u)
+        dx2/dt = -b*x2 + x1^2
+
+    Output: y = x2
+
+    Analytical steady state for constant input u:
+        x1_ss = u,  x2_ss = u^2 / b,  y_ss = u^2 / b
+
+    The Jacobian d(f)/d(x) is lower-triangular with diagonal [-a, -b], so it
+    is always full-rank for positive a and b.
+
+    Parameters: a, b (positive real scalars)
+    """
+    n, nu, ny = 2, 1, 1
+
+    t_sx = cas.SX.sym("t")
+    x_sx = cas.SX.sym("x", n)
+    u_sx = cas.SX.sym("u", nu)
+    a_sx = cas.SX.sym("a")
+    b_sx = cas.SX.sym("b")
+
+    params = {"a": a_sx, "b": b_sx}
+    param_values = {"a": 2.0, "b": 3.0}
+
+    rhs = cas.vertcat(
+        -a_sx * (x_sx[0] - u_sx[0]),
+        -b_sx * x_sx[1] + x_sx[0] ** 2,
+    )
+    f = cas.Function(
+        "f",
+        [t_sx, x_sx, u_sx, a_sx, b_sx],
+        [rhs],
+        ["t", "x", "u", "a", "b"],
+        ["rhs"],
+    )
+
+    y = x_sx[1:2]
+    h = cas.Function(
+        "h",
+        [t_sx, x_sx, u_sx, a_sx, b_sx],
+        [y],
+        ["t", "x", "u", "a", "b"],
+        ["y"],
+    )
+
+    return n, nu, ny, f, h, params, param_values
+
+
+def test_make_steady_state_solver_raises_on_free_states(cart_pole_system):
+    """A clear ValueError is raised when the model has structurally free states.
+
+    The cart-pole has x[0] (cart position) absent from all rhs components,
+    making the Jacobian rank-deficient.  The error should name the offending
+    index and suggest auto_reduce=True.
+    """
+    n, nu, ny, f, h, params, param_values = cart_pole_system
+    model = StateSpaceModelCT(f=f, h=h, n=n, nu=nu, ny=ny, params=params)
+
+    with pytest.raises(ValueError, match=r"indices \[0\]"):
+        make_steady_state_solver(model)
+
+    # The message should also mention auto_reduce.
+    with pytest.raises(ValueError, match="auto_reduce=True"):
+        make_steady_state_solver(model)
+
+
+def test_make_steady_state_solver_auto_reduce_cart_pole(cart_pole_system):
+    """auto_reduce=True solves for the constrained states and pins the free ones.
+
+    For the cart-pole with u=0, the upright equilibrium is
+    x=[x0_pos, 0, 0, 0]: cart position unchanged from x0, all others zero.
+    """
+    n, nu, ny, f, h, params, param_values = cart_pole_system
+    model = StateSpaceModelCT(f=f, h=h, n=n, nu=nu, ny=ny, params=params)
+    solve_ss = make_steady_state_solver(model, auto_reduce=True)
+
+    u = np.array([0.0])
+    x_pos_init = 2.5  # arbitrary non-zero cart position
+    x0 = np.array([x_pos_init, 0.05, 0.1, 0.0])
+    x_ss, y_ss = solve_ss(x0, u, param_values)
+
+    # Free state (cart position) is returned unchanged from x0.
+    assert x_ss[0] == pytest.approx(x_pos_init)
+
+    # Constrained states converge to the upright equilibrium.
+    assert x_ss[1] == pytest.approx(0.0, abs=1e-8)  # x_dot
+    assert x_ss[2] == pytest.approx(0.0, abs=1e-8)  # theta
+    assert x_ss[3] == pytest.approx(0.0, abs=1e-8)  # theta_dot
+
+    # Output y_ss should match h(x_ss, u).
+    y_check = np.array(h(0, x_ss, u, *param_values.values())).flatten()
+    assert np.allclose(y_ss, y_check, atol=1e-10)
+
+
+def test_make_steady_state_solver_known_ss(cascaded_nonlinear_system):
+    """Solver recovers the analytical steady state of a nonlinear system.
+
+    For input u the exact equilibrium is x1_ss=u, x2_ss=u^2/b.  The test
+    verifies the residual f(x_ss, u)=0, the state values, and that y_ss
+    matches h(x_ss, u).
+    """
+    n, nu, ny, f, h, params, param_values = cascaded_nonlinear_system
+    model = StateSpaceModelCT(f=f, h=h, n=n, nu=nu, ny=ny, params=params)
+    solve_ss = make_steady_state_solver(model)
+
+    u_val = 2.0
+    u = np.array([u_val])
+    x0 = np.zeros(n)
+    x_ss, y_ss = solve_ss(x0, u, param_values)
+
+    b = param_values["b"]
+    assert np.allclose(x_ss[0], u_val, atol=1e-8)
+    assert np.allclose(x_ss[1], u_val**2 / b, atol=1e-8)
+
+    residual = np.array(f(0, x_ss, u, *param_values.values())).flatten()
+    assert np.allclose(residual, np.zeros(n), atol=1e-8)
+
+    y_check = np.array(h(0, x_ss, u, *param_values.values())).flatten()
+    assert np.allclose(y_ss, y_check, atol=1e-10)
+    assert np.allclose(y_ss[0], u_val**2 / b, atol=1e-8)
+
+
+def test_make_steady_state_solver_warm_start(cascaded_nonlinear_system):
+    """Solver tracks the SS correctly across a sweep of inputs using warm-starting.
+
+    Each solve is initialised from the previous solution, matching the
+    typical usage pattern documented in the function's Notes section.
+    """
+    n, nu, ny, f, h, params, param_values = cascaded_nonlinear_system
+    model = StateSpaceModelCT(f=f, h=h, n=n, nu=nu, ny=ny, params=params)
+    solve_ss = make_steady_state_solver(model)
+
+    b = param_values["b"]
+    x_prev = np.zeros(n)
+
+    for u_val in [1.0, 2.0, 3.0]:
+        u = np.array([u_val])
+        x_ss, y_ss = solve_ss(x_prev, u, param_values)
+
+        assert np.allclose(x_ss[0], u_val, atol=1e-8)
+        assert np.allclose(x_ss[1], u_val**2 / b, atol=1e-8)
+        assert np.allclose(y_ss[0], u_val**2 / b, atol=1e-8)
+
+        residual = np.array(f(0, x_ss, u, *param_values.values())).flatten()
+        assert np.allclose(residual, np.zeros(n), atol=1e-8)
+
+        x_prev = x_ss

@@ -1,4 +1,5 @@
 import casadi as cas
+import numpy as np
 
 from cas_models.discrete_time.simulate import make_n_step_simulation_function
 
@@ -140,7 +141,9 @@ def _integrator_step_symbolic(
     dt_param = cas.SX.sym("dt_param")
     t_param = cas.SX.sym("t_param")
     u_param = cas.SX.sym("u_param", nu)
-    params_dae = [cas.SX.sym(f"{key}_param", *v.shape) for key, v in params.items()]
+    params_dae = [
+        cas.SX.sym(f"{key}_param", *v.shape) for key, v in params.items()
+    ]
 
     # Current time in original coordinates
     t_current = t_param + s * dt_param
@@ -307,7 +310,9 @@ def make_n_step_simulation_function_from_model(
 
     Example:
         >>> model = build_cola_lv_ct_model()
-        >>> sim = make_n_step_simulation_function_from_model(model, dt=1.0, nT=300)
+        >>> sim = make_n_step_simulation_function_from_model(
+        ...     model, dt=1.0, nT=300
+        ... )
         >>> X, Y = sim(t_eval, U, x0, *param_values.values())
     """
     if name is None:
@@ -334,3 +339,177 @@ def make_n_step_simulation_function_from_model(
         params=model.params,
         name=name,
     )
+
+
+def make_steady_state_solver(
+    model, name="ss_solver", method="newton", opts=None, auto_reduce=False
+):
+    """Build a steady-state solver for a continuous-time state-space model.
+
+    Compiles a CasADi rootfinder that solves ``f(0, x, u, *params) = 0``
+    for ``x``.  The solver is compiled once; the returned callable may then
+    be called repeatedly with different inputs, parameter values, or initial
+    guesses.
+
+    Parameters
+    ----------
+    model : StateSpaceModelCT
+        Continuous-time model with attributes ``f``, ``h``, ``n``, ``nu``,
+        ``ny``, and ``params``.
+    name : str, optional
+        Name for the compiled CasADi rootfinder function.
+    method : str, optional
+        CasADi rootfinder algorithm.  ``"newton"`` (default) is fast with
+        a good initial guess; ``"fast_newton"`` trades robustness for speed;
+        ``"nlpsol"`` (wraps an NLP solver) is the most robust option for
+        difficult problems.
+    opts : dict, optional
+        Options forwarded verbatim to ``cas.rootfinder``.
+    auto_reduce : bool, optional
+        If True and the model has structurally free states (states that do
+        not appear in ``f``), automatically build a reduced rootfinder that
+        solves only for the constrained states.  The free states are returned
+        unchanged from ``x0``.  Default False.
+
+    Returns
+    -------
+    callable
+        A function ``(x0, u, param_vals) -> (x_ss, y_ss)`` where:
+
+        - ``x0`` : array-like, shape ``(n,)`` — initial state guess;
+          free states (when ``auto_reduce=True``) are returned as-is
+        - ``u``  : array-like, shape ``(nu,)`` — input vector
+        - ``param_vals`` : dict — values keyed by ``model.params``
+        - ``x_ss`` : ``np.ndarray``, shape ``(n,)`` — steady-state state
+        - ``y_ss`` : ``np.ndarray``, shape ``(ny,)`` — steady-state output
+
+    Raises
+    ------
+    ValueError
+        If one or more states do not appear in ``f`` (structurally free
+        states), making the Jacobian rank-deficient.  The error message
+        names the offending state indices and explains how to fix the
+        problem, including the option of passing ``auto_reduce=True``.
+
+    Notes
+    -----
+    For sweeps over an input range, pass the previous solution as ``x0``
+    at each step (warm-starting).  Converging from a nearby point typically
+    takes only a handful of Newton iterations.
+
+    A state ``x[j]`` is *structurally free* if its value does not appear in
+    any component of ``f``.  This is common in translation-invariant systems
+    (e.g. absolute cart position in a cart-pole model) where the steady-state
+    position is arbitrary.  With ``auto_reduce=True`` the free states are
+    pinned at their ``x0`` values and only the remaining states are solved
+    for.
+    """
+    if opts is None:
+        opts = {}
+
+    # Build SX variables matching model.params shapes.
+    x_sx = cas.SX.sym("x", model.n)
+    u_sx = cas.SX.sym("u", model.nu)
+    p_sxs = [cas.SX.sym(k, *v.shape) for k, v in model.params.items()]
+
+    # Residual: dx/dt at t=0 (steady state is time-invariant).
+    rhs = model.f(cas.SX(0), x_sx, u_sx, *p_sxs)
+
+    # Detect structurally free states: states absent from every rhs component.
+    colind = cas.jacobian(rhs, x_sx).sparsity().colind()
+    free_indices = [j for j in range(model.n) if colind[j + 1] == colind[j]]
+
+    if free_indices:
+        constrained = [j for j in range(model.n) if j not in set(free_indices)]
+        if not auto_reduce:
+            raise ValueError(
+                f"Cannot build steady-state solver: state(s) at indices "
+                f"{free_indices} do not appear in f(t, x, u, *params) and "
+                f"are therefore unconstrained at steady state — any value "
+                f"satisfies f=0, making the Jacobian structurally rank-"
+                f"deficient.\n\n"
+                f"To resolve this:\n"
+                f"  • Remove these states from your model if they are "
+                f"genuinely free (e.g. absolute position in a translation-"
+                f"invariant system).\n"
+                f"  • Pass auto_reduce=True to pin x[{free_indices}] at "
+                f"their x0 values and solve only for the constrained states "
+                f"at indices {constrained}."
+            )
+
+        # auto_reduce: select len(constrained) independent rows of rhs via
+        # greedy column matching on the sparsity of df/dx[constrained].
+        x_c_sx = cas.vertcat(*[x_sx[j] for j in constrained])
+        J_c = cas.jacobian(rhs, x_c_sx)
+        nz_rows, nz_cols = J_c.sparsity().get_triplet()
+
+        rows_by_col: dict[int, list[int]] = {}
+        for r, c in zip(nz_rows, nz_cols):
+            rows_by_col.setdefault(r, []).append(c)
+
+        col_assigned: set[int] = set()
+        selected_rows: list[int] = []
+        for r in range(model.n):
+            for c in rows_by_col.get(r, []):
+                if c not in col_assigned:
+                    col_assigned.add(c)
+                    selected_rows.append(r)
+                    break
+            if len(selected_rows) == len(constrained):
+                break
+
+        if len(selected_rows) < len(constrained):
+            raise ValueError(
+                f"auto_reduce=True failed: could not find a structurally "
+                f"non-singular {len(constrained)}x{len(constrained)} "
+                f"sub-system after removing free states {free_indices}. "
+                f"Consider restructuring the model."
+            )
+
+        rhs_c = cas.vertcat(*[rhs[r] for r in selected_rows])
+        p_sx = cas.vertcat(u_sx, *p_sxs)
+        g = cas.Function("g", [x_c_sx, p_sx], [rhs_c])
+        rf = cas.rootfinder(name, method, g, opts)
+
+        def solve(x0, u, param_vals):
+            x0_arr = np.asarray(x0, dtype=float).flatten()
+            p_val = cas.vertcat(
+                cas.DM(u), *[param_vals[k] for k in model.params]
+            )
+            x_c_ss = np.array(
+                rf(cas.DM([x0_arr[j] for j in constrained]), p_val)
+            ).flatten()
+            x_ss = x0_arr.copy()
+            for i, j in enumerate(constrained):
+                x_ss[j] = x_c_ss[i]
+            y_ss = np.array(
+                model.h(
+                    cas.DM(0),
+                    cas.DM(x_ss),
+                    cas.DM(u),
+                    *[param_vals[k] for k in model.params],
+                )
+            ).flatten()
+            return x_ss, y_ss
+
+        return solve
+
+    # Full rootfinder — no free states.
+    p_sx = cas.vertcat(u_sx, *p_sxs)
+    g = cas.Function("g", [x_sx, p_sx], [rhs])
+    rf = cas.rootfinder(name, method, g, opts)
+
+    def solve(x0, u, param_vals):
+        p_val = cas.vertcat(cas.DM(u), *[param_vals[k] for k in model.params])
+        x_ss = np.array(rf(cas.DM(x0), p_val)).flatten()
+        y_ss = np.array(
+            model.h(
+                cas.DM(0),
+                cas.DM(x_ss),
+                cas.DM(u),
+                *[param_vals[k] for k in model.params],
+            )
+        ).flatten()
+        return x_ss, y_ss
+
+    return solve

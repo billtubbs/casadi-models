@@ -1,5 +1,6 @@
 plots/*
 !plots/example_sr.svg
+__pycache__/
 *.pyc
-__pycache__
-*.egg-info.venv/
+*.egg-info/
+.venv/
