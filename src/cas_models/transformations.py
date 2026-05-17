@@ -1180,3 +1180,193 @@ def connect_feedback_system(
         name=name,
         sep=sep,
     )
+
+
+def connect_feedback_system_alt(
+    sys1,
+    sys2=None,
+    model_class=None,
+    sign=-1,
+    input_names=None,
+    output_names=None,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
+    name=None,
+    sep="_",
+):
+    """Combine two systems in a feedback loop (lower-level implementation).
+
+    Same interface as connect_feedback_system but builds the combined
+    state/output functions directly from CasADi symbolic expressions,
+    similar to connect_systems_in_series, instead of delegating to the
+    general-purpose connect_systems.
+
+                +
+        y_sp -----( )-- e ---> sys1 -----+-----> y
+                   | -                   |
+                   |                     |
+                   +------- sys2 <-------+
+
+    sys2 defaults to None, giving unity negative feedback.  A scalar
+    int/float may also be passed for sys2, treated as a SISO static gain.
+    """
+    if model_class is None:
+        raise ValueError("model_class must be specified")
+
+    unity_feedback = sys2 is None or (
+        isinstance(sys2, (int, float)) and sys2 == 1
+    )
+    scalar_gain = isinstance(sys2, (int, float))
+
+    if scalar_gain:
+        if model_class._attr_names["state_func"] != "f":
+            raise NotImplementedError(
+                "Scalar sys2 is not yet supported for discrete-time systems"
+            )
+        sys2_gain = float(sys2)
+        has_sys2_states = False
+    elif sys2 is None:
+        sys2_gain = 1.0
+        has_sys2_states = False
+    else:
+        if sys1.ny != sys2.nu:
+            raise ValueError(
+                "sys2 must have same number of inputs as outputs from sys1"
+            )
+        if sys2.ny != sys1.nu:
+            raise ValueError(
+                "sys1 must have same number of inputs as outputs from sys2"
+            )
+        sys2_gain = None
+        has_sys2_states = True
+        validate_systems_are_compatible([sys1, sys2])
+
+    sys2_name = "gain" if not has_sys2_states else sys2.name
+    effective_keys = make_list_of_unique_names(
+        [sys1.name, sys2_name] if keys is None else list(keys), prefix=prefix
+    )
+    attr_names = model_class._attr_names
+    output_func1 = getattr(sys1, attr_names["output_func"])
+    state_func1 = getattr(sys1, attr_names["state_func"])
+    if has_sys2_states:
+        output_func2 = getattr(sys2, attr_names["output_func"])
+        state_func2 = getattr(sys2, attr_names["state_func"])
+
+    # Detect algebraic loops: an algebraic loop exists when the cycle has
+    # direct feedthrough all the way round.  For unity/scalar feedback that
+    # means sys1 alone; for a proper sys2, both must have feedthrough.
+    t_chk = cas.SX.sym("t")
+    u1_chk = cas.SX.sym("u", sys1.nu)
+    y1_chk = output_func1(
+        t_chk, cas.SX.sym("x", sys1.n), u1_chk, *sys1.params.values()
+    )
+    sys1_feedthrough = cas.depends_on(y1_chk, u1_chk)
+    if has_sys2_states:
+        u2_chk = cas.SX.sym("u", sys2.nu)
+        y2_chk = output_func2(
+            t_chk, cas.SX.sym("x", sys2.n), u2_chk, *sys2.params.values()
+        )
+        algebraic_loop = sys1_feedthrough and cas.depends_on(y2_chk, u2_chk)
+    else:
+        algebraic_loop = sys1_feedthrough
+    if algebraic_loop:
+        who = "sys1 and sys2 both have" if has_sys2_states else "sys1 has"
+        raise ValueError(
+            f"Algebraic loop: {who} direct feedthrough (output depends on "
+            f"input). The feedback loop cannot be resolved without solving an "
+            f"implicit equation."
+        )
+
+    param_lists = (
+        [sys1.params, sys2.params] if has_sys2_states else [sys1.params]
+    )
+    params = merge_param_dicts(
+        param_lists,
+        effective_keys[: len(param_lists)],
+        verbose_names=verbose_names,
+    )
+
+    t = cas.SX.sym("t")
+    n1, nu1, ny1 = sys1.n, sys1.nu, sys1.ny
+    x1 = cas.SX.sym(attr_names["state_var"], n1)
+    if has_sys2_states:
+        x2 = cas.SX.sym(attr_names["state_var"], sys2.n)
+
+    # sys1 has no feedthrough (confirmed above), so y1 is independent of its
+    # input — evaluate with zeros to obtain the feedback signal y2 and error e.
+    y1 = output_func1(t, x1, cas.SX.zeros(nu1), *sys1.params.values())
+    y2 = (
+        output_func2(t, x2, y1, *sys2.params.values())
+        if has_sys2_states
+        else sys2_gain * y1
+    )
+    y_sp = cas.SX.sym(attr_names["input_var"], nu1)
+    e = y_sp + sign * y2
+
+    dx1 = state_func1(t, x1, e, *sys1.params.values())
+    if has_sys2_states:
+        x, dx, n = (
+            cas.vcat([x1, x2]),
+            cas.vcat([dx1, state_func2(t, x2, y1, *sys2.params.values())]),
+            n1 + sys2.n,
+        )
+    else:
+        x, dx, n = x1, dx1, n1
+
+    func_args = [
+        "t",
+        attr_names["state_var"],
+        attr_names["input_var"],
+        *params.keys(),
+    ]
+    func_inputs = [t, x, y_sp, *params.values()]
+    state_function = cas.Function(
+        attr_names["state_func"],
+        func_inputs,
+        [dx],
+        func_args,
+        [attr_names["state_output"]],
+    )
+    output_function = cas.Function(
+        attr_names["output_func"],
+        func_inputs,
+        [y1],
+        func_args,
+        [attr_names["output_var"]],
+    )
+
+    if input_names is None:
+        input_names = [f"{n}_sp" for n in sys1.output_names]
+    if output_names is None:
+        sys2_out_names = (
+            sys2.output_names if has_sys2_states else sys1.output_names
+        )
+        output_names = concatenate_lists_of_names(
+            [sys1.output_names, sys2_out_names],
+            keys=effective_keys[:2],
+            verbose_names=verbose_names,
+        )[:ny1]
+    state_names = concatenate_lists_of_names(
+        [sys1.state_names, sys2.state_names if has_sys2_states else []],
+        keys=effective_keys[:2],
+        verbose_names=verbose_names,
+    )
+    if name is None:
+        name_keys = (
+            [effective_keys[0]] if unity_feedback else effective_keys[:2]
+        )
+        name = " ".join(["fbk"] + name_keys)
+
+    return model_class(
+        state_function,
+        output_function,
+        n,
+        nu1,
+        ny1,
+        params=params,
+        input_names=input_names,
+        state_names=state_names,
+        output_names=output_names,
+        name=name,
+    )
