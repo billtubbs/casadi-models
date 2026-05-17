@@ -19,10 +19,6 @@ StateSpaceModelDTARXSISO
 
 Functions
 ---------
-is_ss_dt
-    Return True if an object is a discrete-time state-space model.
-validate_equal_dt
-    Raise if a list of discrete-time models do not share the same dt.
 validate_F_function
     Check that a CasADi function is a valid discrete-time state function.
 validate_H_function
@@ -49,6 +45,7 @@ from cas_models.param_utils import (
     make_list_of_enumerated_names,
 )
 from cas_models.validation import validate_casadi_function_dims
+from cas_models.transformations import connect_systems_in_series
 
 # Attribute names for discrete-time state-space models
 ATTR_NAMES = {
@@ -92,32 +89,6 @@ def validate_H_function(
         H, arg_shapes=arg_shapes, return_shapes=return_shapes
     )
 
-
-def is_ss_dt(sys):
-    """Check if a system is a discrete-time state-space model.
-
-    A discrete-time model is identified by having 'F' and 'H'
-    attributes (uppercase), which are the state transition function
-    and output function respectively.
-
-    Args:
-        sys: A system object to check
-
-    Returns:
-        bool: True if the system has discrete-time attributes (F, H),
-              False otherwise
-    """
-    return hasattr(sys, "F") and hasattr(sys, "H")
-
-
-def validate_equal_dt(systems):
-    """Check all discrete-time systems have the same time interval."""
-    dt_values = [sys.dt for sys in systems]
-    if not all(dt == dt_values[0] for dt in dt_values):
-        raise ValueError(
-            f"All discrete-time systems must have the same dt. "
-            f"Found dt values: {dt_values}"
-        )
 
 
 @dataclass
@@ -246,8 +217,8 @@ class StateSpaceModelDT:
     def __mul__(self, other):
         """Connect two discrete-time systems in series using the * operator.
 
-        This allows for intuitive composition of systems where the output of
-        self is connected to the input of other.
+        This allows easy composition of systems where the output of self is
+        connected to the input of other.
 
         Args:
             other: Another StateSpaceModelDT instance to connect in series.
@@ -268,8 +239,6 @@ class StateSpaceModelDT:
             The output dimension of self must match the input dimension of
             other (self.ny == other.nu).
         """
-        # Import here to avoid circular imports
-        from cas_models.transformations import connect_systems_in_series
 
         return connect_systems_in_series(
             [self, other], model_class=StateSpaceModelDT

@@ -8,14 +8,12 @@ from cas_models.continuous_time.models import (
     SSModelCTDirectTransmission,
     SSModelCTLinearFONoGainSISO,
     SSModelCTLinearFOSISO,
-    is_ss_ct,
 )
 from cas_models.continuous_time.regulators import SSModelCTPIInt
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTFromCT,
     StateSpaceModelDTTFSISO,
-    is_ss_dt,
 )
 from cas_models.discrete_time.simulate import (
     make_n_step_simulation_function_from_model,
@@ -26,6 +24,7 @@ from cas_models.transformations import (
     connect_systems_in_parallel,
     connect_systems_in_series,
 )
+from cas_models.validation import is_ss_ct, is_ss_dt
 
 
 # Fixtures for continuous-time systems

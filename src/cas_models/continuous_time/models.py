@@ -31,8 +31,6 @@ SSModelCTFromSympySS
 
 Functions
 ---------
-is_ss_ct
-    Return True if an object is a continuous-time state-space model.
 validate_f_function
     Check that a CasADi function is a valid continuous-time state function.
 validate_h_function
@@ -54,6 +52,7 @@ from cas_models.sympy_conversion import (
     make_casadi_vars_from_sympy_vars,
 )
 from cas_models.validation import validate_casadi_function_dims
+from cas_models.transformations import connect_systems_in_series
 
 # Attribute names for continuous-time state-space models
 ATTR_NAMES = {
@@ -97,22 +96,6 @@ def validate_h_function(
         h, arg_shapes=arg_shapes, return_shapes=return_shapes
     )
 
-
-def is_ss_ct(sys):
-    """Check if a system is a continuous-time state-space model.
-
-    A continuous-time model is identified by having 'f' and 'h'
-    attributes (lowercase), which are the right-hand-side of the
-    differential equation and output function respectively.
-
-    Args:
-        sys: A system object to check
-
-    Returns:
-        bool: True if the system has continuous-time attributes (f, h),
-              False otherwise
-    """
-    return hasattr(sys, "f") and hasattr(sys, "h")
 
 
 @dataclass
@@ -237,8 +220,8 @@ class StateSpaceModelCT:
     def __mul__(self, other):
         """Connect two continuous-time systems in series using the * operator.
 
-        This allows for intuitive composition of systems where the output of
-        self is connected to the input of other.
+        This allows easy composition of systems where the output of self is
+        connected to the input of other.
 
         Args:
             other: Another StateSpaceModelCT instance to connect in series.
@@ -255,9 +238,6 @@ class StateSpaceModelCT:
             The output dimension of self must match the input dimension of
             other (self.ny == other.nu).
         """
-        # Import here to avoid circular imports
-        from cas_models.transformations import connect_systems_in_series
-
         return connect_systems_in_series(
             [self, other], model_class=StateSpaceModelCT
         )

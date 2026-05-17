@@ -13,6 +13,7 @@ from cas_models.discrete_time.models import (
     StateSpaceModelDTFromCT,
 )
 from cas_models.continuous_time.models import StateSpaceModelCT
+from cas_models.validation import is_ss_ct, is_ss_dt
 from pathlib import Path
 
 
@@ -166,6 +167,10 @@ def test_StateSpaceModelDT_FO_SISO(symbolic_FO_SISO):
     assert float(model.F(0.0, 1.0, 0.0, 0.2, 0.8)) == -0.2
     assert float(model.H(0.0, 1.0, 0.0, 0.2, 0.8)) == 1.0
 
+    # Test model type identification
+    assert is_ss_ct(model) is False
+    assert is_ss_dt(model) is True
+
 
 def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
     n, nu, ny, A, B, C, D, t, F, H, params = symbolic_AR211_SISO
@@ -193,6 +198,10 @@ def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
     Bq = cas.DM([0.8, 0.2])
     assert np.allclose(model.F(t, xk, uk, Aq, Bq), cas.DM([0, 0, 0, -0.5]))
     assert np.allclose(model.H(t, xk, uk, Aq, Bq), cas.DM([0]))
+
+    # Test model type identification
+    assert is_ss_ct(model) is False
+    assert is_ss_dt(model) is True
 
 
 def test_StateSpaceModelDTTFSISO_input_types(tf_test_case_2):
@@ -283,6 +292,10 @@ def test_StateSpaceModelDTTFSISO(
     assert model.nu == 1
     assert model.ny == 1
 
+    # Test model type identification
+    assert is_ss_ct(model) is False
+    assert is_ss_dt(model) is True
+
     # Load test data
     t = cas.DM(data_tf2ss_simulation["t"].to_numpy())
     nT = t.shape[0] - 1
@@ -329,6 +342,10 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
     n = model.n
     assert model.nu == 1
     assert model.ny == 1
+
+    # Test model type identification
+    assert is_ss_ct(model) is False
+    assert is_ss_dt(model) is True
 
     # Load test data
     t = cas.DM(data_TP04_Q1a_ss["t"].to_numpy())

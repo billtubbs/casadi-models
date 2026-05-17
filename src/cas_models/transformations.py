@@ -30,7 +30,7 @@ from cas_models.param_utils import (
     concatenate_lists_of_names,
     merge_param_dicts,
 )
-from cas_models.discrete_time.models import is_ss_dt, validate_equal_dt
+from cas_models.validation import validate_equal_dt
 
 
 def block_diag(matrices, square=False):
