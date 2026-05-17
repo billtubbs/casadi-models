@@ -1071,145 +1071,62 @@ def connect_feedback_system(
     name=None,
     sep="_",
 ):
-    """Combine two systems in a feedback loop as shown below.
+    """Combine two systems in a feedback loop.
 
-                +
-        y_sp -----( )-- e ---> sys1 -----+-----> y
-                   | -                   |
-                   |                     |
-                   +------- sys2 <-------+
+    Builds the closed-loop state and output functions directly from CasADi
+    symbolic expressions.  The loop topology is:
 
-    sys2 defaults to None, which gives unity feedback (static gain of 1).
-    A scalar int or float may also be passed for sys2, in which case it is
-    treated as a SISO static gain.
+                  +
+        y_sp ---( )--- e ---> sys1 ---+---> y
+                 | sign               |
+                 |                    |
+                 +------- sys2 <------+
 
-    This function works for both continuous-time and discrete-time systems by
-    using an attr_names dictionary to specify the appropriate attribute and
-    variable names.
-    """
-    if model_class is None:
-        raise ValueError("model_class must be specified")
-    if sys2 is None:
-        sys2 = 1.0
-    unity_feedback = isinstance(sys2, (int, float)) and sys2 == 1
-    if isinstance(sys2, (int, float)):
-        if model_class._attr_names["state_func"] != "f":
-            raise NotImplementedError(
-                "Scalar sys2 is not yet supported for discrete-time systems"
-            )
-        from cas_models.continuous_time.models import (
-            SSModelCTDirectTransmission,
-        )
+    sys1 must have no direct feedthrough (output must not depend on its
+    input), or an algebraic loop results and a ValueError is raised.
 
-        sys2 = SSModelCTDirectTransmission(
-            D=cas.SX([[float(sys2)]]), name="gain"
-        )
-    if sys1.ny != sys2.nu:
-        raise ValueError(
-            "sys2 must have same number of inputs as outputs from sys1"
-        )
-    if sys2.ny != sys1.nu:
-        raise ValueError(
-            "sys1 must have same number of inputs as outputs from sys2"
-        )
+    Args:
+        sys1: Forward-path state-space model.  Must satisfy the no-direct-
+            feedthrough condition (i.e. output does not depend on input).
+        sys2: Feedback-path element.  Three forms are accepted:
+            - None (default): unity feedback (feedback gain = 1).
+            - int or float: constant scalar gain in the feedback path.
+            - state-space model: a dynamic feedback compensator.  Must have
+              as many inputs as sys1 has outputs and vice-versa.
+              sys2 itself may have direct feedthrough only when sys1 does
+              not (guaranteed by the algebraic-loop check above).
+        model_class: Class used to instantiate the returned model (e.g.
+            StateSpaceModelCT or StateSpaceModelDT).  Required.
+        sign: Sign applied to the feedback signal at the summing junction.
+            Use -1 (default) for negative feedback, +1 for positive feedback.
+        input_names: Names of the closed-loop reference inputs.  Default:
+            ``[f"{n}_sp" for n in sys1.output_names]``.
+        output_names: Names of the closed-loop outputs.  Default: derived
+            from sys1's output names, disambiguated with system keys when
+            names conflict.
+        keys: Two-element list of string keys used to prefix shared
+            parameter/state names when disambiguation is needed.  Default:
+            derived from system names (``[sys1.name, sys2.name]``).
+        verbose_names: If True, always prepend system keys to parameter and
+            state names.  If False (default), keys are prepended only when
+            names conflict across the two systems.
+        prefix: Prefix used to auto-generate keys when a system's name is
+            None (default: ``"sys"``).
+        name: Name of the returned closed-loop model.  Default:
+            ``"fbk {sys1_key}"`` for unity/scalar feedback, or
+            ``"fbk {sys1_key} {sys2_key}"`` for a dynamic feedback system.
+        sep: Separator character used when joining keys with names (default
+            ``"_"``).  Reserved for future use; not yet applied everywhere.
 
-    # Mirror the key and name computation that connect_systems_in_parallel
-    # will apply, so that connection signal names match the parallel system.
-    effective_keys = make_list_of_unique_names(
-        [sys1.name, sys2.name] if keys is None else keys,
-        prefix=prefix,
-    )
-    parallel_input_names = concatenate_lists_of_names(
-        [sys1.input_names, sys2.input_names],
-        keys=effective_keys,
-        prefix=prefix,
-        verbose_names=verbose_names,
-    )
-    parallel_output_names = concatenate_lists_of_names(
-        [sys1.output_names, sys2.output_names],
-        keys=effective_keys,
-        prefix=prefix,
-        verbose_names=verbose_names,
-    )
-    sys1_par_inputs = parallel_input_names[: sys1.nu]
-    sys1_par_outputs = parallel_output_names[: sys1.ny]
-    sys2_par_inputs = parallel_input_names[sys1.nu :]
-    sys2_par_outputs = parallel_output_names[sys1.ny :]
+    Returns:
+        A new state-space model of type ``model_class`` representing the
+        closed-loop system.
 
-    if input_names is None:
-        input_names = [f"{n}_sp" for n in sys2.output_names]
-    else:
-        if len(input_names) != sys1.nu:
-            raise ValueError(
-                "Number of input names must match number of sys1 inputs"
-            )
-    if output_names is None:
-        output_names = sys1_par_outputs
-    else:
-        if len(output_names) != sys1.ny:
-            raise ValueError(
-                "Number of output names must match number of sys1 outputs"
-            )
-    if name is None:
-        name_keys = [effective_keys[0]] if unity_feedback else effective_keys
-        name = " ".join(["fbk"] + name_keys)
-
-    # Define feedback loop connections using parallel-system signal names
-    connections = {}
-    for sp_name, sys1_u, sys1_y, sys2_u, sys2_y in zip(
-        input_names,
-        sys1_par_inputs,
-        sys1_par_outputs,
-        sys2_par_inputs,
-        sys2_par_outputs,
-    ):
-        # y_sp - sys2_y → sys1
-        connections[sys1_u] = {sp_name: 1.0, sys2_y: sign}
-        # sys1_y → sys2
-        connections[sys2_u] = sys1_y
-
-    return connect_systems(
-        [sys1, sys2],
-        connections,
-        model_class,
-        input_names=input_names,
-        output_names=output_names,
-        keys=keys,
-        verbose_names=verbose_names,
-        prefix=prefix,
-        name=name,
-        sep=sep,
-    )
-
-
-def connect_feedback_system_alt(
-    sys1,
-    sys2=None,
-    model_class=None,
-    sign=-1,
-    input_names=None,
-    output_names=None,
-    keys=None,
-    verbose_names=False,
-    prefix="sys",
-    name=None,
-    sep="_",
-):
-    """Combine two systems in a feedback loop (lower-level implementation).
-
-    Same interface as connect_feedback_system but builds the combined
-    state/output functions directly from CasADi symbolic expressions,
-    similar to connect_systems_in_series, instead of delegating to the
-    general-purpose connect_systems.
-
-                +
-        y_sp -----( )-- e ---> sys1 -----+-----> y
-                   | -                   |
-                   |                     |
-                   +------- sys2 <-------+
-
-    sys2 defaults to None, giving unity negative feedback.  A scalar
-    int/float may also be passed for sys2, treated as a SISO static gain.
+    Raises:
+        ValueError: If ``model_class`` is None, if sys2 dimension mismatches
+            sys1, or if an algebraic loop is detected.
+        NotImplementedError: If a scalar ``sys2`` is passed with a
+            discrete-time ``model_class``.
     """
     if model_class is None:
         raise ValueError("model_class must be specified")

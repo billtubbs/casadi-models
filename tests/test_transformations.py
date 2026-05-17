@@ -22,7 +22,6 @@ from cas_models.discrete_time.simulate import (
 )
 from cas_models.transformations import (
     connect_feedback_system,
-    connect_feedback_system_alt,
     connect_systems,
     connect_systems_in_parallel,
     connect_systems_in_series,
@@ -865,117 +864,26 @@ def test_connect_feedback_system_errors():
         )
 
 
-# --- Tests for connect_feedback_system_alt ---
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        # unity feedback
-        dict(model_class=StateSpaceModelCT),
-        # scalar gain feedback
-        dict(sys2=2.0, model_class=StateSpaceModelCT),
-        # custom reference signal name
-        dict(model_class=StateSpaceModelCT, input_names=["r"]),
-        # positive feedback
-        dict(model_class=StateSpaceModelCT, sign=1),
-        # verbose names
-        dict(model_class=StateSpaceModelCT, verbose_names=True),
-    ],
-)
-def test_connect_feedback_system_alt_matches_original(kwargs):
-    """Alt implementation produces identical repr to the original for a first-order plant."""
-    plant = SSModelCTLinearFOSISO(K=2.0, T1=1.0, name="plant")
-    orig = connect_feedback_system(plant, **kwargs)
-    alt = connect_feedback_system_alt(plant, **kwargs)
-    assert repr(alt) == repr(orig)
-
-
-def test_connect_feedback_system_alt_pi_plant():
-    """Alt matches original for the PI+plant README example."""
-    plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
-    ctrl = SSModelCTPIInt(Kc=1, Ti=2, name="ctrl")
-    orig = connect_feedback_system(ctrl * plant, model_class=StateSpaceModelCT)
-    alt = connect_feedback_system_alt(
-        ctrl * plant, model_class=StateSpaceModelCT
-    )
-    assert repr(alt) == repr(orig)
-
-
-def test_connect_feedback_system_alt_simulation():
-    """Alt closed-loop simulation matches original numerically."""
-    dt = 0.01
-
-    def simulate_response(sys_cl, nT):
-        sys_dt = StateSpaceModelDTFromCT(sys_cl, dt)
-        simulate = make_n_step_simulation_function_from_model(sys_dt, nT)
-        t = dt * np.arange(nT + 1)
-        _, Y = simulate(t, np.ones((nT, 1)), np.zeros(sys_dt.n))
-        return float(Y[-1])
-
-    # Unity feedback: y_ss should match between both implementations
-    plant = SSModelCTLinearFOSISO(K=2.0, T1=1.0, name="plant")
-    orig = connect_feedback_system(plant, model_class=StateSpaceModelCT)
-    alt = connect_feedback_system_alt(plant, model_class=StateSpaceModelCT)
-    assert (
-        abs(simulate_response(orig, 1000) - simulate_response(alt, 1000))
-        < 1e-8
-    )
-
-    # PI + plant: y_ss should match between both implementations
-    plant2 = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
-    ctrl = SSModelCTPIInt(Kc=1, Ti=2, name="ctrl")
-    orig2 = connect_feedback_system(
-        ctrl * plant2, model_class=StateSpaceModelCT
-    )
-    alt2 = connect_feedback_system_alt(
-        ctrl * plant2, model_class=StateSpaceModelCT
-    )
-    assert (
-        abs(simulate_response(orig2, 2000) - simulate_response(alt2, 2000))
-        < 1e-8
-    )
-
-
-def test_connect_feedback_system_alt_errors():
-    """Alt raises the same errors as the original."""
-    plant = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="plant")
-
-    with pytest.raises(ValueError, match="model_class must be specified"):
-        connect_feedback_system_alt(plant, model_class=None)
-
-    plant_a = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="a")
-    plant_b = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="b")
-    mimo = connect_systems_in_parallel([plant_a, plant_b], StateSpaceModelCT)
-    with pytest.raises(
-        ValueError, match="sys2 must have same number of inputs"
-    ):
-        connect_feedback_system_alt(
-            plant, sys2=mimo, model_class=StateSpaceModelCT
-        )
-
-
-def test_connect_feedback_system_alt_detects_algebraic_loop():
-    """Alt raises ValueError when both sys1 and sys2 have direct feedthrough.
+def test_connect_feedback_system_detects_algebraic_loop():
+    """Raises ValueError when sys1 has direct feedthrough (algebraic loop).
 
     Two pure-gain systems in feedback form an algebraic loop: neither
     sys1 nor sys2 has any state, so the output always depends directly
     on the input and the closed-loop gain cannot be resolved symbolically.
-    The original connect_feedback_system silently returns the wrong result
-    (y=2 instead of the correct y=4/3 for unit setpoint); the alt detects
-    and rejects the loop up front.
+    connect_feedback_system detects this and raises ValueError rather than
+    silently returning an incorrect result.
     """
     fwd = SSModelCTDirectTransmission(D=cas.SX([[2.0]]), name="fwd")
     fbk = SSModelCTDirectTransmission(D=cas.SX([[0.5]]), name="fbk")
 
     with pytest.raises(ValueError, match="Algebraic loop"):
-        connect_feedback_system_alt(fwd, fbk, model_class=StateSpaceModelCT)
+        connect_feedback_system(fwd, fbk, model_class=StateSpaceModelCT)
 
     # Unity feedback on a pure-gain forward path is also an algebraic loop
     with pytest.raises(ValueError, match="Algebraic loop"):
-        connect_feedback_system_alt(fwd, model_class=StateSpaceModelCT)
+        connect_feedback_system(fwd, model_class=StateSpaceModelCT)
 
     # A plant with no direct feedthrough must NOT raise even in unity feedback
     plant = SSModelCTLinearFOSISO(K=2.0, T1=1.0, name="plant")
-    sys_cl = connect_feedback_system_alt(plant, model_class=StateSpaceModelCT)
+    sys_cl = connect_feedback_system(plant, model_class=StateSpaceModelCT)
     assert sys_cl.n == 1
