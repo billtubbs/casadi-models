@@ -158,7 +158,7 @@ ctrl.describe()
 ```
 
 ```python
-# Negative feedback loop: reference -> ctrl -> plant -> (feedback) -> ctrl
+# First, join controller and plant in series
 sys1 = ctrl * plant
 sys1.describe()
 # StateSpaceModelCT:
@@ -172,6 +172,7 @@ sys1.describe()
 ```
 
 ```python
+# Negative feedback loop: reference -> ctrl -> plant -> (feedback) -> ctrl
 sys_cl = connect_feedback_system(sys1, model_class=StateSpaceModelCT)
 sys_cl.describe()
 # StateSpaceModelCT:
