@@ -1,19 +1,30 @@
 # CasADi Dynamic Models
 
-Tools to define and manipulate simple linear dynamic models in [CasADi](https://web.casadi.org)
-for use in non-linear dynamic modelling and optimization.  The models may have symbolic 
-parameters allowing them to be included in optimization problems.
+Python tools to define and combine dynamic system models in [CasADi](https://web.casadi.org)
+for use in nonlinear modelling, dynamic optimization and control.
 
-While CasADi is primarily used for solving non-linear optimization problems, it is often 
-convenient to add linear dynamical systems to introduce simple identifiable dynamics.
+## Key features
 
-Furthermore, it is sometimes necessary or convenient to use non-linear constrained optimization
-to identify the parameters of linear dynamic models.
+ - Construct large complex system models by connecting sub-models
+ - Combine custom nonlinear models with standard linear dynamical systems
+ - Python classes keep track of variable names (inputs, states, outputs and parameters) when connecting and combining models.
+ - Built with CasADi's high-performance functions which are automatically differentiable
+ - Uses CasADi's built-in integrators to simulate or discretize continuous time models
+ - Model parameters can be symbolic, allowing them to be included in optimization problems
+ - Supports both continuous and discrete time models
+
+## Use Cases
+
+Add linear dynamical systems to a nonlinear model to introduce simple identifiable dynamics.
+
+Use nonlinear constrained optimization to identify the parameters of linear dynamic systems.
+
+Easily construct and evaluate different model structures.
 
 I'm not aware of a system identification toolbox for CasADi models so I developed these
 tools to identify and simulate simple dynamical systems for my projects.
 
-Note this is a work-in-progress and only a small subset of possible models have been
+Note this is still a work-in-progress and only a small subset of possible model types have been
 implemented.
 
 ## Examples: Building Models
