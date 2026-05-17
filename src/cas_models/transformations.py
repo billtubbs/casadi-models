@@ -616,9 +616,13 @@ def _build_internal_input_vector(
     """Build the full internal input vector for the parallel system.
 
     Iteratively fills connected inputs to handle multi-stage connections
-    (e.g., external inputs → mixer → tank). This approach avoids algebraic
-    loops by starting with zeros for connected inputs and building them up
-    layer by layer.
+    (e.g., external inputs → mixer → tank). Starts with zeros for connected
+    inputs and propagates values layer by layer.
+
+    Note: algebraic loops are not detected. If connections create a cycle
+    where every link has direct feedthrough, the unresolvable inputs are
+    left as zero and the resulting functions silently return incorrect values.
+    See test_connect_systems_algebraic_loop_silent_failure.
 
     Args:
         u_ext: External input vector (symbolic)
@@ -715,7 +719,11 @@ def _build_internal_input_vector(
                             filled_inputs.add(temp_name)
                             changed = True
 
-                # If nothing changed, we're done
+                # If nothing changed, we're done (or stuck in a cycle)
+                # TODO: check here whether all connected inputs are in
+                # filled_inputs; if not, an algebraic loop is preventing
+                # resolution and we should raise ValueError rather than
+                # silently using zeros for the unresolvable inputs.
                 if not changed:
                     break
 

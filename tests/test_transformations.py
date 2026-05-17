@@ -748,6 +748,46 @@ def test_mixed_ct_dt_systems_error():
         )
 
 
+def test_connect_systems_algebraic_loop_silent_failure():
+    """connect_systems silently returns an incorrect result for an algebraic loop.
+
+    Two pure-gain systems connected in negative feedback form an algebraic
+    loop: fwd_u depends on fbk_y, which depends on fwd_y, which depends on
+    fwd_u — all instantaneously.
+
+    Correct closed-loop gain: G_fwd / (1 + G_fwd * G_fbk) = 2 / (1 + 1) = 1.0
+    Actual output with y_sp=1: 2.0 — fbk_y is treated as 0, breaking the loop.
+
+    Crucially, no exception is raised either at construction time or when the
+    output function is called with numeric values. The result is silently wrong.
+
+    TODO: connect_systems should detect algebraic loops at construction time
+    and raise a ValueError, as connect_feedback_system already does.
+    """
+    fwd = SSModelCTDirectTransmission(D=cas.SX([[2.0]]), name="fwd")
+    fbk_gain = SSModelCTDirectTransmission(D=cas.SX([[0.5]]), name="fbk")
+
+    # Construction succeeds without error despite the algebraic loop
+    sys_cl = connect_systems(
+        [fwd, fbk_gain],
+        connections={
+            "fwd_u": {"y_sp": 1.0, "fbk_y": -1.0},
+            "fbk_u": "fwd_y",
+        },
+        model_class=StateSpaceModelCT,
+        input_names=["y_sp"],
+        output_names=["fwd_y"],
+    )
+
+    # Calling the output function with y_sp=1 also succeeds — no exception
+    y = sys_cl.h(0.0, cas.DM.zeros(sys_cl.n), cas.DM([1.0]))
+
+    # Result is wrong: 2.0 instead of the correct 1.0
+    correct = 2.0 / (1.0 + 2.0 * 0.5)  # = 1.0
+    assert float(y) != pytest.approx(correct)
+    assert float(y) == pytest.approx(2.0)
+
+
 # --- Tests for connect_feedback_system ---
 
 
