@@ -1283,14 +1283,12 @@ def connect_feedback_system(
     if input_names is None:
         input_names = [f"{n}_sp" for n in sys1.output_names]
     if output_names is None:
-        sys2_out_names = (
-            sys2.output_names if has_sys2_states else sys1.output_names
-        )
-        output_names = concatenate_lists_of_names(
-            [sys1.output_names, sys2_out_names],
-            keys=effective_keys[:2],
-            verbose_names=verbose_names,
-        )[:ny1]
+        if verbose_names:
+            output_names = [
+                f"{effective_keys[0]}_{n}" for n in sys1.output_names
+            ]
+        else:
+            output_names = sys1.output_names
     state_names = concatenate_lists_of_names(
         [sys1.state_names, sys2.state_names if has_sys2_states else []],
         keys=effective_keys[:2],

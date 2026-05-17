@@ -169,7 +169,7 @@ print(f"States:  {sys_cl.state_names}")
 ```
 ```lang-none
 Inputs:  ['y_sp']
-Outputs: ['ctrl_plant_y']
+Outputs: ['y']
 States:  ['plant_x', 'ctrl_x']
 ```
 
