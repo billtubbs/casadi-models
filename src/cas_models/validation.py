@@ -30,13 +30,6 @@ def is_ss_ct(sys):
     A continuous-time model is identified by having 'f' and 'h'
     attributes (lowercase), which are the right-hand-side of the
     differential equation and output function respectively.
-
-    Args:
-        sys: A system object to check
-
-    Returns:
-        bool: True if the system has continuous-time attributes (f, h),
-              False otherwise
     """
     return hasattr(sys, "f") and hasattr(sys, "h")
 
@@ -47,13 +40,6 @@ def is_ss_dt(sys):
     A discrete-time model is identified by having 'F' and 'H'
     attributes (uppercase), which are the state transition function
     and output function respectively.
-
-    Args:
-        sys: A system object to check
-
-    Returns:
-        bool: True if the system has discrete-time attributes (F, H),
-              False otherwise
     """
     return hasattr(sys, "F") and hasattr(sys, "H")
 

@@ -48,15 +48,6 @@ from cas_models.validation import validate_casadi_function_dims
 from cas_models.transformations import connect_systems_in_series, sum_systems
 
 # Attribute names for discrete-time state-space models
-ATTR_NAMES = {
-    "state_func": "F",
-    "output_func": "H",
-    "state_var": "xk",
-    "input_var": "uk",
-    "state_output": "xkp1",
-    "output_var": "yk",
-}
-
 
 def validate_F_function(F: cas.Function, n: int, nu: int, params=None):
     """Use this to check a state transition function has the correct

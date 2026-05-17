@@ -158,6 +158,9 @@ def linear_systems_in_series(
     }
 
 
+# TODO: Consider renaming connect_systems_in_parallel to connect_diagonal_system,
+# since it stacks inputs and outputs block-diagonally rather than implementing
+# the classical parallel (shared-input, summed-output) connection. See sum_systems.
 def connect_systems_in_parallel(
     systems,
     model_class,
@@ -989,10 +992,7 @@ def connect_systems(
 
     Examples:
         >>> # Example 1: Simple feedback connection
-        >>> from cas_models.continuous_time.models import (
-        ...     StateSpaceModelCT,
-        ...     ATTR_NAMES,
-        ... )
+        >>> from cas_models.continuous_time.models import StateSpaceModelCT
         >>> sys1 = StateSpaceModelCT(...)  # Plant
         >>> sys2 = StateSpaceModelCT(...)  # Controller
         >>>
@@ -1000,7 +1000,6 @@ def connect_systems(
         >>> connected = connect_nonlinear_systems(
         ...     [sys1, sys2],
         ...     connections=[("sys2_y", "sys1_u"), ("sys1_y", "sys2_u")],
-        ...     attr_names=ATTR_NAMES,
         ...     model_class=StateSpaceModelCT,
         ... )
         >>>
@@ -1012,7 +1011,6 @@ def connect_systems(
         ...         "sys1_u": {"sys2_y": 1.0, "sys3_y": -0.5},  # Weighted sum
         ...         "sys2_u": "sys1_y",  # Simple connection
         ...     },
-        ...     attr_names=ATTR_NAMES,
         ...     model_class=StateSpaceModelCT,
         ...     input_names=["sys3_u"],  # Only sys3 input is external
         ...     output_names=["sys1_y", "sys2_y"],  # Expose these outputs
@@ -1022,7 +1020,6 @@ def connect_systems(
         >>> connected = connect_nonlinear_systems(
         ...     [sys1, sys2],
         ...     connections={"sys1_u": "sys2_y", "sys2_u": "sys1_y"},
-        ...     attr_names=ATTR_NAMES,
         ...     model_class=StateSpaceModelCT,
         ...     input_names=[],  # No external inputs
         ...     output_names=["sys1_y"],
@@ -1038,7 +1035,6 @@ def connect_systems(
         ...         # sys2 has another input from sys1 output
         ...         "sys2_v": "sys1_y",
         ...     },
-        ...     attr_names=ATTR_NAMES,
         ...     model_class=StateSpaceModelCT,
         ...     input_names=["sys2_u", "sys3_u"],  # These must be external
         ...     output_names=["sys3_y"],

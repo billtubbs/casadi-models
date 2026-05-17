@@ -55,15 +55,6 @@ from cas_models.validation import validate_casadi_function_dims
 from cas_models.transformations import connect_systems_in_series, sum_systems
 
 # Attribute names for continuous-time state-space models
-ATTR_NAMES = {
-    "state_func": "f",
-    "output_func": "h",
-    "state_var": "x",
-    "input_var": "u",
-    "state_output": "rhs",
-    "output_var": "y",
-}
-
 
 def validate_f_function(f: cas.Function, n: int, nu: int, params=None):
     """Use this to check a state transition function has the correct
