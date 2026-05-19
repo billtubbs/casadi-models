@@ -20,10 +20,13 @@ def make_list_of_enumerated_names(prefix, n, sep=""):
 
 
 def make_list_of_unique_names(keys, prefix="sys"):
-    """Generate a list of unique names from keys, replacing None values.
+    """Generate a list of unique names from keys, replacing None values and
+    deduplicating repeated strings by appending a numeric suffix.
 
     For each key in the input list:
-    - If the key is not None, use it as-is
+    - If the key is not None and unique, use it as-is
+    - If the key appears more than once, append a sequential number to each
+      occurrence (e.g., two "motor" keys become "motor1", "motor2")
     - If the key is None, generate a unique name using the prefix and a
       sequential number (e.g., "sys1", "sys2", etc.)
 
@@ -34,10 +37,18 @@ def make_list_of_unique_names(keys, prefix="sys"):
     Returns:
         List of unique names (all strings, no None values)
 
-    Example:
+    Examples:
         >>> make_list_of_unique_names(["plant", None, "controller"])
         ["plant", "sys1", "controller"]
+        >>> make_list_of_unique_names(["motor", "motor"])
+        ["motor1", "motor2"]
     """
+    counts = {}
+    for key in keys:
+        if key is not None:
+            counts[key] = counts.get(key, 0) + 1
+
+    seen = {}
     new_names = []
     i = 0
     for key in keys:
@@ -47,6 +58,9 @@ def make_list_of_unique_names(keys, prefix="sys"):
                 new_name = prefix + str(i)
                 if new_name not in keys:
                     break
+        elif counts[key] > 1:
+            seen[key] = seen.get(key, 0) + 1
+            new_name = key + str(seen[key])
         else:
             new_name = key
         new_names.append(new_name)

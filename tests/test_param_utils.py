@@ -37,6 +37,21 @@ def test_make_list_of_unique_names():
     names = make_list_of_unique_names(keys)
     assert names == ["sys2", "sys3", "sys1"]
 
+    # Duplicate strings are numbered
+    keys = ["motor", "motor"]
+    names = make_list_of_unique_names(keys)
+    assert names == ["motor1", "motor2"]
+
+    # Only the duplicated name gets numbered; unique names are unchanged
+    keys = ["plant", "motor", "motor"]
+    names = make_list_of_unique_names(keys)
+    assert names == ["plant", "motor1", "motor2"]
+
+    # Mixed: duplicate strings alongside None values
+    keys = ["motor", None, "motor"]
+    names = make_list_of_unique_names(keys)
+    assert names == ["motor1", "sys1", "motor2"]
+
 
 def test_concatenate_lists_of_names():
     # Test 1: Default behavior (verbose_names=False) with conflicts
