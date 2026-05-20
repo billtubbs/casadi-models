@@ -48,8 +48,10 @@ def test_example_build_models():
     assert str(sys.f) == "f:(t,x[3],u,sys1_T1,sys2_T1,T2)->(rhs[3]) SXFunction"
     assert str(sys.h) == "h:(t,x[3],u,sys1_T1,sys2_T1,T2)->(y) SXFunction"
 
-    # Series connections can also be made with the '*' operator
-    sys = sys_model * sys_model_2
+    # The '*' operator follows the matrix-multiplication convention (rightmost
+    # operand acts first), so sys_model_2 * sys_model gives the same connection
+    # as connect_systems_in_series([sys_model, sys_model_2]).
+    sys = sys_model_2 * sys_model
     assert str(sys.f) == "f:(t,x[3],u,sys1_T1,sys2_T1,T2)->(rhs[3]) SXFunction"
     assert str(sys.h) == "h:(t,x[3],u,sys1_T1,sys2_T1,T2)->(y) SXFunction"
 

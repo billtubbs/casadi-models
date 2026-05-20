@@ -71,8 +71,10 @@ print(sys.h)
 ```
 
 ```python
-# Series connections can also be made with the '*' operator
-sys = sys_model * sys_model_2
+# The '*' operator follows the matrix-multiplication convention:
+# the rightmost operand acts first on the input.
+# sys_model_2 * sys_model: u -> sys_model -> sys_model_2 -> y
+sys = sys_model_2 * sys_model
 ```
 
 ## Examples: Simulation
@@ -169,8 +171,8 @@ ctrl.describe()
 ```
 
 ```python
-# First, join controller and plant in series
-sys1 = ctrl * plant
+# First, join controller and plant in series: u -> ctrl -> plant -> y
+sys1 = plant * ctrl
 sys1.describe()
 # StateSpaceModelCT:
 #   Name: ctrl_plant

@@ -61,8 +61,8 @@ Ts = 0.1
 systems = {}
 sim_functions = {}
 for name, model in models.items():
-    # Connect model to input source
-    sys = input_sys * model
+    # Connect input source to model: signal flows input_sys -> model -> y
+    sys = model * input_sys
     systems[name] = sys
     f = sys.f
     h = sys.h

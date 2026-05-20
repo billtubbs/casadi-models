@@ -371,7 +371,9 @@ def sum_systems(
         ValueError: If systems do not all have the same nu or ny.
 
     Example:
-        >>> sys_combined = sum_systems([sys1, sys2], model_class=StateSpaceModelCT)
+        >>> sys_combined = sum_systems(
+        ...     [sys1, sys2], model_class=StateSpaceModelCT
+        ... )
         >>> # Equivalent to sys1 + sys2 via the __add__ operator.
     """
     validate_systems_are_compatible(systems)
@@ -427,7 +429,12 @@ def sum_systems(
         attr_names["state_func"],
         [t, x, u, *params.values()],
         [state_combined],
-        ["t", attr_names["state_var"], attr_names["input_var"], *params.keys()],
+        [
+            "t",
+            attr_names["state_var"],
+            attr_names["input_var"],
+            *params.keys(),
+        ],
         [attr_names["state_output"]],
     )
 
@@ -435,7 +442,12 @@ def sum_systems(
         attr_names["output_func"],
         [t, x, u, *params.values()],
         [y_sum],
-        ["t", attr_names["state_var"], attr_names["input_var"], *params.keys()],
+        [
+            "t",
+            attr_names["state_var"],
+            attr_names["input_var"],
+            *params.keys(),
+        ],
         [attr_names["output_var"]],
     )
 

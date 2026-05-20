@@ -870,8 +870,9 @@ def test_connect_feedback_system_pi_plant():
     """PI controller + first-order plant — the README/notebook example."""
     plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
     ctrl = SSModelCTPIInt(Kc=1, Ti=2, name="ctrl")
+    # plant * ctrl: signal flows u -> ctrl -> plant -> y (ctrl acts first)
     sys_cl = connect_feedback_system(
-        ctrl * plant, model_class=StateSpaceModelCT
+        plant * ctrl, model_class=StateSpaceModelCT
     )
 
     assert sys_cl.n == 2
@@ -909,7 +910,7 @@ def test_connect_feedback_system_simulation():
     plant2 = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
     ctrl = SSModelCTPIInt(Kc=1, Ti=2, name="ctrl")
     sys_cl2 = connect_feedback_system(
-        ctrl * plant2, model_class=StateSpaceModelCT
+        plant2 * ctrl, model_class=StateSpaceModelCT
     )
     sys_dt2 = StateSpaceModelDTFromCT(sys_cl2, dt)
     nT2 = 2000

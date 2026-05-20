@@ -908,11 +908,15 @@ def test_StateSpaceModelDTDelay_compare_with_TF():
 
 
 def test_mul_operator_series_connection():
-    """Test the * operator for connecting discrete-time systems in series"""
+    """Test the * operator for connecting discrete-time systems in series.
+
+    G1 * G2 follows the matrix-multiplication convention: signal flows through
+    G2 first, then G1 (i.e. u -> G2 -> G1 -> y).
+    """
     sys1 = StateSpaceModelDTTFSISO(num=cas.DM([0, 1.0]), den=cas.DM([1, -0.5]))
     sys2 = StateSpaceModelDTTFSISO(num=cas.DM([0, 2.0]), den=cas.DM([1, -0.3]))
 
-    # Use * operator to connect in series
+    # sys1 * sys2: signal flows u -> sys2 -> sys1 -> y
     sys_combined = sys1 * sys2
 
     # Verify it creates a combined system
@@ -935,8 +939,7 @@ def test_mul_operator_series_connection():
     assert sys_combined_3.input_names == ["u"]  # No prefix (no conflict)
     assert sys_combined_3.output_names == ["y"]  # No prefix (no conflict)
 
-    # Verify functionality: output of combined system equals
-    # output of sys3 when fed sys2's output, fed sys1's output
+    # Verify functionality: G1 * G2 * G3 means u -> G3 -> G2 -> G1 -> y
     t_val = 0.0
     x1 = cas.DM([0.0])
     x2 = cas.DM([0.0])
@@ -944,16 +947,112 @@ def test_mul_operator_series_connection():
     x_combined = cas.DM.zeros(3, 1)
     u_val = cas.DM([1.0])
 
-    # Single step through individual systems
-    y1 = sys1.H(t_val, x1, u_val)
-    y2 = sys2.H(t_val, x2, y1)  # sys2 input is sys1 output
-    y3 = sys3.H(t_val, x3, y2)  # sys3 input is sys2 output
+    # Single step through individual systems in the correct order
+    y3 = sys3.H(t_val, x3, u_val)   # sys3 takes external input
+    y2 = sys2.H(t_val, x2, y3)      # sys2 takes sys3 output
+    y1 = sys1.H(t_val, x1, y2)      # sys1 takes sys2 output
 
     # Single step through combined system
     y_combined = sys_combined_3.H(t_val, x_combined, u_val)
 
     # Outputs should match
-    assert np.isclose(float(y3), float(y_combined))
+    assert np.isclose(float(y1), float(y_combined))
+
+
+def test_mul_operator_signal_flow_order():
+    """Verify that * follows matrix-multiplication signal-flow order.
+
+    For linear SISO systems G1 * G2 = G2 * G1 in the z-domain, so
+    ordering cannot be detected numerically.  Inserting a squaring
+    nonlinearity NL (yk = uk**2) breaks commutativity and lets us confirm:
+
+        NL * G1 * G2  →  u → G2 → G1 → NL → y,  output = (2·xk_G1)²
+        G1 * NL * G2  →  u → G2 → NL → G1 → y,  output =  2·xk_G1
+        G2 * G1 * NL  →  u → NL → G1 → G2 → y,  output =  3·xk_G2
+
+    All three outputs are numerically distinct, so this test fails if
+    the order argument to connect_systems_in_series is swapped.
+    """
+    t_sym = cas.SX.sym("t")
+
+    # Squaring nonlinearity: yk = uk**2 (no state, no params)
+    xk_nl = cas.SX.sym("xk", 0)
+    uk_nl = cas.SX.sym("uk")
+    NL = StateSpaceModelDT(
+        cas.Function(
+            "F", [t_sym, xk_nl, uk_nl], [cas.SX.zeros(0)],
+            ["t", "xk", "uk"], ["xkp1"]
+        ),
+        cas.Function(
+            "H", [t_sym, xk_nl, uk_nl], [uk_nl**2],
+            ["t", "xk", "uk"], ["yk"]
+        ),
+        n=0,
+    )
+
+    # G1: xk+1 = 0.5*xk + uk,  yk = 2*xk  (gain=2, no direct feedthrough)
+    xk1 = cas.SX.sym("xk")
+    uk1 = cas.SX.sym("uk")
+    G1 = StateSpaceModelDT(
+        cas.Function(
+            "F", [t_sym, xk1, uk1], [0.5 * xk1 + uk1],
+            ["t", "xk", "uk"], ["xkp1"]
+        ),
+        cas.Function(
+            "H", [t_sym, xk1, uk1], [2 * xk1],
+            ["t", "xk", "uk"], ["yk"]
+        ),
+        n=1,
+    )
+
+    # G2: xk+1 = 0.3*xk + uk,  yk = 3*xk  (gain=3, no direct feedthrough)
+    xk2 = cas.SX.sym("xk")
+    uk2 = cas.SX.sym("uk")
+    G2 = StateSpaceModelDT(
+        cas.Function(
+            "F", [t_sym, xk2, uk2], [0.3 * xk2 + uk2],
+            ["t", "xk", "uk"], ["xkp1"]
+        ),
+        cas.Function(
+            "H", [t_sym, xk2, uk2], [3 * xk2],
+            ["t", "xk", "uk"], ["yk"]
+        ),
+        n=1,
+    )
+
+    xk_G1 = cas.DM([1.5])
+    xk_G2 = cas.DM([0.8])
+    u = cas.DM([2.0])
+    t = 0.0
+
+    # NL * G1 * G2: u → G2 → G1 → NL → y
+    # Output stage is NL, so y = (G1.yk)² = (2·xk_G1)²
+    # State vector: [xk_G1, xk_G2]
+    sys_NL_G1_G2 = NL * G1 * G2
+    assert sys_NL_G1_G2.n == 2
+    y_NL_G1_G2 = float(sys_NL_G1_G2.H(t, cas.vertcat(xk_G1, xk_G2), u))
+    assert np.isclose(y_NL_G1_G2, (2 * float(xk_G1)) ** 2)  # 9.0
+
+    # G1 * NL * G2: u → G2 → NL → G1 → y
+    # Output stage is G1 (D=0), so y = G1.yk = 2·xk_G1
+    # State vector: [xk_G1, xk_G2]
+    sys_G1_NL_G2 = G1 * NL * G2
+    assert sys_G1_NL_G2.n == 2
+    y_G1_NL_G2 = float(sys_G1_NL_G2.H(t, cas.vertcat(xk_G1, xk_G2), u))
+    assert np.isclose(y_G1_NL_G2, 2 * float(xk_G1))  # 3.0
+
+    # G2 * G1 * NL: u → NL → G1 → G2 → y
+    # Output stage is G2 (D=0), so y = G2.yk = 3·xk_G2
+    # State vector: [xk_G2, xk_G1]
+    sys_G2_G1_NL = G2 * G1 * NL
+    assert sys_G2_G1_NL.n == 2
+    y_G2_G1_NL = float(sys_G2_G1_NL.H(t, cas.vertcat(xk_G2, xk_G1), u))
+    assert np.isclose(y_G2_G1_NL, 3 * float(xk_G2))  # 2.4
+
+    # All three outputs are distinct, confirming order sensitivity
+    assert y_NL_G1_G2 != y_G1_NL_G2
+    assert y_G1_NL_G2 != y_G2_G1_NL
+    assert y_NL_G1_G2 != y_G2_G1_NL
 
 
 def test_add_operator_parallel_connection():

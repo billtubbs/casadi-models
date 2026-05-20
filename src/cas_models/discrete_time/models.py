@@ -49,6 +49,7 @@ from cas_models.transformations import connect_systems_in_series, sum_systems
 
 # Attribute names for discrete-time state-space models
 
+
 def validate_F_function(F: cas.Function, n: int, nu: int, params=None):
     """Use this to check a state transition function has the correct
     arguments (excluding any parameters) and return dimensions.
@@ -79,7 +80,6 @@ def validate_H_function(
     return validate_casadi_function_dims(
         H, arg_shapes=arg_shapes, return_shapes=return_shapes
     )
-
 
 
 @dataclass
@@ -208,31 +208,34 @@ class StateSpaceModelDT:
     def __mul__(self, other):
         """Connect two discrete-time systems in series using the * operator.
 
-        This allows easy composition of systems where the output of self is
-        connected to the input of other.
+        Follows the matrix multiplication convention: for ``G1 * G2``, the
+        signal flows through G2 first, then G1:
+
+            u --> [other] --> [self] --> y
+
+        so the combined transfer function is ``self(other(u))``, i.e.
+        ``y = G1 * G2 * u``.  This matches the python-control library and
+        standard linear-algebra notation where the rightmost factor acts first.
 
         Args:
             other: Another StateSpaceModelDT instance to connect in series.
+                ``other.ny`` must equal ``self.nu``.
 
         Returns:
-            StateSpaceModelDT: Combined system where self -> other.
+            StateSpaceModelDT: Combined system where other feeds into self.
 
         Example:
-            >>> sys1 = StateSpaceModelDTTFSISO(
+            >>> G1 = StateSpaceModelDTTFSISO(
             ...     num=cas.DM([0, 1.0]), den=cas.DM([1, -0.5])
             ... )
-            >>> sys2 = StateSpaceModelDTTFSISO(
+            >>> G2 = StateSpaceModelDTTFSISO(
             ...     num=cas.DM([0, 2.0]), den=cas.DM([1, -0.3])
             ... )
-            >>> sys_combined = sys1 * sys2  # Connect in series
-
-        Note:
-            The output dimension of self must match the input dimension of
-            other (self.ny == other.nu).
+            >>> sys_combined = G1 * G2  # signal: u -> G2 -> G1 -> y
         """
 
         return connect_systems_in_series(
-            [self, other], model_class=StateSpaceModelDT
+            [other, self], model_class=StateSpaceModelDT
         )
 
     def __add__(self, other):
