@@ -217,6 +217,7 @@ def connect_systems_in_parallel(
         [sys.params for sys in systems],
         keys,
         verbose_names=verbose_names,
+        sep=sep,
     )
 
     t = cas.SX.sym("t")
@@ -399,6 +400,7 @@ def sum_systems(
         [sys.params for sys in systems],
         keys,
         verbose_names=verbose_names,
+        sep=sep,
     )
 
     t = cas.SX.sym("t")
@@ -545,7 +547,7 @@ def connect_systems_in_series(
         x1 = cas.SX.sym(attr_names["state_var"], n1)
         state_func1 = getattr(sys1, attr_names["state_func"])
         params1 = merge_param_dicts(
-            param_dicts[:i], keys[:i], verbose_names=verbose_names
+            param_dicts[:i], keys[:i], verbose_names=verbose_names, sep=sep
         )
         state_out1 = state_func1(t, x1, u1, *params1.values())
         output_func1 = getattr(sys1, attr_names["output_func"])
@@ -575,6 +577,7 @@ def connect_systems_in_series(
             param_dicts[: i + 1],
             keys[: i + 1],
             verbose_names=verbose_names,
+            sep=sep,
         )
         state_function = cas.Function(
             attr_names["state_func"],
@@ -1294,10 +1297,10 @@ def connect_feedback_system(
         prefix: Prefix used to auto-generate keys when a system's name is
             None (default: ``"sys"``).
         name: Name of the returned closed-loop model.  Default:
-            ``"fbk {sys1_key}"`` for unity/scalar feedback, or
-            ``"fbk {sys1_key} {sys2_key}"`` for a dynamic feedback system.
-        sep: Separator character used when joining keys with names (default
-            ``"_"``).  Reserved for future use; not yet applied everywhere.
+            ``"fbk_{sys1_key}"`` for unity/scalar feedback, or
+            ``"fbk_{sys1_key}_{sys2_key}"`` for a dynamic feedback system.
+        sep: Separator character used when joining system names to form the
+            combined system ``name`` (default ``"_"``).
 
     Returns:
         A new state-space model of type ``model_class`` representing the
@@ -1383,6 +1386,7 @@ def connect_feedback_system(
         param_lists,
         effective_keys[: len(param_lists)],
         verbose_names=verbose_names,
+        sep=sep,
     )
 
     t = cas.SX.sym("t")
@@ -1452,7 +1456,7 @@ def connect_feedback_system(
         name_keys = (
             [effective_keys[0]] if unity_feedback else effective_keys[:2]
         )
-        name = " ".join(["fbk"] + name_keys)
+        name = sep.join(["fbk"] + name_keys)
 
     return model_class(
         state_function,

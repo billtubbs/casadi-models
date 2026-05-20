@@ -7,7 +7,9 @@ conversions work correctly for systems with no dynamics.
 import pytest
 import numpy as np
 import casadi as cas
-from cas_models.continuous_time.models import StateSpaceModelCTStaticNonlinearity
+from cas_models.continuous_time.models import (
+    StateSpaceModelCTStaticNonlinearity,
+)
 from cas_models.discrete_time.models import StateSpaceModelDTFromCTRK4
 
 
@@ -125,7 +127,7 @@ def test_static_nonlinearity_time_invariance():
     t = cas.SX.sym("t")
     x = cas.SX.sym("x", 0)
     u = cas.SX.sym("u", 1)
-    y = u ** 2
+    y = u**2
     h = cas.Function("h", [t, x, u], [y], ["t", "x", "u"], ["y"])
 
     model = StateSpaceModelCTStaticNonlinearity(h, nu=1, ny=1)

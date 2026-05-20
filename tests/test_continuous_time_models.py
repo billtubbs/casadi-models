@@ -615,7 +615,9 @@ def test_mul_operator_signal_flow_order():
     x1 = cas.SX.sym("x")
     u1 = cas.SX.sym("u")
     G1 = StateSpaceModelCT(
-        cas.Function("f", [t_sym, x1, u1], [-x1 + u1], ["t", "x", "u"], ["rhs"]),
+        cas.Function(
+            "f", [t_sym, x1, u1], [-x1 + u1], ["t", "x", "u"], ["rhs"]
+        ),
         cas.Function("h", [t_sym, x1, u1], [2 * x1], ["t", "x", "u"], ["y"]),
         n=1,
     )
@@ -624,7 +626,9 @@ def test_mul_operator_signal_flow_order():
     x2 = cas.SX.sym("x")
     u2 = cas.SX.sym("u")
     G2 = StateSpaceModelCT(
-        cas.Function("f", [t_sym, x2, u2], [-0.5 * x2 + u2], ["t", "x", "u"], ["rhs"]),
+        cas.Function(
+            "f", [t_sym, x2, u2], [-0.5 * x2 + u2], ["t", "x", "u"], ["rhs"]
+        ),
         cas.Function("h", [t_sym, x2, u2], [3 * x2], ["t", "x", "u"], ["y"]),
         n=1,
     )

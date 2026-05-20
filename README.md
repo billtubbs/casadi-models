@@ -189,7 +189,7 @@ sys1.describe()
 sys_cl = connect_feedback_system(sys1, model_class=StateSpaceModelCT)
 sys_cl.describe()
 # StateSpaceModelCT:
-#   Name: fbk ctrl_plant
+#   Name: fbk_ctrl_plant
 #   f:(t,x[2],u,Kc,Ti)->(rhs[2]) SXFunction
 #   h:(t,x[2],u,Kc,Ti)->(y) SXFunction
 #   States (n=2): ['plant_x', 'ctrl_x']

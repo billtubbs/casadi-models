@@ -862,7 +862,7 @@ def test_connect_feedback_system_unity_properties():
     assert sys_cl.input_names == ["y_sp"]
     assert sys_cl.output_names == ["y"]
     assert sys_cl.state_names == ["x"]
-    assert sys_cl.name == "fbk plant"
+    assert sys_cl.name == "fbk_plant"
     assert is_ss_ct(sys_cl)
 
 
@@ -886,7 +886,7 @@ def test_connect_feedback_system_pi_plant():
         "StateSpaceModelCT("
         "f=Function(f:(t,x[2],u)->(rhs[2]) SXFunction), "
         "h=Function(h:(t,x[2],u)->(y) SXFunction), "
-        "n=2, nu=1, ny=1, params={}, name='fbk ctrl_plant', "
+        "n=2, nu=1, ny=1, params={}, name='fbk_ctrl_plant', "
         "input_names=['y_sp'], state_names=['plant_x', 'ctrl_x'], "
         "output_names=['y'])"
     )
@@ -941,7 +941,7 @@ def test_connect_feedback_system_scalar_gain():
     assert sys_cl.nu == 1
     assert sys_cl.ny == 1
     assert sys_cl.input_names == ["y_sp"]
-    assert sys_cl.name == "fbk plant gain"
+    assert sys_cl.name == "fbk_plant_gain"
 
 
 def test_connect_feedback_system_errors():

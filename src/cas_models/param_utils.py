@@ -135,7 +135,7 @@ def concatenate_lists_of_names(
 
 
 def merge_param_dicts(
-    list_of_dicts, keys=None, verbose_names=False, prefix="sys"
+    list_of_dicts, keys=None, verbose_names=False, prefix="sys", sep="_"
 ):
     """Merges a list of parameter dictionaries into one dictionary of
     unique model variables. Note that the same symbolic variables
@@ -180,17 +180,17 @@ def merge_param_dicts(
             param = unique_params.pop()
             if verbose_names:
                 # Include all systems that use this parameter
-                systems = "_".join(
+                systems = sep.join(
                     sorted(sys_key for sys_key, _ in sys_params)
                 )
-                new_key = f"{systems}_{orig_key}"
+                new_key = f"{systems}{sep}{orig_key}"
             else:
                 new_key = orig_key
             merged_params[new_key] = param
         else:
             # Different parameters share the same key - must disambiguate
             for sys_key, param in sys_params:
-                new_key = f"{sys_key}_{orig_key}"
+                new_key = f"{sys_key}{sep}{orig_key}"
                 merged_params[new_key] = param
 
     return merged_params

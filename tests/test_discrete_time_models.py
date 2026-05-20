@@ -948,9 +948,9 @@ def test_mul_operator_series_connection():
     u_val = cas.DM([1.0])
 
     # Single step through individual systems in the correct order
-    y3 = sys3.H(t_val, x3, u_val)   # sys3 takes external input
-    y2 = sys2.H(t_val, x2, y3)      # sys2 takes sys3 output
-    y1 = sys1.H(t_val, x1, y2)      # sys1 takes sys2 output
+    y3 = sys3.H(t_val, x3, u_val)  # sys3 takes external input
+    y2 = sys2.H(t_val, x2, y3)  # sys2 takes sys3 output
+    y1 = sys1.H(t_val, x1, y2)  # sys1 takes sys2 output
 
     # Single step through combined system
     y_combined = sys_combined_3.H(t_val, x_combined, u_val)
@@ -980,12 +980,14 @@ def test_mul_operator_signal_flow_order():
     uk_nl = cas.SX.sym("uk")
     NL = StateSpaceModelDT(
         cas.Function(
-            "F", [t_sym, xk_nl, uk_nl], [cas.SX.zeros(0)],
-            ["t", "xk", "uk"], ["xkp1"]
+            "F",
+            [t_sym, xk_nl, uk_nl],
+            [cas.SX.zeros(0)],
+            ["t", "xk", "uk"],
+            ["xkp1"],
         ),
         cas.Function(
-            "H", [t_sym, xk_nl, uk_nl], [uk_nl**2],
-            ["t", "xk", "uk"], ["yk"]
+            "H", [t_sym, xk_nl, uk_nl], [uk_nl**2], ["t", "xk", "uk"], ["yk"]
         ),
         n=0,
     )
@@ -995,12 +997,14 @@ def test_mul_operator_signal_flow_order():
     uk1 = cas.SX.sym("uk")
     G1 = StateSpaceModelDT(
         cas.Function(
-            "F", [t_sym, xk1, uk1], [0.5 * xk1 + uk1],
-            ["t", "xk", "uk"], ["xkp1"]
+            "F",
+            [t_sym, xk1, uk1],
+            [0.5 * xk1 + uk1],
+            ["t", "xk", "uk"],
+            ["xkp1"],
         ),
         cas.Function(
-            "H", [t_sym, xk1, uk1], [2 * xk1],
-            ["t", "xk", "uk"], ["yk"]
+            "H", [t_sym, xk1, uk1], [2 * xk1], ["t", "xk", "uk"], ["yk"]
         ),
         n=1,
     )
@@ -1010,12 +1014,14 @@ def test_mul_operator_signal_flow_order():
     uk2 = cas.SX.sym("uk")
     G2 = StateSpaceModelDT(
         cas.Function(
-            "F", [t_sym, xk2, uk2], [0.3 * xk2 + uk2],
-            ["t", "xk", "uk"], ["xkp1"]
+            "F",
+            [t_sym, xk2, uk2],
+            [0.3 * xk2 + uk2],
+            ["t", "xk", "uk"],
+            ["xkp1"],
         ),
         cas.Function(
-            "H", [t_sym, xk2, uk2], [3 * xk2],
-            ["t", "xk", "uk"], ["yk"]
+            "H", [t_sym, xk2, uk2], [3 * xk2], ["t", "xk", "uk"], ["yk"]
         ),
         n=1,
     )
