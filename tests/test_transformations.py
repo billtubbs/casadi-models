@@ -808,6 +808,97 @@ def test_mixed_ct_dt_systems_error():
         )
 
 
+def test_connect_systems_multistage_mixed_sources():
+    """connect_systems resolves multi-stage connections with mixed sources.
+
+    The PI controller (D=Kc, direct feedthrough) creates a chain:
+        ref → pi_e = ref - plant_y → pi_u = Kc*pi_e + (Kc/Ti)*pi_x → plant_u
+
+    Previously _build_internal_input_vector could not resolve this because
+    pi_e has mixed sources (external ref + system output plant_y).  It left
+    pi_e=0 when computing pi_u, so plant_u only received the integral term
+    (Kc/Ti)*pi_x, dropping the proportional term Kc*(ref - plant_y).
+
+    This test verifies that both the output function (y) and the state
+    function (f) receive the correct fully-resolved internal signals after
+    the fix.
+    """
+    Kc_val = 2.0
+    Ti_val = 1.0
+    K_val = 1.0
+    T1_val = 1.0
+
+    pi_ctrl = SSModelCTPIInt(
+        Kc=Kc_val,
+        Ti=Ti_val,
+        name="pi",
+        input_name="pi_e",
+        output_name="pi_u",
+    )
+    plant = SSModelCTLinearFOSISO(
+        K=K_val,
+        T1=T1_val,
+        name="plant",
+        input_name="plant_u",
+        output_name="plant_y",
+    )
+
+    sys_cl = connect_systems(
+        [pi_ctrl, plant],
+        connections={
+            "plant_u": "pi_u",
+            "pi_e": {"ref": 1.0, "plant_y": -1.0},
+        },
+        model_class=StateSpaceModelCT,
+        input_names=["ref"],
+        output_names=["pi_u", "plant_y"],
+    )
+
+    assert sys_cl.input_names == ["ref"]
+    assert sys_cl.output_names == ["pi_u", "plant_y"]
+    assert sys_cl.n == 2
+
+    pi_x_val = 0.5
+    plant_x_val = 0.3
+    ref_val = 1.0
+    t_val = cas.DM(0.0)
+    # State order: pi_ctrl first, plant second (matches systems list order)
+    x_val = cas.DM([pi_x_val, plant_x_val])
+    u_val = cas.DM([ref_val])
+
+    # plant_y = plant_x (C=1, D=0 — no feedthrough)
+    # pi_e   = ref - plant_y = 1.0 - 0.3 = 0.7
+    # pi_u   = Kc*pi_e + (Kc/Ti)*pi_x = 2.0*0.7 + 2.0*0.5 = 2.4
+    expected_plant_y = plant_x_val
+    expected_pi_u = Kc_val * (ref_val - plant_x_val) + (Kc_val / Ti_val) * pi_x_val
+
+    y = sys_cl.h(t_val, x_val, u_val)
+    assert np.isclose(float(y[0]), expected_pi_u), (
+        f"pi_u: got {float(y[0]):.4f}, expected {expected_pi_u:.4f} "
+        f"(bug would give {(Kc_val / Ti_val) * pi_x_val:.4f})"
+    )
+    assert np.isclose(float(y[1]), expected_plant_y)
+
+    f = sys_cl.f(t_val, x_val, u_val)
+    pi_x_idx = sys_cl.state_names.index("pi_x")
+    plant_x_idx = sys_cl.state_names.index("plant_x")
+
+    # d(pi_x)/dt = pi_e = ref - plant_y = 0.7
+    expected_d_pi_x = ref_val - plant_x_val
+    # d(plant_x)/dt = (-plant_x + K*plant_u) / T1, plant_u = pi_u = 2.4
+    # = (-0.3 + 1.0*2.4) / 1.0 = 2.1
+    # (bug would give (-0.3 + 1.0*1.0) / 1.0 = 0.7 — integral term only)
+    expected_d_plant_x = (-plant_x_val + K_val * expected_pi_u) / T1_val
+
+    assert np.isclose(float(f[pi_x_idx]), expected_d_pi_x), (
+        f"d(pi_x)/dt: got {float(f[pi_x_idx]):.4f}, expected {expected_d_pi_x:.4f}"
+    )
+    assert np.isclose(float(f[plant_x_idx]), expected_d_plant_x), (
+        f"d(plant_x)/dt: got {float(f[plant_x_idx]):.4f}, "
+        f"expected {expected_d_plant_x:.4f}"
+    )
+
+
 def test_connect_systems_algebraic_loop_silent_failure():
     """connect_systems silently returns an incorrect result for an algebraic loop.
 
@@ -816,10 +907,11 @@ def test_connect_systems_algebraic_loop_silent_failure():
     fwd_u — all instantaneously.
 
     Correct closed-loop gain: G_fwd / (1 + G_fwd * G_fbk) = 2 / (1 + 1) = 1.0
-    Actual output with y_sp=1: 2.0 — fbk_y is treated as 0, breaking the loop.
 
-    Crucially, no exception is raised either at construction time or when the
-    output function is called with numeric values. The result is silently wrong.
+    The iterative resolution in _build_internal_input_vector does not converge
+    when every signal in the cycle has direct feedthrough. No exception is
+    raised at construction time or when the output function is called with
+    numeric values — the result is silently wrong.
 
     TODO: connect_systems should detect algebraic loops at construction time
     and raise a ValueError, as connect_feedback_system already does.
@@ -842,10 +934,9 @@ def test_connect_systems_algebraic_loop_silent_failure():
     # Calling the output function with y_sp=1 also succeeds — no exception
     y = sys_cl.h(0.0, cas.DM.zeros(sys_cl.n), cas.DM([1.0]))
 
-    # Result is wrong: 2.0 instead of the correct 1.0
+    # Result is wrong: correct answer is 1.0, but the loop is unresolved
     correct = 2.0 / (1.0 + 2.0 * 0.5)  # = 1.0
     assert float(y) != pytest.approx(correct)
-    assert float(y) == pytest.approx(2.0)
 
 
 # --- Tests for connect_feedback_system ---
