@@ -15,6 +15,7 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearO2NoGainSISO,
     SSModelCTLinearO2UnderdampedSISO,
 )
+from cas_models.continuous_time.regulators import SSModelCTP
 from cas_models.validation import is_ss_ct, is_ss_dt
 from cas_models.transformations import block_diag, sum_systems
 
@@ -713,6 +714,31 @@ def test_describe(capsys):
     assert "Outputs (ny=1)" in out
     assert "Parameters" in out
     assert "dt" not in out
+
+
+def test_SSModelCTP():
+    # Numeric gain
+    ctrl = SSModelCTP(Kc=2.0, name="ctrl")
+    assert ctrl.n == 0
+    assert ctrl.nu == 1
+    assert ctrl.ny == 1
+    assert ctrl.input_names == ["e"]
+    assert ctrl.output_names == ["u"]
+    assert ctrl.state_names == []
+    x = cas.DM.zeros(0)
+    assert float(ctrl.h(0.0, x, 1.5)) == pytest.approx(3.0)
+    assert float(ctrl.h(0.0, x, -0.5)) == pytest.approx(-1.0)
+    assert np.array_equal(ctrl.f(0.0, x, 1.5), np.empty((0, 1)))
+
+    # Custom names
+    ctrl = SSModelCTP(Kc=5.0, input_name="pos_e", output_name="vel_ref")
+    assert ctrl.input_names == ["pos_e"]
+    assert ctrl.output_names == ["vel_ref"]
+    assert float(ctrl.h(0.0, cas.DM.zeros(0), 2.0)) == pytest.approx(10.0)
+
+    # Symbolic gain — verify output expression contains Kc
+    ctrl = SSModelCTP(name="p_ctrl")
+    assert "Kc" in str(ctrl.h)
 
 
 def test_tf_models():

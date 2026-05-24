@@ -2,6 +2,8 @@
 
 Classes
 -------
+SSModelCTP
+    Proportional (P) controller.
 SSModelCTPIInt
     PI controller in interactive (series) form.
 SSModelCTPIDInt
@@ -12,6 +14,47 @@ import casadi as cas
 
 from cas_models.continuous_time.models import SSModelCTFromABCDSISO
 from cas_models.param_utils import make_symbolic_vars_from_kwargs
+
+
+class SSModelCTP(SSModelCTFromABCDSISO):
+    def __init__(
+        self,
+        Kc=None,
+        input_name=None,
+        output_name=None,
+        name=None,
+    ):
+        """Construct a state space model of a continuous time
+        proportional (P) controller.
+
+        Transfer function: Gc(s) = Kc
+
+        State-space realisation (no states):
+
+            u = Kc * e
+
+        which gives A=[], B=[], C=[], D=Kc.
+        """
+        if input_name is None:
+            input_name = "e"
+        if output_name is None:
+            output_name = "u"
+        params = make_symbolic_vars_from_kwargs(Kc=Kc)
+        Kc = params["Kc"]
+        A = cas.SX.zeros(0, 0)
+        B = cas.SX.zeros(0, 1)
+        C = cas.SX.zeros(1, 0)
+        D = cas.SX(Kc)
+        super().__init__(
+            A,
+            B,
+            C,
+            D,
+            name=name,
+            input_name=input_name,
+            state_names=None,
+            output_name=output_name,
+        )
 
 
 class SSModelCTPIInt(SSModelCTFromABCDSISO):
