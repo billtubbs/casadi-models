@@ -326,18 +326,21 @@ def test_StateSpaceModelDTTFSISO(
 
 
 def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
-    # ARX(2, 2, 1) model with fixed coefficients
+    # ARX model with the coefficients estimated by Octave's arx() with
+    # na = 2, nb = 2, nk = 1. Octave's arx() (control package) delays the
+    # input one step more than Matlab's arx() and filter(): its model is
+    # filter([0 0 B], [1 A], u), which is nk = 2 in Matlab's convention.
     A = [-1.40429502, 0.69767633]
     B = [0.18669536, 0.16536220]
-    model = StateSpaceModelDTARXSISO(A=A, B=B)
+    model = StateSpaceModelDTARXSISO(A=A, B=B, nk=2)
 
     assert str(model) == (
         "StateSpaceModelDTARXSISO("
-        "F=Function(F:(t,xk[3],uk)->(xkp1[3]) SXFunction), "
-        "H=Function(H:(t,xk[3],uk)->(yk) SXFunction), "
-        "n=3, nu=1, ny=1, dt=None, "
+        "F=Function(F:(t,xk[5],uk)->(xkp1[5]) SXFunction), "
+        "H=Function(H:(t,xk[5],uk)->(yk) SXFunction), "
+        "n=5, nu=1, ny=1, dt=None, "
         "params={}, name=None, "
-        "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
+        "input_names=['u'], state_names=['x1', 'x2', 'x3', 'x4', 'x5'], "
         "output_names=['y']"
         ")"
     )
@@ -370,33 +373,38 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
     X = cas.vcat(X)
     y = cas.vcat(y)
 
-    # Compare with Octave simulation results
-    X_octave = data_TP04_Q1a_ss[["x1", "x2", "x3"]].to_numpy()
+    # Compare outputs with Octave simulation results (Octave's states are
+    # those of a different state-space form)
     y_octave = data_TP04_Q1a_ss["y"].to_numpy().reshape(-1, 1)
 
-    # Verify states match
-    assert np.allclose(np.array(X), X_octave, atol=1e-6), (
-        "States don't match Octave output"
-    )
+    # States are the past outputs and inputs:
+    # x(k) = [y(k-1), y(k-2), u(k-1), u(k-2), u(k-3)]
+    X_np = np.array(X)
+    y_np = np.array(y).flatten()
+    u_np = np.array(u).flatten()
+    assert np.array_equal(X_np[1:, 0], y_np[:-1])
+    assert np.array_equal(X_np[2:, 1], y_np[:-2])
+    for i in range(3):
+        assert np.array_equal(X_np[i + 1 :, 2 + i], u_np[: nT - i])
 
     # Verify outputs match
     assert np.allclose(np.array(y), y_octave, atol=1e-6), (
         "Outputs don't match Octave output"
     )
 
-    # ARX(2, 2, 1) model with symbolic coefficients
+    # Same model with symbolic coefficients
     na = 2
     nb = 2
-    model = StateSpaceModelDTARXSISO(na=na, nb=nb)
+    model = StateSpaceModelDTARXSISO(na=na, nb=nb, nk=2)
 
     assert str(model) == (
         "StateSpaceModelDTARXSISO("
-        "F=Function(F:(t,xk[3],uk,a_0,a_1,b_0,b_1)->(xkp1[3]) SXFunction), "
-        "H=Function(H:(t,xk[3],uk,a_0,a_1,b_0,b_1)->(yk) SXFunction), "
-        "n=3, nu=1, ny=1, dt=None, "
+        "F=Function(F:(t,xk[5],uk,a_0,a_1,b_0,b_1)->(xkp1[5]) SXFunction), "
+        "H=Function(H:(t,xk[5],uk,a_0,a_1,b_0,b_1)->(yk) SXFunction), "
+        "n=5, nu=1, ny=1, dt=None, "
         "params={'a_0': SX(a_0), 'a_1': SX(a_1), 'b_0': SX(b_0), 'b_1': SX(b_1)}, "
         "name=None, "
-        "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
+        "input_names=['u'], state_names=['x1', 'x2', 'x3', 'x4', 'x5'], "
         "output_names=['y']"
         ")"
     )
@@ -413,11 +421,6 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
 
     X = cas.vcat(X)
     y = cas.vcat(y)
-
-    # Verify states match
-    assert np.allclose(np.array(X), X_octave, atol=1e-6), (
-        "States don't match Octave output"
-    )
 
     # Verify outputs match
     assert np.allclose(np.array(y), y_octave, atol=1e-6), (
@@ -465,6 +468,44 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
     assert np.allclose(
         params_sol, [-1.40429502, 0.69767633, 0.18669536, 0.16536220]
     )
+
+
+@pytest.mark.parametrize(
+    "A, B, nk",
+    [
+        ([-0.9], [0.1], 1),
+        ([-0.9], [0.1], 2),
+        ([-1.5, 0.7], [1.0], 1),
+        ([-1.5, 0.7], [1.0, 0.5], 1),
+        ([-1.5, 0.7], [1.0, 0.5], 3),
+        ([-0.5], [1.0, 0.5, 0.25], 1),
+        ([-1.5, 0.7], [1.0, 0.5], 0),
+    ],
+)
+def test_StateSpaceModelDTARXSISO_matches_filter(A, B, nk):
+    """The output equals Matlab's filter([zeros(1, nk) B], [1 A], u),
+    computed here with the ARX difference equation."""
+    model = StateSpaceModelDTARXSISO(A=np.c_[A], B=np.c_[B], nk=nk)
+    na, nb = len(A), len(B)
+    assert model.n == na + nk + nb - 1
+
+    rng = np.random.default_rng(0)
+    nT = 50
+    u = rng.normal(size=nT)
+
+    # Difference equation from zero initial conditions
+    y_expected = np.zeros(nT)
+    for k in range(nT):
+        y_expected[k] = -sum(
+            A[i] * y_expected[k - 1 - i] for i in range(na) if k - 1 - i >= 0
+        ) + sum(B[j] * u[k - nk - j] for j in range(nb) if k - nk - j >= 0)
+
+    xk = cas.DM.zeros(model.n)
+    y = np.zeros(nT)
+    for k in range(nT):
+        y[k] = float(model.H(k, xk, u[k]))
+        xk = model.F(k, xk, u[k])
+    assert np.allclose(y, y_expected, rtol=0, atol=1e-12)
 
 
 # TODO: Introduce this class as an intermediate step to state space models.

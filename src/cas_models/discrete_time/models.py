@@ -981,9 +981,34 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
                + b_1 u(k-nk) + b_2 u(k-nk-1) + ... + b_nb u(k-nk-nb+1)
                + e(k)
 
-    The model is implemented in observable canonical form to match
-    Matlab/Octave's arx() function, using a minimal state representation
-    with n = max(na, nb+nk) states.
+    This is the same convention as Matlab's arx() and filter() and
+    SciPy's lfilter(): the noise-free output is
+
+        y = filter([zeros(1, nk), B], [1, A], u)
+
+    The model is simulated without the noise term, e(k) = 0, using the
+    past outputs and inputs as the states:
+
+        x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb+1)]
+
+    so there are n = na + nk + nb - 1 states (not a minimal realization
+    when nb + nk > 1, but the states are easy to interpret and to
+    initialize from data). With nk = 0, u(k) acts on y(k) directly.
+
+    Comparing with Matlab and Octave arx():
+    - Matlab (System Identification Toolbox): same convention. nk is the
+      number of leading zeros of B, so a model estimated with
+      arx(data, [na nb nk]) is StateSpaceModelDTARXSISO(A, B, nk=nk).
+    - Octave (control package, checked with version 4.1.1): nk is one
+      less than here. Octave's arx() always delays the input one step
+      and adds nk steps to that, so a model estimated with
+      arx(dat, 'na', na, 'nb', nb, 'nk', nk) is
+      StateSpaceModelDTARXSISO(A, B, nk=nk + 1). Its default, nk = 0, is
+      the usual one-step delay, and it can't estimate a model with
+      direct transmission (nk = 0 here). Its documentation doesn't say
+      so.
+    In both cases, A here is the estimated denominator without its
+    leading 1, and B the numerator without its leading zeros.
 
     """
 
@@ -1015,7 +1040,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
 
         This is internally represented as a state-space model with state
         vector:
-            x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb)]
+            x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb+1)]
 
         Args:
             A (cas.SX, optional): Symbolic vector of A polynomial coefficients
@@ -1038,7 +1063,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
                 defaults to "y".
 
         Note:
-            The total number of states is n = max(na, nb + nk).
+            The total number of states is n = na + nk + nb - 1.
 
         Example:
             >>> # Create ARX model with symbolic parameters
@@ -1063,51 +1088,27 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             B = cas.SX(B)
             assert B.shape[1] == 1
             nb = B.shape[0]
+        na, nb, nk = int(na), int(nb), int(nk)
+        assert na >= 0 and nb >= 1 and nk >= 0
 
-        # Construct state-space model in observable canonical form
-        # (matches Matlab/Octave arx() output)
+        # States: na past outputs, then m past inputs
+        m = nk + nb - 1  # largest input lag
+        n = na + m
         t = cas.SX.sym("t")
-        uk = cas.SX.sym("uk")
-
-        # Minimal state dimension
-        n = int(max(na, nb + nk))
         xk = cas.SX.sym("xk", n)
+        uk = cas.SX.sym("uk")
+        # (index xk directly: CasADi returns 1 x 0, not 0 x 1, for an
+        # empty slice of a 1 x 1 slice)
+        y_past = xk[0:na]  # y(k-1), ..., y(k-na)
 
-        # Pad coefficients to length n if needed
-        A_padded = cas.sparsify(cas.vertcat(A, cas.SX.zeros(n - na, 1)))
-        B_padded = cas.sparsify(cas.vertcat(B, cas.SX.zeros(n - nb, 1)))
+        # Inputs u(k), u(k-1), ..., u(k-m) and the output y(k)
+        u_lags = cas.vertcat(uk, xk[na:n])
+        yk = -cas.dot(A, y_past) + cas.dot(B, u_lags[nk : nk + nb])
 
-        # Observable canonical form matrices
-        # A matrix: companion form with shifts on subdiagonal and AR
-        # coefficients in last column
-        A_mat = cas.SX.zeros(n, n)
-        for i in range(n - 1):
-            # Alternating signs on subdiagonal: 1, -1, 1, -1, ...
-            A_mat[i + 1, i] = (-1) ** i
-        # Last column contains AR coefficients with specific pattern
-        for i in range(na):
-            if i % 2 == 0:
-                A_mat[n - 1 - i, n - 1] = -A_padded[i]
-            else:
-                A_mat[n - 1 - i, n - 1] = A_padded[i]
-
-        # B matrix: reversed B coefficients padded with zeros
-        B_mat = cas.SX.zeros(n, 1)
-        for i in range(nb):
-            B_mat[nb - 1 - i] = B_padded[i]
-
-        # C matrix: extracts output from last state with negation
-        C_mat = cas.SX.zeros(1, n)
-        C_mat[0, n - 1] = -1
-
-        # D matrix: direct feedthrough (zero for ARX with nk >= 1)
-        D_mat = cas.SX.zeros(1, 1)
-
-        # State-space equations:
-        # x(k+1) = A_mat * x(k) + B_mat * u(k)
-        # y(k) = C_mat * x(k) + D_mat * u(k)
-        xkp1 = cas.mtimes(A_mat, xk) + cas.mtimes(B_mat, uk)
-        yk = cas.mtimes(C_mat, xk) + cas.mtimes(D_mat, uk)
+        # Shift the past outputs and inputs by one time step:
+        # x(k+1) = [y(k), ..., y(k-na+1), u(k), ..., u(k-m+1)]
+        y_next = cas.vertcat(yk, xk[0 : na - 1]) if na > 0 else cas.SX(0, 1)
+        xkp1 = cas.vertcat(y_next, u_lags[0:m])
 
         # Add any symbolic variables to params dictionary
         params = {v.name(): v for v in cas.symvar(A)}
