@@ -34,8 +34,8 @@ tf_to_ss_obs_cas
 from collections import OrderedDict
 from dataclasses import dataclass
 
-import numpy as np
 import casadi as cas
+import numpy as np
 
 from cas_models.continuous_time.simulate import (
     make_sim_step_function_integrator_fixed_dt,
@@ -44,8 +44,8 @@ from cas_models.continuous_time.simulate import (
 from cas_models.param_utils import (
     make_list_of_enumerated_names,
 )
-from cas_models.validation import validate_casadi_function_dims
 from cas_models.transformations import connect_systems_in_series, sum_systems
+from cas_models.validation import validate_casadi_function_dims
 
 # Attribute names for discrete-time state-space models
 

@@ -1,7 +1,8 @@
 from pathlib import Path
-import numpy as np
+
 import casadi as cas
 import matplotlib.pyplot as plt
+import numpy as np
 
 from cas_models.continuous_time.models import (
     SSModelCTLinearFOSISO,
@@ -10,8 +11,8 @@ from cas_models.continuous_time.models import (
     StateSpaceModelCTStaticNonlinearity,
 )
 from cas_models.continuous_time.simulate import (
-    make_step_function,
     make_sim_step_function_RK4_fixed_dt,
+    make_step_function,
 )
 from cas_models.discrete_time.simulate import make_n_step_simulation_function
 
