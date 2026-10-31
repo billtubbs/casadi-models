@@ -1,9 +1,10 @@
 """Unit tests for prediction_errors and prediction_errors_ms in
 src/cas_models/discrete_time/simulate.py"""
 
-import pytest
-import numpy as np
 import casadi as cas
+import numpy as np
+import pytest
+
 from cas_models.continuous_time.models import SSModelCTLinearO2SISO
 from cas_models.discrete_time.models import StateSpaceModelDTFromCTRK4
 from cas_models.discrete_time.simulate import (

@@ -45,7 +45,7 @@ addopts = "-v --tb=short"
 
 [tool.ruff]
 # Extend the default line length
-line-length = 88
+line-length = 79
 
 [tool.ruff.format]
 # Use double quotes for strings

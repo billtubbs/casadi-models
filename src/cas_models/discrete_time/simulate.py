@@ -247,14 +247,17 @@ def prediction_errors_ms(
         if L not in sims:
             sims[L] = make_n_step_simulation_function_from_model(model, L)
         X_seg, Y_seg = sims[L](
-            cas.DM(t[k:k + L + 1]), cas.DM(U[k:k + L]), X0[i], *param_values
+            cas.DM(t[k : k + L + 1]),
+            cas.DM(U[k : k + L]),
+            X0[i],
+            *param_values,
         )
         if last:
             # The last segment also gives the output at the final time
             errors.append(Y_seg - cas.DM(Y[k:]))
         else:
             # The output at the segment end belongs to the next segment
-            errors.append(Y_seg[:L, :] - cas.DM(Y[k:k + L]))
+            errors.append(Y_seg[:L, :] - cas.DM(Y[k : k + L]))
             x_next = opti.variable(model.n)
             if X_init is not None:
                 opti.set_initial(x_next, X_init[k + L])

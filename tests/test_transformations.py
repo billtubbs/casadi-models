@@ -870,7 +870,9 @@ def test_connect_systems_multistage_mixed_sources():
     # pi_e   = ref - plant_y = 1.0 - 0.3 = 0.7
     # pi_u   = Kc*pi_e + (Kc/Ti)*pi_x = 2.0*0.7 + 2.0*0.5 = 2.4
     expected_plant_y = plant_x_val
-    expected_pi_u = Kc_val * (ref_val - plant_x_val) + (Kc_val / Ti_val) * pi_x_val
+    expected_pi_u = (
+        Kc_val * (ref_val - plant_x_val) + (Kc_val / Ti_val) * pi_x_val
+    )
 
     y = sys_cl.h(t_val, x_val, u_val)
     assert np.isclose(float(y[0]), expected_pi_u), (

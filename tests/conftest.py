@@ -1,7 +1,7 @@
 """Shared pytest fixtures for tests"""
 
-import pytest
 import numpy as np
+import pytest
 
 
 @pytest.fixture
