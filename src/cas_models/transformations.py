@@ -199,12 +199,12 @@ def connect_systems_in_parallel(
 
     Example:
         >>> # For continuous-time models:
-        >>> combined = connect_nonlinear_systems_in_parallel(
+        >>> combined = connect_systems_in_parallel(
         ...     [sys1, sys2], StateSpaceModelCT
         ... )
         >>>
         >>> # For discrete-time models:
-        >>> combined = connect_nonlinear_systems_in_parallel(
+        >>> combined = connect_systems_in_parallel(
         ...     [sys1, sys2], StateSpaceModelDT
         ... )
     """
@@ -522,7 +522,7 @@ def connect_systems_in_series(
 
     Example:
         >>> # For continuous-time models:
-        >>> combined = connect_nonlinear_systems_in_series(
+        >>> combined = connect_systems_in_series(
         ...     [sys1, sys2], StateSpaceModelCT
         ... )
     """
@@ -652,51 +652,52 @@ def _normalize_connections(connections):
     """Convert connections to normalized dict format with gains.
 
     Args:
-        connections: Connection specification (list of tuples or dict)
+        connections: Connection specification (list of (source, target)
+            tuples or dict of {target: source_spec})
 
     Returns:
-        dict: {input_name: {output_name: gain, ...}, ...}
+        dict: {target: {source: gain, ...}, ...}
 
     Raises:
-        ValueError: If list format has duplicate input targets
+        ValueError: If list format has duplicate targets
     """
     if isinstance(connections, list):
-        # List of tuples format: [('output_name', 'input_name'), ...]
+        # List of tuples format: [('source', 'target'), ...]
         connections_dict = {}
         for conn in connections:
             if len(conn) != 2:
                 raise ValueError(
                     f"Each connection tuple must have exactly 2 elements "
-                    f"(output_name, input_name), got {len(conn)}"
+                    f"(source, target), got {len(conn)}"
                 )
-            output_name, input_name = conn
-            if input_name in connections_dict:
+            source, target = conn
+            if target in connections_dict:
                 raise ValueError(
-                    f"Duplicate connection target '{input_name}' in list "
+                    f"Duplicate connection target '{target}' in list "
                     f"format. Use dictionary format with gains for summing "
                     "junctions: connections = "
-                    f"{{'{input_name}': {{'out1': 1.0, 'out2': 1.0}}}}"
+                    f"{{'{target}': {{'out1': 1.0, 'out2': 1.0}}}}"
                 )
-            connections_dict[input_name] = output_name
+            connections_dict[target] = source
         connections = connections_dict
 
     # Normalize dict format
     connections_norm = {}
-    for input_name, output_spec in connections.items():
-        if isinstance(output_spec, str):
+    for target, source_spec in connections.items():
+        if isinstance(source_spec, str):
             # Simple string: 'sys2_y' -> {'sys2_y': 1.0}
-            connections_norm[input_name] = {output_spec: 1.0}
-        elif isinstance(output_spec, list):
-            # List of outputs: ['sys2_y', 'sys3_y'] -> {'sys2_y': 1.0,
+            connections_norm[target] = {source_spec: 1.0}
+        elif isinstance(source_spec, list):
+            # List of sources: ['sys2_y', 'sys3_y'] -> {'sys2_y': 1.0,
             # 'sys3_y': 1.0}
-            connections_norm[input_name] = {name: 1.0 for name in output_spec}
-        elif isinstance(output_spec, dict):
+            connections_norm[target] = {name: 1.0 for name in source_spec}
+        elif isinstance(source_spec, dict):
             # Already in correct format: {'sys2_y': 1.0, 'sys3_y': -0.5}
-            connections_norm[input_name] = output_spec
+            connections_norm[target] = source_spec
         else:
             raise ValueError(
-                f"Connection value for '{input_name}' must be a string, "
-                f"list, or dict, got {type(output_spec)}"
+                f"Connection value for '{target}' must be a string, "
+                f"list, or dict, got {type(source_spec)}"
             )
 
     return connections_norm
@@ -728,7 +729,7 @@ def validate_systems_are_compatible(systems):
 
 
 def _validate_connections(
-    connections_norm, parallel_sys, external_inputs=None
+    connections_norm, parallel_sys, external_inputs=None, external_outputs=None
 ):
     """Validate connection specification.
 
@@ -738,50 +739,105 @@ def _validate_connections(
         external_inputs: List of external input names, including any new
             signals not already in the parallel system (e.g. a setpoint
             injected via input_names).
+        external_outputs: List of external output names, including any
+            new signals not already in the parallel system (e.g. a sum of
+            subsystem outputs declared in output_names).
 
     Raises:
         ValueError: If connections are invalid
     """
     if external_inputs is None:
         external_inputs = []
+    if external_outputs is None:
+        external_outputs = []
 
-    # Check all input names exist
-    for input_name in connections_norm.keys():
-        if input_name not in parallel_sys.input_names:
+    # Check all targets exist: subsystem inputs or new external outputs
+    for target in connections_norm:
+        if target in parallel_sys.input_names:
+            continue
+        if target in parallel_sys.output_names:
             raise ValueError(
-                f"Connection target input '{input_name}' not found in "
-                "parallel system. Available inputs: "
-                f"{parallel_sys.input_names}"
+                f"Connection target '{target}' is an output of a "
+                "subsystem. Targets must be subsystem inputs or new "
+                "external outputs."
+            )
+        if target not in external_outputs:
+            raise ValueError(
+                f"Connection target '{target}' not found in parallel "
+                "system. Available inputs: "
+                f"{parallel_sys.input_names}. To make it a new external "
+                "output, add it to output_names."
             )
 
     # Check all source names exist (can be outputs, inputs, or new externals)
-    for input_name, source_dict in connections_norm.items():
-        for source_name in source_dict.keys():
-            is_output = source_name in parallel_sys.output_names
-            is_input = source_name in parallel_sys.input_names
-            is_new_external = source_name in external_inputs
+    for target, source_dict in connections_norm.items():
+        for source in source_dict:
+            is_output = source in parallel_sys.output_names
+            is_input = source in parallel_sys.input_names
+            is_new_external = source in external_inputs
             if not is_output and not is_input and not is_new_external:
                 raise ValueError(
-                    f"Connection source '{source_name}' (for input "
-                    f"'{input_name}') not found in parallel system. "
+                    f"Connection source '{source}' (for target "
+                    f"'{target}') not found in parallel system. "
                     f"Available outputs: {parallel_sys.output_names}, "
-                    f"available inputs: {parallel_sys.input_names}"
+                    f"available inputs: {parallel_sys.input_names}. To "
+                    "make it a new external input, add it to input_names."
                 )
 
 
-def _extract_outputs(y_parallel, output_names, parallel_sys):
-    """Extract specified outputs from parallel system output vector.
+def _build_output_vector(
+    y_parallel,
+    u_internal,
+    u_ext,
+    connections_norm,
+    external_inputs,
+    external_outputs,
+    parallel_sys,
+):
+    """Build the external output vector of the connected system.
+
+    Each external output is either a subsystem output, taken from the
+    parallel system output vector, or a new output defined by a
+    connection, computed as the weighted sum of its sources. A source of
+    a new output can be a subsystem output, an external input, or a
+    subsystem input (including a connected one, so internal signals can
+    be exposed).
 
     Args:
         y_parallel: Full output vector from parallel system
-        output_names: List of output names to extract
+        u_internal: Full (resolved) input vector of the parallel system
+        u_ext: External input vector (symbolic)
+        connections_norm: Normalized connections dict
+        external_inputs: List of external input names
+        external_outputs: List of external output names
         parallel_sys: The parallel system
 
     Returns:
-        cas.SX: Selected output vector
+        cas.SX: External output vector
     """
-    indices = [parallel_sys.output_names.index(name) for name in output_names]
-    return cas.vertcat(*[y_parallel[i] for i in indices])
+    output_name_to_idx = {
+        name: i for i, name in enumerate(parallel_sys.output_names)
+    }
+    input_name_to_idx = {
+        name: i for i, name in enumerate(parallel_sys.input_names)
+    }
+    external_input_map = {name: i for i, name in enumerate(external_inputs)}
+
+    outputs = []
+    for name in external_outputs:
+        if name not in connections_norm:
+            outputs.append(y_parallel[output_name_to_idx[name]])
+            continue
+        sum_expr = cas.SX(0)
+        for src, gain in connections_norm[name].items():
+            if src in output_name_to_idx:
+                sum_expr += gain * y_parallel[output_name_to_idx[src]]
+            elif src in external_input_map:
+                sum_expr += gain * u_ext[external_input_map[src]]
+            else:
+                sum_expr += gain * u_internal[input_name_to_idx[src]]
+        outputs.append(sum_expr)
+    return cas.vertcat(*outputs)
 
 
 def _build_internal_input_vector(
@@ -898,37 +954,49 @@ def connect_systems(
     This function combines multiple state-space models (continuous-time or
     discrete-time) into a single connected system by:
     1. First arranging all systems in parallel
-    2. Creating internal connections between outputs and inputs
+    2. Creating connections between signals
     3. Exposing only specified external inputs and outputs
+
+    Terminology: a signal is a named input or output of a subsystem or of
+    the connected system. A connection sets the value of one signal, its
+    target, to the weighted sum of one or more other signals, its sources.
 
     Args:
         systems (list): List of state-space model objects to connect.
         connections (list or dict): Connection specification:
-            - List format: [(source_name, input_name), ...] for simple
-                one-to-one connections where source_name is an output name
-                or external input name.
-            - Dict format: {input_name: source_spec, ...} where source_spec
+            - List format: [(source, target), ...] for simple one-to-one
+                connections.
+            - Dict format: {target: source_spec, ...} where source_spec
                 can be:
-                - A string: 'sys2_y' (simple connection from output or input)
+                - A string: 'sys2_y' (simple connection from one source)
                 - A list: ['sys2_y', 'sys3_y'] (sum with unit gains)
                 - A dict: {'sys2_y': 1.0, 'sys3_y': -0.5} (weighted sum)
 
-            Source names can be either:
-                - Output names from any of the systems in the parallel
-                  connection
-                - External input names (inputs that are NOT themselves
-                  connected)
+            Targets can be:
+                - Subsystem inputs
+                - New external outputs (names that are not subsystem
+                  outputs), which must be listed in output_names
 
-            Note: If an input name appears as a source, it must be an
-            external input (not connected). This prevents circular
-            dependencies.
+            Sources can be:
+                - Subsystem outputs
+                - External inputs, including new ones (names that are not
+                  subsystem inputs), which must be listed in input_names
+                - For new external outputs only: connected subsystem
+                  inputs (to expose internal signals)
+
+            Note: If a subsystem input appears as a source for another
+            subsystem input, it must be an external input (not
+            connected). This prevents circular dependencies.
         model_class: Target model class (StateSpaceModelCT or
             StateSpaceModelDT). The _attr_names class attribute determines
             the naming conventions.
         input_names (list, optional): List of external input signal names to
             expose. If None, exposes all inputs that are not connected.
+            Names that are not subsystem inputs are new external inputs.
         output_names (list, optional): List of external output signal names
-            to expose. If None, exposes all outputs.
+            to expose. If None, exposes all subsystem outputs. Names that
+            are not subsystem outputs are new external outputs and must be
+            connection targets.
         keys (list, optional): Custom keys for naming subsystems.
         verbose_names (bool, optional): Use verbose parameter naming.
             Default: False.
@@ -960,7 +1028,7 @@ def connect_systems(
         >>> sys2 = StateSpaceModelCT(...)  # Controller
         >>>
         >>> # Connect output of sys2 to input of sys1, and vice versa
-        >>> connected = connect_nonlinear_systems(
+        >>> connected = connect_systems(
         ...     [sys1, sys2],
         ...     connections=[("sys2_y", "sys1_u"), ("sys1_y", "sys2_u")],
         ...     model_class=StateSpaceModelCT,
@@ -968,7 +1036,7 @@ def connect_systems(
         >>>
         >>> # Example 2: Summing junction with feedback
         >>> # sys3 output feeds into sys1, with feedback from sys1 and sys2
-        >>> connected = connect_nonlinear_systems(
+        >>> connected = connect_systems(
         ...     [sys1, sys2, sys3],
         ...     connections={
         ...         "sys1_u": {"sys2_y": 1.0, "sys3_y": -0.5},  # Weighted sum
@@ -980,7 +1048,7 @@ def connect_systems(
         ... )
         >>>
         >>> # Example 3: Closed-loop system (no external inputs)
-        >>> connected = connect_nonlinear_systems(
+        >>> connected = connect_systems(
         ...     [sys1, sys2],
         ...     connections={"sys1_u": "sys2_y", "sys2_u": "sys1_y"},
         ...     model_class=StateSpaceModelCT,
@@ -990,7 +1058,7 @@ def connect_systems(
         >>>
         >>> # Example 4: Input-to-input connections (e.g., tank network)
         >>> # Connect one external input to multiple system inputs
-        >>> connected = connect_nonlinear_systems(
+        >>> connected = connect_systems(
         ...     [sys1, sys2, sys3],
         ...     connections={
         ...         # sys1_u gets sum of sys2_u and sys3_u
@@ -1002,6 +1070,16 @@ def connect_systems(
         ...     input_names=["sys2_u", "sys3_u"],  # These must be external
         ...     output_names=["sys3_y"],
         ... )
+        >>>
+        >>> # Example 5: New external output (sum of subsystem outputs)
+        >>> # Two SISO models with different inputs and a summed output
+        >>> connected = connect_systems(
+        ...     [sys1, sys2],
+        ...     connections={"y": {"sys1_y": 1.0, "sys2_y": 1.0}},
+        ...     model_class=StateSpaceModelCT,
+        ...     input_names=["sys1_u", "sys2_u"],
+        ...     output_names=["y"],  # New output, a connection target
+        ... )
 
     Note:
         - All input/output names must be unique (enforced by
@@ -1010,9 +1088,9 @@ def connect_systems(
         - Connections must not create algebraic loops (no automatic detection)
 
     See Also:
-        connect_nonlinear_systems_in_parallel: Combine systems without
+        connect_systems_in_parallel: Combine systems without
             connections
-        connect_nonlinear_systems_in_series: Connect systems in series
+        connect_systems_in_series: Connect systems in series
     """
     attr_names = model_class._attr_names
 
@@ -1034,7 +1112,7 @@ def connect_systems(
     if not connections:
         connections = {}
 
-    # Step 2: Normalize connections and determine external inputs
+    # Step 2: Normalize connections: {target: {source: gain, ...}, ...}
     connections_norm = _normalize_connections(connections)
 
     # Step 3: Determine external inputs and outputs
@@ -1046,9 +1124,9 @@ def connect_systems(
             if name not in connections_norm
         ]
     else:
-        external_inputs = input_names
-        # Validate no overlap with connected inputs
-        overlap = set(external_inputs) & set(connections_norm.keys())
+        external_inputs = list(input_names)
+        # Validate no overlap with connection targets
+        overlap = set(external_inputs) & set(connections_norm)
         if overlap:
             raise ValueError(
                 f"Inputs cannot be both external and connected. "
@@ -1058,32 +1136,43 @@ def connect_systems(
         # (e.g. a setpoint injected into a summing junction). They are valid
         # as connection sources but not as connection targets.
 
-    _validate_connections(connections_norm, parallel_sys, external_inputs)
-
     if output_names is None:
         external_outputs = parallel_sys.output_names  # All outputs
     else:
-        external_outputs = output_names
-        # Validate all exist
+        external_outputs = list(output_names)
+        # Names not in the parallel system are new external outputs, which
+        # must be connection targets (e.g. a sum of subsystem outputs)
         for name in external_outputs:
-            if name not in parallel_sys.output_names:
+            if (
+                name not in parallel_sys.output_names
+                and name not in connections_norm
+            ):
                 raise ValueError(
-                    f"External output '{name}' not found in parallel system. "
-                    f"Available: {parallel_sys.output_names}"
+                    f"External output '{name}' not found in parallel system "
+                    "and not a connection target. Available outputs: "
+                    f"{parallel_sys.output_names}"
                 )
 
-    # Validate that input names in connection sources are external.
-    # If a name exists in both output_names and input_names, it is resolved
-    # as an output (the computation code already does this), so skip the check.
-    for input_name, source_dict in connections_norm.items():
-        for source_name in source_dict.keys():
-            is_also_output = source_name in parallel_sys.output_names
-            if source_name in parallel_sys.input_names and not is_also_output:
+    _validate_connections(
+        connections_norm, parallel_sys, external_inputs, external_outputs
+    )
+
+    # Validate that subsystem inputs used as sources for other subsystem
+    # inputs are external. Sources of new external outputs may be connected
+    # inputs (to expose internal signals). If a name exists in both
+    # output_names and input_names, it is resolved as an output (the
+    # computation code already does this), so skip the check.
+    for target, source_dict in connections_norm.items():
+        if target not in parallel_sys.input_names:
+            continue
+        for source in source_dict:
+            is_also_output = source in parallel_sys.output_names
+            if source in parallel_sys.input_names and not is_also_output:
                 # Source is an input-only name - must be external
-                if source_name not in external_inputs:
+                if source not in external_inputs:
                     raise ValueError(
-                        f"Connection source input '{source_name}' (for input "
-                        f"'{input_name}') must be an external input (not "
+                        f"Connection source input '{source}' (for target "
+                        f"'{target}') must be an external input (not "
                         f"connected). Currently it is connected."
                     )
 
@@ -1139,8 +1228,16 @@ def connect_systems(
         t, x, u_internal, *parallel_sys.params.values()
     )
 
-    # Extract selected external outputs
-    y_ext = _extract_outputs(y_parallel, external_outputs, parallel_sys)
+    # Select the external outputs and compute any new ones
+    y_ext = _build_output_vector(
+        y_parallel,
+        u_internal,
+        u_ext,
+        connections_norm,
+        external_inputs,
+        external_outputs,
+        parallel_sys,
+    )
 
     # Create connected output function
     output_func = cas.Function(

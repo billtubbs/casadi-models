@@ -562,7 +562,7 @@ def test_connect_error_handling(system_type, model_class):
 
     # Test error on non-existent input
     with pytest.raises(
-        ValueError, match="Connection target input 'sys3_u' not found"
+        ValueError, match="Connection target 'sys3_u' not found"
     ):
         connect_systems(
             [sys1, sys2],
@@ -899,6 +899,155 @@ def test_connect_systems_multistage_mixed_sources():
         f"d(plant_x)/dt: got {float(f[plant_x_idx]):.4f}, "
         f"expected {expected_d_plant_x:.4f}"
     )
+
+
+def test_connect_new_output_sum(system_type, model_class):
+    """A new external output can be a weighted sum of subsystem outputs."""
+    if system_type == "ct":
+        sys1 = SSModelCTLinearFOSISO(K=1.0, T1=1.0)
+        sys2 = SSModelCTLinearFOSISO(K=2.0, T1=0.5)
+    else:
+        sys1 = StateSpaceModelDTTFSISO(
+            num=cas.DM([0.5, 1.0]), den=cas.DM([1, -0.5])
+        )
+        sys2 = StateSpaceModelDTTFSISO(
+            num=cas.DM([0.2, 2.0]), den=cas.DM([1, -0.3])
+        )
+
+    connected = connect_systems(
+        [sys1, sys2],
+        connections={"y": {"sys1_y": 1.0, "sys2_y": -0.5}},
+        model_class=model_class,
+        input_names=["sys1_u", "sys2_u"],
+        output_names=["sys1_y", "y"],
+    )
+    assert connected.n == 2
+    assert connected.input_names == ["sys1_u", "sys2_u"]
+    assert connected.output_names == ["sys1_y", "y"]
+
+    # Outputs match those of the separate subsystems
+    H = getattr(connected, model_class._attr_names["output_func"])
+    H1 = getattr(sys1, model_class._attr_names["output_func"])
+    H2 = getattr(sys2, model_class._attr_names["output_func"])
+    x1, x2, u1, u2 = 0.3, -0.7, 1.5, 2.0
+    # State order follows the systems list order
+    y = H(0.0, cas.DM([x1, x2]), cas.DM([u1, u2])).full()
+    y1 = float(H1(0.0, x1, u1))
+    y2 = float(H2(0.0, x2, u2))
+    assert np.allclose(y, [[y1], [y1 - 0.5 * y2]])
+
+
+def test_connect_new_output_matches_summing_block():
+    """A two-input rack model built with a new output equals the same
+    model built with a parallel connection and a summing block in series."""
+    keys = ["CRAC1", "CRAC2"]
+    models = [
+        SSModelCTLinearFOSISO(input_name=f"{key}_flow", output_name="R11")
+        for key in keys
+    ]
+
+    # Same output name in both models, so prefixed with the keys
+    rack = connect_systems(
+        models,
+        connections={"R11_intake": ["CRAC1_R11", "CRAC2_R11"]},
+        model_class=StateSpaceModelCT,
+        input_names=["CRAC1_flow", "CRAC2_flow"],
+        output_names=["R11_intake"],
+        keys=keys,
+    )
+
+    paths = connect_systems_in_parallel(models, StateSpaceModelCT, keys=keys)
+    summer = SSModelCTDirectTransmission(
+        D=cas.DM.ones(1, 2), output_names=["R11_intake"]
+    )
+    rack_ref = connect_systems_in_series([paths, summer], StateSpaceModelCT)
+
+    assert rack.input_names == rack_ref.input_names
+    assert rack.output_names == rack_ref.output_names
+    assert list(rack.params) == list(rack_ref.params)
+    assert rack.n == rack_ref.n == 2
+
+    x = cas.DM([0.4, -1.2])
+    u = cas.DM([0.1, -0.3])
+    p = [1.5, -2.0, 3.0, 20.0]  # CRAC1_K, CRAC2_K, CRAC1_T1, CRAC2_T1
+    f, f_ref = rack.f(0.0, x, u, *p), rack_ref.f(0.0, x, u, *p)
+    h, h_ref = rack.h(0.0, x, u, *p), rack_ref.h(0.0, x, u, *p)
+    assert np.allclose(f.full(), f_ref.full())
+    assert np.allclose(h.full(), h_ref.full())
+
+
+def test_connect_new_output_internal_signals():
+    """New external outputs can expose an external input and a connected
+    subsystem input (here the error signal of a PI controller)."""
+    pi_ctrl = SSModelCTPIInt(
+        Kc=2.0, Ti=1.0, name="pi", input_name="pi_e", output_name="pi_u"
+    )
+    plant = SSModelCTLinearFOSISO(
+        K=1.0,
+        T1=1.0,
+        name="plant",
+        input_name="plant_u",
+        output_name="plant_y",
+    )
+    sys_cl = connect_systems(
+        [pi_ctrl, plant],
+        connections={
+            "plant_u": "pi_u",
+            "pi_e": {"ref": 1.0, "plant_y": -1.0},
+            "error": "pi_e",  # connected subsystem input
+            "setpoint": "ref",  # new external input
+        },
+        model_class=StateSpaceModelCT,
+        input_names=["ref"],
+        output_names=["plant_y", "error", "setpoint"],
+    )
+    assert sys_cl.output_names == ["plant_y", "error", "setpoint"]
+
+    plant_x, ref = 0.3, 1.0
+    y = sys_cl.h(0.0, cas.DM([0.5, plant_x]), cas.DM([ref])).full()
+    assert np.allclose(y, [[plant_x], [ref - plant_x], [ref]])
+
+
+def test_connect_new_signal_errors():
+    """New external inputs and outputs must be declared in input_names and
+    output_names, and subsystem outputs can't be targets."""
+    sys1 = SSModelCTLinearFOSISO(K=1.0, T1=1.0)
+    sys2 = SSModelCTLinearFOSISO(K=2.0, T1=0.5)
+    systems = [sys1, sys2]
+
+    # Target that is neither a subsystem input nor in output_names
+    with pytest.raises(ValueError, match="add it to output_names"):
+        connect_systems(
+            systems,
+            connections={"y": ["sys1_y", "sys2_y"]},
+            model_class=StateSpaceModelCT,
+        )
+
+    # Target that is a subsystem output
+    with pytest.raises(ValueError, match="'sys1_y' is an output of a"):
+        connect_systems(
+            systems,
+            connections={"sys1_y": "sys2_y"},
+            model_class=StateSpaceModelCT,
+            output_names=["sys1_y"],
+        )
+
+    # New output in output_names without a connection
+    with pytest.raises(ValueError, match="not a connection target"):
+        connect_systems(
+            systems,
+            connections={},
+            model_class=StateSpaceModelCT,
+            output_names=["y"],
+        )
+
+    # Source that is neither a signal nor in input_names
+    with pytest.raises(ValueError, match="add it to input_names"):
+        connect_systems(
+            systems,
+            connections={"sys1_u": {"ref": 1.0, "sys2_y": -1.0}},
+            model_class=StateSpaceModelCT,
+        )
 
 
 def test_connect_systems_algebraic_loop_silent_failure():
