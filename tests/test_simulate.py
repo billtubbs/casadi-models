@@ -134,13 +134,13 @@ def test_cart_pole_equilibrium(cart_pole_system):
     t = 0.0
 
     # Evaluate dynamics at equilibrium
-    rhs = f(t, x_eq, u_eq, *param_values.values())
+    rhs = f(t, x_eq, u_eq, *param_values.values()).full()
 
     # At equilibrium, derivatives should be zero
     assert np.allclose(rhs, np.zeros((n, 1)), atol=1e-10)
 
     # Check output
-    y = h(t, x_eq, u_eq, *param_values.values())
+    y = h(t, x_eq, u_eq, *param_values.values()).full()
     assert np.allclose(y, np.array([[0.0], [0.0]]))
 
 
@@ -163,7 +163,7 @@ def test_make_sim_step_function_RK4(cart_pole_system):
     dt = 0.01
 
     # Take one step
-    x1 = F_rk4(t, x0, u, dt, *param_values.values())
+    x1 = F_rk4(t, x0, u, dt, *param_values.values()).full()
 
     # Check that state evolved (angle should increase due to gravity)
     assert x1.shape == (n, 1)
@@ -171,7 +171,7 @@ def test_make_sim_step_function_RK4(cart_pole_system):
 
     # With no control, pole should fall to the right (theta > 0)
     # theta_dot should be positive (falling in positive theta direction)
-    assert float(x1[3]) > 0  # angular velocity increases
+    assert x1[3].item() > 0  # angular velocity increases
 
 
 def test_make_sim_step_function_integrator_rk(cart_pole_system):
@@ -201,7 +201,7 @@ def test_make_sim_step_function_integrator_rk(cart_pole_system):
     dt = 0.01
 
     # Take one step
-    x1 = F_rk(t, x0, u, dt, *param_values.values())
+    x1 = F_rk(t, x0, u, dt, *param_values.values()).full()
 
     # Check that state evolved
     assert x1.shape == (n, 1)
@@ -209,7 +209,7 @@ def test_make_sim_step_function_integrator_rk(cart_pole_system):
 
     # With no control, pole should fall to the right (theta > 0)
     # theta_dot should be positive
-    assert float(x1[3]) > 0  # angular velocity increases
+    assert x1[3].item() > 0  # angular velocity increases
 
 
 def test_make_sim_step_function_integrator_cvodes(cart_pole_system):
@@ -239,7 +239,7 @@ def test_make_sim_step_function_integrator_cvodes(cart_pole_system):
     dt = 0.01
 
     # Take one step
-    x1 = F_cvodes(t, x0, u, dt, *param_values.values())
+    x1 = F_cvodes(t, x0, u, dt, *param_values.values()).full()
 
     # Check that state evolved
     assert x1.shape == (n, 1)
@@ -247,7 +247,7 @@ def test_make_sim_step_function_integrator_cvodes(cart_pole_system):
 
     # With no control, pole should fall to the right (theta > 0)
     # theta_dot should be positive
-    assert float(x1[3]) > 0  # angular velocity increases
+    assert x1[3].item() > 0  # angular velocity increases
 
 
 def test_integrator_comparison(cart_pole_system):
@@ -282,9 +282,9 @@ def test_integrator_comparison(cart_pole_system):
     dt = 0.01
 
     # Take one step with each integrator
-    x1_rk4 = F_rk4(t, x0, u, dt, *param_values.values())
-    x1_rk = F_rk(t, x0, u, dt, *param_values.values())
-    x1_cvodes = F_cvodes(t, x0, u, dt, *param_values.values())
+    x1_rk4 = F_rk4(t, x0, u, dt, *param_values.values()).full()
+    x1_rk = F_rk(t, x0, u, dt, *param_values.values()).full()
+    x1_cvodes = F_cvodes(t, x0, u, dt, *param_values.values()).full()
 
     # Results should be similar (but not identical due to different methods)
     # CVodes with tight tolerances should be most accurate
@@ -313,17 +313,17 @@ def test_integrator_with_control_input(cart_pole_system):
     dt = 0.01
 
     # Simulate with right force
-    x1_right = F_rk4(t, x0, u_right, dt, *param_values.values())
+    x1_right = F_rk4(t, x0, u_right, dt, *param_values.values()).full()
 
     # Simulate with left force
-    x1_left = F_rk4(t, x0, u_left, dt, *param_values.values())
+    x1_left = F_rk4(t, x0, u_left, dt, *param_values.values()).full()
 
     # Cart should move in direction of applied force
     # Right force should increase cart position
-    assert float(x1_right[1]) > 0  # positive velocity
+    assert x1_right[1].item() > 0  # positive velocity
 
     # Left force should decrease cart position
-    assert float(x1_left[1]) < 0  # negative velocity
+    assert x1_left[1].item() < 0  # negative velocity
 
     # Forces should affect the system differently
     assert not np.allclose(x1_right, x1_left)
@@ -377,6 +377,8 @@ def test_make_n_step_simulation_function(cart_pole_system):
 
     # Run simulation
     X, Y = sim_func(t_eval, U, x0, *param_values.values())
+    X = X.full()
+    Y = Y.full()
 
     # Check outputs
     assert X.shape == (nT + 1, n)  # states at all time steps
@@ -457,8 +459,8 @@ def test_multi_step_integrator_comparison(cart_pole_system):
     )(t_eval, U, x0, *param_values.values())
 
     # Results should be very similar (RK4 methods)
-    assert np.allclose(X_rk4, X_rk, rtol=1e-3, atol=1e-4)
-    assert np.allclose(Y_rk4, Y_rk, rtol=1e-3, atol=1e-4)
+    assert np.allclose(X_rk4.full(), X_rk.full(), rtol=1e-3, atol=1e-4)
+    assert np.allclose(Y_rk4.full(), Y_rk.full(), rtol=1e-3, atol=1e-4)
 
     # System should respond to the step input
     # Position should change when force is applied
@@ -610,8 +612,8 @@ def test_make_sim_step_function_RK4_with_dt_parameter(cart_pole_system):
     dt_small = 0.001
     dt_large = 0.1
 
-    x1_small = F(t, x0, u, dt_small, *param_values.values())
-    x1_large = F(t, x0, u, dt_large, *param_values.values())
+    x1_small = F(t, x0, u, dt_small, *param_values.values()).full()
+    x1_large = F(t, x0, u, dt_large, *param_values.values()).full()
 
     # Larger time step should result in larger state change
     delta_small = np.linalg.norm(np.array(x1_small) - x0.reshape(-1, 1))
@@ -643,11 +645,11 @@ def test_make_sim_step_function_RK4_fixed_dt(cart_pole_system):
     t = 0.0
 
     # Take one step with fixed-dt version
-    x1_fixed = F_fixed(t, x0, u, *param_values.values())
+    x1_fixed = F_fixed(t, x0, u, *param_values.values()).full()
 
     # Compare with variable-dt version using same dt
     F_variable = make_sim_step_function_RK4(f, n, nu, params=params)
-    x1_variable = F_variable(t, x0, u, dt, *param_values.values())
+    x1_variable = F_variable(t, x0, u, dt, *param_values.values()).full()
 
     # Results should be identical
     assert np.allclose(x1_fixed, x1_variable, rtol=1e-10, atol=1e-12)
@@ -683,7 +685,7 @@ def test_make_sim_step_function_integrator_fixed_dt_rk(cart_pole_system):
     t = 0.0
 
     # Take one step with fixed-dt version
-    x1_fixed = F_fixed(t, x0, u, *param_values.values())
+    x1_fixed = F_fixed(t, x0, u, *param_values.values()).full()
 
     # Compare with variable-dt version using same dt
     F_variable = make_sim_step_function_integrator(
@@ -694,7 +696,7 @@ def test_make_sim_step_function_integrator_fixed_dt_rk(cart_pole_system):
         solver="rk",
         integrator_opts={"number_of_finite_elements": 4},
     )
-    x1_variable = F_variable(t, x0, u, dt, *param_values.values())
+    x1_variable = F_variable(t, x0, u, dt, *param_values.values()).full()
 
     # Results should be very close
     assert np.allclose(x1_fixed, x1_variable, rtol=1e-6, atol=1e-8)
@@ -744,7 +746,9 @@ def test_make_sim_step_function_integrator_fixed_dt_cvodes(cart_pole_system):
     x1_variable = F_variable(t, x0, u, dt, *param_values.values())
 
     # Results should be very close
-    assert np.allclose(x1_fixed, x1_variable, rtol=1e-6, atol=1e-8)
+    assert np.allclose(
+        x1_fixed.full(), x1_variable.full(), rtol=1e-6, atol=1e-8
+    )
 
 
 def test_fixed_dt_functions_with_n_step_simulation(cart_pole_system):
@@ -777,6 +781,8 @@ def test_fixed_dt_functions_with_n_step_simulation(cart_pole_system):
 
     # Run simulation
     X, Y = sim_func(t_eval, U, x0, *param_values.values())
+    X = X.full()
+    Y = Y.full()
 
     # Verify results
     assert X.shape == (nT + 1, n)

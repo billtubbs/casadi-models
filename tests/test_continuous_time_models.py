@@ -1,23 +1,24 @@
 """Unit tests for src/cas_models/continuous_time/models.py module"""
 
-import pytest
-import numpy as np
 import casadi as cas
+import numpy as np
+import pytest
+
 from cas_models.continuous_time.models import (
-    StateSpaceModelCT,
-    StateSpaceModelCTStaticNonlinearity,
-    StateSpaceModelCTFromABCD,
-    SSModelCTFromABCDSISO,
     SSModelCTDirectTransmission,
+    SSModelCTFromABCDSISO,
     SSModelCTLinearFONoGainSISO,
     SSModelCTLinearFOSISO,
-    SSModelCTLinearO2SISO,
     SSModelCTLinearO2NoGainSISO,
+    SSModelCTLinearO2SISO,
     SSModelCTLinearO2UnderdampedSISO,
+    StateSpaceModelCT,
+    StateSpaceModelCTFromABCD,
+    StateSpaceModelCTStaticNonlinearity,
 )
 from cas_models.continuous_time.regulators import SSModelCTP
-from cas_models.validation import is_ss_ct, is_ss_dt
 from cas_models.transformations import block_diag, sum_systems
+from cas_models.validation import is_ss_ct, is_ss_dt
 
 
 @pytest.fixture
@@ -218,14 +219,14 @@ def test_StateSpaceModelCT_O2_SISO(symbolic_O2_SISO):
     K = cas.DM(0.8)
     T1 = cas.DM(0.6)
     T2 = cas.DM(3.0)
-    assert np.allclose(model.f(t, x, u, K, T1, T2), cas.DM([1, -2.5]))
-    assert np.allclose(model.h(t, x, u, K, T1, T2), cas.DM(0))
+    assert np.allclose(model.f(t, x, u, K, T1, T2).full(), [[1.0], [-2.5]])
+    assert np.allclose(model.h(t, x, u, K, T1, T2).full(), [[0.0]])
 
     T1 = T2
     x = cas.DM([3.0, 1.0])
-    assert np.allclose(model.f(t, x, u, K, T1, T2), cas.DM([1, -1.5]))
+    assert np.allclose(model.f(t, x, u, K, T1, T2).full(), [[1.0], [-1.5]])
     assert np.allclose(
-        model.h(t, x, u, K, T1, T2), cas.DM(0.26666666666666666)
+        model.h(t, x, u, K, T1, T2).full(), [[0.26666666666666666]]
     )
 
     # Test model type identification
@@ -249,10 +250,18 @@ def test_StateSpaceModelCTFromABCD_FO_SISO(symbolic_FO_SISO):
     )
 
     # Test function calls - with scalars
-    assert np.array_equal(model.f(0.0, 0.0, 0.0, 1.0, 2.0), np.array([[0.0]]))
-    assert np.array_equal(model.h(0.0, 0.0, 0.0, 1.0, 2.0), np.array([[0.0]]))
-    assert np.array_equal(model.f(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[-0.5]]))
-    assert np.array_equal(model.h(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[0.5]]))
+    assert np.array_equal(
+        model.f(0.0, 0.0, 0.0, 1.0, 2.0).full(), np.array([[0.0]])
+    )
+    assert np.array_equal(
+        model.h(0.0, 0.0, 0.0, 1.0, 2.0).full(), np.array([[0.0]])
+    )
+    assert np.array_equal(
+        model.f(0.0, 1.0, 0.0, 1.0, 2.0).full(), np.array([[-0.5]])
+    )
+    assert np.array_equal(
+        model.h(0.0, 1.0, 0.0, 1.0, 2.0).full(), np.array([[0.5]])
+    )
 
     # Test model type identification
     assert is_ss_ct(model) is True
@@ -280,14 +289,14 @@ def test_StateSpaceModelCTFromABCD_O2_SISO(symbolic_O2_SISO):
     K = cas.DM(0.8)
     T1 = cas.DM(0.6)
     T2 = cas.DM(3.0)
-    assert np.allclose(model.f(t, x, u, K, T1, T2), cas.DM([1, -2.5]))
-    assert np.allclose(model.h(t, x, u, K, T1, T2), cas.DM(0))
+    assert np.allclose(model.f(t, x, u, K, T1, T2).full(), [[1.0], [-2.5]])
+    assert np.allclose(model.h(t, x, u, K, T1, T2).full(), [[0.0]])
 
     T1 = T2
     x = cas.DM([3.0, 1.0])
-    assert np.allclose(model.f(t, x, u, K, T1, T2), cas.DM([1, -1.5]))
+    assert np.allclose(model.f(t, x, u, K, T1, T2).full(), [[1.0], [-1.5]])
     assert np.allclose(
-        model.h(t, x, u, K, T1, T2), cas.DM(0.26666666666666666)
+        model.h(t, x, u, K, T1, T2).full(), [[0.26666666666666666]]
     )
 
     # Test model type identification
@@ -311,10 +320,18 @@ def test_SSModelCTFromABCDSISO(symbolic_FO_SISO):
     )
 
     # Test function calls - with scalars
-    assert np.array_equal(model.f(0.0, 0.0, 0.0, 1.0, 2.0), np.array([[0.0]]))
-    assert np.array_equal(model.h(0.0, 0.0, 0.0, 1.0, 2.0), np.array([[0.0]]))
-    assert np.array_equal(model.f(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[-0.5]]))
-    assert np.array_equal(model.h(0.0, 1.0, 0.0, 1.0, 2.0), np.array([[0.5]]))
+    assert np.array_equal(
+        model.f(0.0, 0.0, 0.0, 1.0, 2.0).full(), np.array([[0.0]])
+    )
+    assert np.array_equal(
+        model.h(0.0, 0.0, 0.0, 1.0, 2.0).full(), np.array([[0.0]])
+    )
+    assert np.array_equal(
+        model.f(0.0, 1.0, 0.0, 1.0, 2.0).full(), np.array([[-0.5]])
+    )
+    assert np.array_equal(
+        model.h(0.0, 1.0, 0.0, 1.0, 2.0).full(), np.array([[0.5]])
+    )
 
 
 def test_SSModelCTDirectTransmission():
@@ -329,9 +346,11 @@ def test_SSModelCTDirectTransmission():
         "input_names=['u'], state_names=[], output_names=['y']"
         ")"
     )
-    assert np.array_equal(model.f(0.0, cas.DM.zeros(0), 1.1), np.empty((0, 1)))
     assert np.array_equal(
-        model.h(0.0, cas.DM.zeros(0), 1.1), np.array([[1.1]])
+        model.f(0.0, cas.DM.zeros(0), 1.1).full(), np.empty((0, 1))
+    )
+    assert np.array_equal(
+        model.h(0.0, cas.DM.zeros(0), 1.1).full(), np.array([[1.1]])
     )
 
     # Example 2: 2x2 static gains
@@ -351,8 +370,10 @@ def test_SSModelCTDirectTransmission():
     # Test function calls - with numpy arrays
     u = np.array([-1.0, 2.0]).reshape((-1, 1))
     x = np.empty((0, 1))
-    assert np.array_equal(model.f(0.0, x, u), np.empty((0, 1)))
-    assert np.array_equal(model.h(0.0, x, u), np.array([[-2.0], [4.25]]))
+    assert np.array_equal(model.f(0.0, x, u).full(), np.empty((0, 1)))
+    assert np.array_equal(
+        model.h(0.0, x, u).full(), np.array([[-2.0], [4.25]])
+    )
 
     # Test model type identification
     assert is_ss_ct(model) is True
@@ -376,8 +397,8 @@ def test_SSModelCTLinearFONoGainSISO():
     # Test function calls - with numpy arrays
     u = np.array([-1.0]).reshape((-1, 1))
     x = np.array([2.0]).reshape((-1, 1))
-    assert np.array_equal(model.f(0.0, x, u, 0.5), [[-5]])
-    assert np.array_equal(model.h(0.0, x, u, 0.5), [[4]])
+    assert np.array_equal(model.f(0.0, x, u, 0.5).full(), [[-5]])
+    assert np.array_equal(model.h(0.0, x, u, 0.5).full(), [[4]])
 
     # Example 2: Fixed time constant
     T1 = 0.5
@@ -396,8 +417,8 @@ def test_SSModelCTLinearFONoGainSISO():
     # Test function calls - with numpy arrays
     u = np.array([-1.0]).reshape((-1, 1))
     x = np.array([2.0]).reshape((-1, 1))
-    assert np.array_equal(model.f(0.0, x, u), [[-5]])
-    assert np.array_equal(model.h(0.0, x, u), [[4]])
+    assert np.array_equal(model.f(0.0, x, u).full(), [[-5]])
+    assert np.array_equal(model.h(0.0, x, u).full(), [[4]])
 
 
 def test_SSModelCTLinearO2SISO():
@@ -417,8 +438,10 @@ def test_SSModelCTLinearO2SISO():
     # Test function calls - with numpy arrays
     u = np.array([-1.0]).reshape((-1, 1))
     x = np.array([2.0, -1.0]).reshape((-1, 1))
-    assert np.allclose(model.f(0.0, x, u, 2.0, 0.5, 2.5), [[-1], [-0.2]])
-    assert np.allclose(model.h(0.0, x, u, 2.0, 0.5, 2.5), [[3.2]])
+    assert np.allclose(
+        model.f(0.0, x, u, 2.0, 0.5, 2.5).full(), [[-1], [-0.2]]
+    )
+    assert np.allclose(model.h(0.0, x, u, 2.0, 0.5, 2.5).full(), [[3.2]])
 
     # Example 2: Fixed parameters
     K = 2.0
@@ -437,8 +460,8 @@ def test_SSModelCTLinearO2SISO():
     # Test function calls - with numpy arrays
     u = np.array([-1.0]).reshape((-1, 1))
     x = np.array([2.0, -1.0]).reshape((-1, 1))
-    assert np.allclose(model.f(0.0, x, u, 2.5), [[-1], [-0.2]])
-    assert np.allclose(model.h(0.0, x, u, 2.5), [[3.2]])
+    assert np.allclose(model.f(0.0, x, u, 2.5).full(), [[-1], [-0.2]])
+    assert np.allclose(model.h(0.0, x, u, 2.5).full(), [[3.2]])
 
 
 def test_SSModelCTLinearO2NoGainSISO():
@@ -458,8 +481,8 @@ def test_SSModelCTLinearO2NoGainSISO():
     # Test function calls - with numpy arrays
     u = np.array([-1.0]).reshape((-1, 1))
     x = np.array([2.0, -1.0]).reshape((-1, 1))
-    assert np.allclose(model.f(0.0, x, u, 0.5, 2.5), [[-1], [-0.2]])
-    assert np.allclose(model.h(0.0, x, u, 0.5, 2.5), [[1.6]])
+    assert np.allclose(model.f(0.0, x, u, 0.5, 2.5).full(), [[-1], [-0.2]])
+    assert np.allclose(model.h(0.0, x, u, 0.5, 2.5).full(), [[1.6]])
 
     # Example 2: Fixed parameters
     T1 = 0.5
@@ -477,8 +500,8 @@ def test_SSModelCTLinearO2NoGainSISO():
     # Test function calls - with numpy arrays
     u = np.array([-1.0]).reshape((-1, 1))
     x = np.array([2.0, -1.0]).reshape((-1, 1))
-    assert np.allclose(model.f(0.0, x, u, 2.5), [[-1], [-0.2]])
-    assert np.allclose(model.h(0.0, x, u, 2.5), [[1.6]])
+    assert np.allclose(model.f(0.0, x, u, 2.5).full(), [[-1], [-0.2]])
+    assert np.allclose(model.h(0.0, x, u, 2.5).full(), [[1.6]])
 
 
 def test_SSModelCTLinearO2UnderdampedSISO():
@@ -498,8 +521,8 @@ def test_SSModelCTLinearO2UnderdampedSISO():
     # Test function calls - with numpy arrays
     u = np.array([-1.0]).reshape((-1, 1))
     x = np.array([2.0, -1.0]).reshape((-1, 1))
-    assert np.allclose(model.f(0.0, x, u, 2.0, 1.0, 0.5), [[-1], [-2]])
-    assert np.allclose(model.h(0.0, x, u, 2.0, 1.0, 0.5), [[4.0]])
+    assert np.allclose(model.f(0.0, x, u, 2.0, 1.0, 0.5).full(), [[-1], [-2]])
+    assert np.allclose(model.h(0.0, x, u, 2.0, 1.0, 0.5).full(), [[4.0]])
 
     # Example 2: Fixed parameters
     zeta = 0.5
@@ -517,8 +540,8 @@ def test_SSModelCTLinearO2UnderdampedSISO():
     # Test function calls - with numpy arrays
     u = np.array([-1.0]).reshape((-1, 1))
     x = np.array([2.0, -1.0]).reshape((-1, 1))
-    assert np.allclose(model.f(0.0, x, u, 2.0), [[-1], [-2]])
-    assert np.allclose(model.h(0.0, x, u, 2.0), [[4.0]])
+    assert np.allclose(model.f(0.0, x, u, 2.0).full(), [[-1], [-2]])
+    assert np.allclose(model.h(0.0, x, u, 2.0).full(), [[4.0]])
 
 
 def test_block_diag():
@@ -530,7 +553,7 @@ def test_block_diag():
     ]
     result = block_diag(matrices)
     assert np.array_equal(
-        cas.DM(result),
+        cas.DM(result).full(),
         np.array(
             [
                 [1.0, 1.0, 0.0, 0.0, 0.0],
@@ -728,7 +751,7 @@ def test_SSModelCTP():
     x = cas.DM.zeros(0)
     assert float(ctrl.h(0.0, x, 1.5)) == pytest.approx(3.0)
     assert float(ctrl.h(0.0, x, -0.5)) == pytest.approx(-1.0)
-    assert np.array_equal(ctrl.f(0.0, x, 1.5), np.empty((0, 1)))
+    assert np.array_equal(ctrl.f(0.0, x, 1.5).full(), np.empty((0, 1)))
 
     # Custom names
     ctrl = SSModelCTP(Kc=5.0, input_name="pos_e", output_name="vel_ref")

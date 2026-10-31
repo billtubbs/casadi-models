@@ -1,22 +1,23 @@
 """Unit tests for src/cas_models/continuous_time/models.py module"""
 
-import pytest
+from pathlib import Path
+
+import casadi as cas
 import numpy as np
 import pandas as pd
-import casadi as cas
+import pytest
+
+from cas_models.continuous_time.models import StateSpaceModelCT
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
     StateSpaceModelDTDelay,
-    StateSpaceModelDTTFSISO,
-    StateSpaceModelDTFromCTRK4,
     StateSpaceModelDTFromCT,
+    StateSpaceModelDTFromCTRK4,
+    StateSpaceModelDTTFSISO,
 )
-from cas_models.continuous_time.models import StateSpaceModelCT
-from cas_models.validation import is_ss_ct, is_ss_dt
 from cas_models.transformations import sum_systems
-from pathlib import Path
-
+from cas_models.validation import is_ss_ct, is_ss_dt
 
 DATA_DIR = Path("tests/data")
 
@@ -197,8 +198,10 @@ def test_symbolic_AR211_SISO(symbolic_AR211_SISO):
     uk = cas.DM([-0.5])
     Aq = cas.DM([0.6, 0.1])
     Bq = cas.DM([0.8, 0.2])
-    assert np.allclose(model.F(t, xk, uk, Aq, Bq), cas.DM([0, 0, 0, -0.5]))
-    assert np.allclose(model.H(t, xk, uk, Aq, Bq), cas.DM([0]))
+    assert np.allclose(
+        model.F(t, xk, uk, Aq, Bq).full(), [[0.0], [0.0], [0.0], [-0.5]]
+    )
+    assert np.allclose(model.H(t, xk, uk, Aq, Bq).full(), [[0.0]])
 
     # Test model type identification
     assert is_ss_ct(model) is False
@@ -566,8 +569,8 @@ def test_StateSpaceModelDTFromCTRK4():
     t_val = 0.0
 
     # Compute next state
-    x1 = model_dt.F(t_val, x0, u_val, a_val, b_val)
-    y0 = model_dt.H(t_val, x0, u_val, a_val, b_val)
+    x1 = model_dt.F(t_val, x0, u_val, a_val, b_val).full()
+    y0 = model_dt.H(t_val, x0, u_val, a_val, b_val).full()
 
     # Output should equal state
     assert np.allclose(y0, x0)
@@ -631,8 +634,8 @@ def test_StateSpaceModelDTFromCT():
     t_val = 0.0
 
     # Compute next state
-    x1 = model_dt.F(t_val, x0, u_val, a_val, b_val)
-    y0 = model_dt.H(t_val, x0, u_val, a_val, b_val)
+    x1 = model_dt.F(t_val, x0, u_val, a_val, b_val).full()
+    y0 = model_dt.H(t_val, x0, u_val, a_val, b_val).full()
 
     # Output should equal state
     assert np.allclose(y0, x0)
@@ -686,8 +689,8 @@ def test_StateSpaceModelDTFromCT_compare_solvers():
     t_val = 0.0
 
     # Compute next state with both methods
-    x1_rk4 = model_rk4.F(t_val, x0, u_val, a_val, b_val)
-    x1_cvodes = model_cvodes.F(t_val, x0, u_val, a_val, b_val)
+    x1_rk4 = model_rk4.F(t_val, x0, u_val, a_val, b_val).full()
+    x1_cvodes = model_cvodes.F(t_val, x0, u_val, a_val, b_val).full()
 
     # Results should be very close (both are high-accuracy integrators)
     assert np.allclose(x1_rk4, x1_cvodes, rtol=1e-5, atol=1e-7)
@@ -699,7 +702,7 @@ def test_StateSpaceModelDTFromCT_compare_solvers():
         solver="rk",
         integrator_opts={"number_of_finite_elements": 4},
     )
-    x1_rk = model_rk.F(t_val, x0, u_val, a_val, b_val)
+    x1_rk = model_rk.F(t_val, x0, u_val, a_val, b_val).full()
 
     # RK and RK4 should also be close
     assert np.allclose(x1_rk4, x1_rk, rtol=1e-4, atol=1e-6)
