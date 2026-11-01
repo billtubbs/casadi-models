@@ -14,6 +14,12 @@ prediction_errors_ms
     parameter estimation with cas.Opti.
 estimate_params
     Estimate the parameters of a DT model from input-output data.
+
+The work is done by private core functions that take a function
+make_sim(L) returning an L-step simulation function with the signature
+(t_eval, U, x0, *params) -> (X, Y). The continuous-time versions in
+cas_models.continuous_time.estimate use the same core with an RK4
+simulation function.
 """
 
 import casadi as cas
@@ -49,10 +55,7 @@ def prediction_errors(model, t, U, Y, x0, params):
     Returns:
         E: Errors, simulated minus measured outputs, shape (nT+1, ny).
     """
-    U, Y, nT = _check_data(model, t, U, Y)
-    sim = make_n_step_simulation_function_from_model(model, nT)
-    _, Y_pred = sim(cas.DM(t), cas.DM(U), x0, *_param_list(model, params))
-    return Y_pred - cas.DM(Y)
+    return _prediction_errors(_dt_sim(model), model, t, U, Y, x0, params)
 
 
 def prediction_errors_ms(
@@ -106,6 +109,36 @@ def prediction_errors_ms(
         X0 (list): Initial states of the segments, x0 then the decision
             variables of the others (n x 1 each).
     """
+    return _prediction_errors_ms(
+        _dt_sim(model), opti, model, t, U, Y, x0, params, n_steps, X_init
+    )
+
+
+# Core functions shared with cas_models.continuous_time.estimate. make_sim(L)
+# returns an L-step simulation function (t_eval, U, x0, *params) -> (X, Y).
+
+
+def _dt_sim(model):
+    """Return make_sim(L) for a discrete-time model."""
+
+    def make_sim(L):
+        return make_n_step_simulation_function_from_model(model, L)
+
+    return make_sim
+
+
+def _prediction_errors(make_sim, model, t, U, Y, x0, params):
+    """Core of prediction_errors()."""
+    U, Y, nT = _check_data(model, t, U, Y)
+    sim = make_sim(nT)
+    _, Y_pred = sim(cas.DM(t), cas.DM(U), x0, *_param_list(model, params))
+    return Y_pred - cas.DM(Y)
+
+
+def _prediction_errors_ms(
+    make_sim, opti, model, t, U, Y, x0, params, n_steps, X_init=None
+):
+    """Core of prediction_errors_ms()."""
     U, Y, nT = _check_data(model, t, U, Y)
     n_steps = int(n_steps)
     if n_steps < 1:
@@ -123,7 +156,7 @@ def prediction_errors_ms(
         last = i == len(starts) - 1
         L = nT - k if last else n_steps
         if L not in sims:
-            sims[L] = make_n_step_simulation_function_from_model(model, L)
+            sims[L] = make_sim(L)
         X_seg, Y_seg = sims[L](
             cas.DM(t[k : k + L + 1]),
             cas.DM(U[k : k + L]),
@@ -143,6 +176,84 @@ def prediction_errors_ms(
             X0.append(x_next)
 
     return cas.vcat(errors), X0
+
+
+def _estimate_params(
+    make_sim,
+    model,
+    t,
+    U,
+    Y,
+    x0=None,
+    estimate_x0=False,
+    n_steps=None,
+    params_init=None,
+    X_init=None,
+    param_bounds=None,
+    solver_options=None,
+):
+    """Core of estimate_params()."""
+    for name in {**(params_init or {}), **(param_bounds or {})}:
+        if name not in model.params:
+            raise ValueError(
+                f"unknown parameter {name!r}; model parameters: "
+                f"{list(model.params)}"
+            )
+
+    opti = cas.Opti()
+
+    # Decision variables: one for each model parameter
+    params = {
+        name: opti.variable(*sym.shape) for name, sym in model.params.items()
+    }
+    if params_init is not None:
+        for name, value in params_init.items():
+            opti.set_initial(params[name], value)
+
+    # Initial state: given (default zero) or estimated
+    x0_value = cas.DM.zeros(model.n, 1) if x0 is None else cas.DM(x0)
+    x0 = x0_value
+    if estimate_x0:
+        x0 = opti.variable(model.n)
+        opti.set_initial(x0, x0_value)
+
+    # Output errors
+    if n_steps is None:
+        errors = _prediction_errors(make_sim, model, t, U, Y, x0, params)
+    else:
+        # Initial guesses of the states at the segment starts, from a
+        # simulation with the initial parameter guesses
+        if X_init is None and params_init is not None:
+            sim = make_sim(len(t) - 1)
+            X_init, _ = sim(
+                cas.DM(t),
+                cas.DM(np.asarray(U, dtype=float).reshape(-1, model.nu)),
+                x0_value,
+                *[params_init.get(name, 0.0) for name in model.params],
+            )
+            X_init = X_init.full()
+        errors, _ = _prediction_errors_ms(
+            make_sim, opti, model, t, U, Y, x0, params, n_steps, X_init
+        )
+
+    # Objective: sum of squared errors between the data and the simulated
+    # outputs
+    opti.minimize(cas.sumsqr(errors))
+
+    # Bounds on parameter values
+    if param_bounds is not None:
+        for name, (lb, ub) in param_bounds.items():
+            if lb is not None:
+                opti.subject_to(params[name] >= lb)
+            if ub is not None:
+                opti.subject_to(params[name] <= ub)
+
+    opti.solver("ipopt", {"print_time": False}, solver_options or {})
+    sol = opti.solve()
+
+    params_est = {name: _value(sol.value(var)) for name, var in params.items()}
+    x0_est = np.atleast_1d(sol.value(x0)) if estimate_x0 else None
+    return params_est, x0_est, sol
 
 
 def _check_data(model, t, U, Y):
@@ -244,67 +355,20 @@ def estimate_params(
             aren't parameters of the model.
         RuntimeError: If IPOPT fails.
     """
-    for name in {**(params_init or {}), **(param_bounds or {})}:
-        if name not in model.params:
-            raise ValueError(
-                f"unknown parameter {name!r}; model parameters: "
-                f"{list(model.params)}"
-            )
-
-    opti = cas.Opti()
-
-    # Decision variables: one for each model parameter
-    params = {
-        name: opti.variable(*sym.shape) for name, sym in model.params.items()
-    }
-    if params_init is not None:
-        for name, value in params_init.items():
-            opti.set_initial(params[name], value)
-
-    # Initial state: given (default zero) or estimated
-    x0_value = cas.DM.zeros(model.n, 1) if x0 is None else cas.DM(x0)
-    x0 = x0_value
-    if estimate_x0:
-        x0 = opti.variable(model.n)
-        opti.set_initial(x0, x0_value)
-
-    # Output errors
-    if n_steps is None:
-        errors = prediction_errors(model, t, U, Y, x0, params)
-    else:
-        # Initial guesses of the states at the segment starts, from a
-        # simulation with the initial parameter guesses
-        if X_init is None and params_init is not None:
-            sim = make_n_step_simulation_function_from_model(model, len(t) - 1)
-            X_init, _ = sim(
-                cas.DM(t),
-                cas.DM(np.asarray(U, dtype=float).reshape(-1, model.nu)),
-                x0_value,
-                *[params_init.get(name, 0.0) for name in model.params],
-            )
-            X_init = X_init.full()
-        errors, _ = prediction_errors_ms(
-            opti, model, t, U, Y, x0, params, n_steps, X_init=X_init
-        )
-
-    # Objective: sum of squared errors between the data and the simulated
-    # outputs
-    opti.minimize(cas.sumsqr(errors))
-
-    # Bounds on parameter values
-    if param_bounds is not None:
-        for name, (lb, ub) in param_bounds.items():
-            if lb is not None:
-                opti.subject_to(params[name] >= lb)
-            if ub is not None:
-                opti.subject_to(params[name] <= ub)
-
-    opti.solver("ipopt", {"print_time": False}, solver_options or {})
-    sol = opti.solve()
-
-    params_est = {name: _value(sol.value(var)) for name, var in params.items()}
-    x0_est = np.atleast_1d(sol.value(x0)) if estimate_x0 else None
-    return params_est, x0_est, sol
+    return _estimate_params(
+        _dt_sim(model),
+        model,
+        t,
+        U,
+        Y,
+        x0=x0,
+        estimate_x0=estimate_x0,
+        n_steps=n_steps,
+        params_init=params_init,
+        X_init=X_init,
+        param_bounds=param_bounds,
+        solver_options=solver_options,
+    )
 
 
 def _value(v):

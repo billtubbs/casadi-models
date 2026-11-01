@@ -17,6 +17,9 @@ make_sim_step_function_integrator_fixed_dt
     Create a fixed-timestep single-step CasADi integrator.
 make_n_step_simulation_function_from_model
     Build an n-step simulation function directly from a CT model.
+make_n_step_simulation_function_RK4
+    Build an n-step RK4 simulation function for a CT model with time steps
+    of any (varying) length.
 make_steady_state_solver
     Build a CasADi function that solves for steady-state (x_ss, y_ss).
 """
@@ -361,6 +364,80 @@ def make_n_step_simulation_function_from_model(
         nT,
         params=model.params,
         name=name,
+    )
+
+
+def make_n_step_simulation_function_RK4(model, nT, n_sub=1, name=None):
+    """Create a multi-step RK4 simulation function for a continuous-time
+    model, for time steps of any length.
+
+    The length of each time step is taken from the time vector, so the
+    time steps can vary (e.g. irregular sample times) and the same
+    function works for any time vector of length nT+1. Each step from
+    t_eval[k] to t_eval[k+1] is divided into n_sub RK4 substeps, with
+    the input held at U[k] (zero-order hold). Same signature and output
+    convention as the discrete-time make_n_step_simulation_function:
+    Y[k] = h(t[k], x[k], U[k]), and the last output uses U[nT-1].
+
+    Explicit RK4 is unstable if a substep is longer than about 2.8 times
+    the smallest time constant of the model, so choose n_sub for the
+    longest time step.
+
+    Args:
+        model: A continuous-time state-space model with attributes f, h,
+            n, nu, ny, and params.
+        nT (int): Number of time steps to simulate.
+        n_sub (int, optional): Number of RK4 substeps per time step.
+            Default 1.
+        name (str, optional): Name for the CasADi function. If None,
+            defaults to "{model.f.name()}_rk4_sim_{nT}_steps".
+
+    Returns:
+        cas.Function: A CasADi Function with signature
+            (t_eval, U, x0, *params) -> (X, Y) where:
+            - t_eval: Time vector of length nT+1 (increasing)
+            - U: Input matrix of shape (nT, nu)
+            - x0: Initial state vector of length n
+            - X: State trajectory matrix of shape (nT+1, n)
+            - Y: Output trajectory matrix of shape (nT+1, ny)
+
+    Example:
+        >>> sim = make_n_step_simulation_function_RK4(model, nT=100, n_sub=4)
+        >>> X, Y = sim(t_eval, U, x0, *param_values.values())
+    """
+    n_sub = int(n_sub)
+    if n_sub < 1:
+        raise ValueError("n_sub must be at least 1")
+    if nT < 1:
+        raise ValueError("nT must be at least 1")
+    if name is None:
+        name = f"{model.f.name()}_rk4_sim_{nT}_steps"
+    F = make_sim_step_function_RK4(
+        model.f, model.n, model.nu, params=model.params
+    )
+    params = list(model.params.values())
+
+    t_eval = cas.SX.sym("t_eval", nT + 1)
+    U = cas.SX.sym("U", nT, model.nu)
+    x0 = cas.SX.sym("x0", model.n)
+    X = [x0.T]
+    Y = []
+    xk = x0
+    for k in range(nT):
+        uk = U[k, :].T
+        Y.append(model.h(t_eval[k], xk, uk, *params).T)
+        dt = (t_eval[k + 1] - t_eval[k]) / n_sub
+        for j in range(n_sub):
+            xk = F(t_eval[k] + j * dt, xk, uk, dt, *params)
+        X.append(xk.T)
+    Y.append(model.h(t_eval[nT], xk, uk, *params).T)
+
+    return cas.Function(
+        name,
+        [t_eval, U, x0, *params],
+        [cas.vcat(X), cas.vcat(Y)],
+        ["t_eval", "U", "x0", *model.params.keys()],
+        ["X", "Y"],
     )
 
 
