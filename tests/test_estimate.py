@@ -1,5 +1,4 @@
-"""Unit tests for prediction_errors and prediction_errors_ms in
-src/cas_models/discrete_time/simulate.py"""
+"""Unit tests for src/cas_models/discrete_time/estimate.py"""
 
 import casadi as cas
 import numpy as np
@@ -7,10 +6,13 @@ import pytest
 
 from cas_models.continuous_time.models import SSModelCTLinearO2SISO
 from cas_models.discrete_time.models import StateSpaceModelDTFromCTRK4
-from cas_models.discrete_time.simulate import (
-    make_n_step_simulation_function_from_model,
+from cas_models.discrete_time.estimate import (
+    estimate_params,
     prediction_errors,
     prediction_errors_ms,
+)
+from cas_models.discrete_time.simulate import (
+    make_n_step_simulation_function_from_model,
 )
 
 
@@ -139,3 +141,96 @@ def test_parameter_estimation(o2_system_data, n_steps):
         sorted([true_params["T1"], true_params["T2"]]),
         rtol=1e-4,
     )
+
+
+def check_o2_estimates(est, true_params):
+    assert np.isclose(est["K"], true_params["K"], rtol=1e-4)
+    # The time constants of the O2 model are interchangeable
+    assert np.allclose(
+        sorted([est["T1"], est["T2"]]),
+        sorted([true_params["T1"], true_params["T2"]]),
+        rtol=1e-4,
+    )
+
+
+@pytest.mark.parametrize("n_steps", [None, 10])
+def test_estimate_params(o2_system_data, n_steps):
+    model, true_params, t, U, X, Y, x0 = o2_system_data
+    params_est, x0_est, sol = estimate_params(
+        model,
+        t,
+        U,
+        Y,
+        n_steps=n_steps,
+        params_init={"K": 1.0, "T1": 1.0, "T2": 4.0},
+        param_bounds={"T1": (0.1, None), "T2": (0.1, None)},
+        solver_options={"print_level": 0},
+    )
+    assert sol.stats()["return_status"] == "Solve_Succeeded"
+    assert list(params_est) == list(model.params)
+    assert all(isinstance(v, float) for v in params_est.values())
+    assert x0_est is None
+    check_o2_estimates(params_est, true_params)
+
+
+def test_estimate_params_x0(o2_system_data):
+    """Data from a non-zero initial state: estimating x0 recovers it."""
+    model, true_params, t, U, X, Y, x0 = o2_system_data
+    x0_true = np.array([0.5, -1.0])
+    sim = make_n_step_simulation_function_from_model(model, len(t) - 1)
+    _, Y = sim(t, U, x0_true, *true_params.values())
+    params_est, x0_est, sol = estimate_params(
+        model,
+        t,
+        U,
+        Y.full(),
+        estimate_x0=True,
+        n_steps=10,
+        params_init={"K": 1.0, "T1": 1.0, "T2": 4.0},
+        param_bounds={"T1": (0.1, None), "T2": (0.1, None)},
+        solver_options={"print_level": 0},
+    )
+    check_o2_estimates(params_est, true_params)
+    # The states are only determined up to the order of the time
+    # constants, so compare the simulated outputs from x0_est
+    _, Y_est = sim(t, U, x0_est, *params_est.values())
+    assert np.allclose(Y_est.full(), Y.full(), atol=1e-6)
+
+
+def test_estimate_params_options(o2_system_data):
+    model, true_params, t, U, X, Y, x0 = o2_system_data
+    # Limited-memory Hessian through solver_options
+    params_est, _, sol = estimate_params(
+        model,
+        t,
+        U,
+        Y,
+        n_steps=10,
+        params_init={"K": 1.0, "T1": 1.0, "T2": 4.0},
+        param_bounds={"T1": (0.1, None), "T2": (0.1, None)},
+        solver_options={
+            "print_level": 0,
+            "hessian_approximation": "limited-memory",
+        },
+    )
+    check_o2_estimates(params_est, true_params)
+
+    # A bound that excludes the true value is active at the solution
+    params_est, _, _ = estimate_params(
+        model,
+        t,
+        U,
+        Y,
+        params_init={"K": 1.0, "T1": 1.0, "T2": 4.0},
+        param_bounds={"K": (None, 1.5), "T1": (0.1, None), "T2": (0.1, None)},
+        solver_options={"print_level": 0},
+    )
+    assert np.isclose(params_est["K"], 1.5, atol=1e-6)
+
+
+def test_estimate_params_names(o2_system_data):
+    model, true_params, t, U, X, Y, x0 = o2_system_data
+    with pytest.raises(ValueError, match="unknown parameter 'k'"):
+        estimate_params(model, t, U, Y, params_init={"k": 1.0})
+    with pytest.raises(ValueError, match="unknown parameter 'T3'"):
+        estimate_params(model, t, U, Y, param_bounds={"T3": (0, 1)})
