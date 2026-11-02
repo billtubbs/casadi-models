@@ -74,10 +74,9 @@ def symbolic_AR211_SISO():
     y(k) + a1*y(k-1) + a2*y(k-2) = b1*u(k-1)
 
     """
-    # Dimensions
+    # Dimensions (with nk = 1)
     na = 2
     nb = 1
-    nk = 1
 
     # Parameters (symbolic)
     Aq = cas.SX.sym("Aq", na)
@@ -262,6 +261,31 @@ def test_StateSpaceModelDTTFSISO_input_types(tf_test_case_2):
         "input_names=['u'], state_names=['x1', 'x2', 'x3'], "
         "output_names=['y'])"
     )
+
+
+def test_StateSpaceModelDTTFSISO_num_den_types():
+    """num and den are stored as DM when they have no symbols, else SX"""
+    num = [0.2, 0.1]
+    den = [1, -1.4, 0.49]
+    for num_in, den_in in [
+        (num, den),
+        (np.array(num), np.array(den)),
+        (cas.DM(num), cas.DM(den)),
+        (cas.SX(num), cas.SX(den)),
+    ]:
+        model = StateSpaceModelDTTFSISO(num=num_in, den=den_in)
+        assert isinstance(model.num, cas.DM)
+        assert isinstance(model.den, cas.DM)
+        np.testing.assert_array_equal(model.num.full().ravel(), num)
+        np.testing.assert_array_equal(model.den.full().ravel(), den)
+
+    # One symbol makes the whole vector SX; the other stays DM
+    a1 = cas.SX.sym("a1")
+    model = StateSpaceModelDTTFSISO(num=num, den=cas.vertcat(1, a1, 0.49))
+    assert isinstance(model.num, cas.DM)
+    assert isinstance(model.den, cas.SX)
+    assert cas.depends_on(model.den, model.params["a1"])
+    assert str(model.den) == "[1, a1, 0.49]"
 
 
 @pytest.mark.parametrize(

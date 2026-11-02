@@ -46,6 +46,7 @@ from cas_models.param_utils import (
     make_list_of_enumerated_names,
     make_symbolic_vars_from_kwargs,
 )
+from cas_models.pickle_utils import getstate, setstate
 from cas_models.sympy_conversion import (
     convert_sympy_state_space_to_casadi_SX,
     get_free_symbols_in_sympy_ss,
@@ -252,6 +253,18 @@ class StateSpaceModelCT:
             Both systems must have the same nu and ny.
         """
         return sum_systems([self, other], model_class=StateSpaceModelCT)
+
+    def __getstate__(self):
+        """Pickle support: pickle.dump(model, file) works without a
+        CasADi pickle context, and the symbols shared within the model
+        (e.g. params and the expressions that use them) stay shared. To
+        keep symbols shared between models, pickle them together inside
+        a cas.global_pickle_context() (see cas_models.pickle_utils).
+        """
+        return getstate(self)
+
+    def __setstate__(self, state):
+        setstate(self, state)
 
     def describe(self):
         """Print a human-readable summary of the system."""

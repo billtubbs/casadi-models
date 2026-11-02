@@ -295,3 +295,33 @@ is a complete example.
 `StateSpaceModelDTARXSISO` is an ARX model with the same polynomials as
 MATLAB's `arx` and `filter([zeros(1, nk) B], [1 A], u)`. Octave's `arx`
 counts the delay `nk` one less (see the class docstring).
+
+## Saving and Loading Models
+
+Models with fixed parameter values pickle like ordinary Python objects:
+
+```python
+import pickle
+
+with open("model.pkl", "wb") as f:
+    pickle.dump(model, f)
+with open("model.pkl", "rb") as f:
+    model = pickle.load(f)
+```
+
+Models with symbolic parameters pickle the same way for now, but this may
+be withdrawn (see the TODO in `cas_models/pickle_utils.py`): a symbolic
+model is a template, cheap to rebuild from code. CasADi pickles SX and MX
+objects only inside a `cas.global_pickle_context()` (and loads them inside
+a `cas.global_unpickle_context()`), and the models open one for themselves.
+The loaded model has new symbols, shared within it as in the original
+(e.g. a model's `params` and its expressions); symbols shared between
+models stay shared only if they are pickled together inside a context:
+
+```python
+with cas.global_pickle_context():
+    pickle.dump((model_a, model_b), f)
+```
+
+Pickle files are binary and tied to the class names in this package and to
+the CasADi version.
