@@ -16,7 +16,11 @@ from cas_models.continuous_time.models import (
     StateSpaceModelCTFromABCD,
     StateSpaceModelCTStaticNonlinearity,
 )
-from cas_models.continuous_time.regulators import SSModelCTP
+from cas_models.continuous_time.regulators import (
+    SSModelCTP,
+    SSModelCTPIDInt,
+    SSModelCTPIInt,
+)
 from cas_models.transformations import block_diag, sum_systems
 from cas_models.validation import is_ss_ct, is_ss_dt
 
@@ -378,6 +382,56 @@ def test_SSModelCTDirectTransmission():
     # Test model type identification
     assert is_ss_ct(model) is True
     assert is_ss_dt(model) is False
+
+
+@pytest.mark.parametrize("to_type", [cas.DM, np.array, lambda M: M])
+def test_ABCD_matrix_types(to_type):
+    """The matrices can be DM, NumPy arrays or lists (of values for a
+    column vector, of rows for a matrix): the same sparse model"""
+    A = [[-1.0, 0.0], [0.5, -2.0]]
+    B = [[1.0], [0.0]]
+    C = [[0.0, 1.0]]
+    D = [[0.0]]
+
+    def same(model, expected):
+        assert model.f.serialize() == expected.f.serialize()
+        assert model.h.serialize() == expected.h.serialize()
+
+    expected = StateSpaceModelCTFromABCD(
+        cas.DM(A), cas.DM(B), cas.DM(C), cas.DM(D)
+    )
+    model = StateSpaceModelCTFromABCD(
+        to_type(A), to_type(B), to_type(C), to_type(D)
+    )
+    same(model, expected)
+    # Structural zeros: the zeros in A and D aren't in the model
+    x = cas.SX.sym("x", 2)
+    u = cas.SX.sym("u")
+    assert cas.jacobian(model.f(0, x, u), x).nnz() == 3
+
+    # A column vector as a list of values
+    same(
+        SSModelCTFromABCDSISO(to_type(A), to_type([1.0, 0.0]), C, 0.0),
+        SSModelCTFromABCDSISO(cas.DM(A), cas.DM(B), cas.DM(C), cas.DM(D)),
+    )
+
+    D2 = [[1.0, -0.5], [-0.25, 2.0]]
+    same(
+        SSModelCTDirectTransmission(D=to_type(D2)),
+        SSModelCTDirectTransmission(D=cas.DM(D2)),
+    )
+
+
+def test_ABCD_symbolic_matrices():
+    """SX matrices with symbols are used as they are"""
+    a = cas.SX.sym("a")
+    model = StateSpaceModelCTFromABCD(
+        cas.vertcat(cas.horzcat(-a, 0), cas.horzcat(1, -2 * a)),
+        [[1.0], [0.0]],
+        [[0.0, 1.0]],
+        [[0.0]],
+    )
+    assert list(model.params) == ["a"]
 
 
 def test_SSModelCTLinearFONoGainSISO():
@@ -762,6 +816,78 @@ def test_SSModelCTP():
     # Symbolic gain — verify output expression contains Kc
     ctrl = SSModelCTP(name="p_ctrl")
     assert "Kc" in str(ctrl.h)
+
+
+def linear_matrices(model, params=()):
+    """A, B, C, D of a linear CT model (NumPy arrays), with the
+    parameter values params (in the order of model.params)."""
+    x = cas.SX.sym("x", model.n)
+    u = cas.SX.sym("u", model.nu)
+    rhs = model.f(0, x, u, *params)
+    y = model.h(0, x, u, *params)
+    return [
+        cas.evalf(cas.jacobian(expr, v)).full()
+        for expr, v in [(rhs, x), (rhs, u), (y, x), (y, u)]
+    ]
+
+
+def frequency_response(model, omega, params=()):
+    """G(j omega) = C (j omega I - A)^-1 B + D of a linear SISO model."""
+    A, B, C, D = linear_matrices(model, params)
+    eye = np.eye(model.n)
+    return np.array(
+        [(C @ np.linalg.solve(1j * w * eye - A, B) + D).item() for w in omega]
+    )
+
+
+OMEGA = np.logspace(-3, 3, 25)
+
+
+@pytest.mark.parametrize("Kc,Ti", [(0.5, 30.0), (2.0, 5.0)])
+def test_SSModelCTPIInt_frequency_response(Kc, Ti):
+    """Gc(s) = Kc (Ti s + 1) / (Ti s)"""
+    s = 1j * OMEGA
+    ctrl = SSModelCTPIInt(Kc=Kc, Ti=Ti)
+    np.testing.assert_allclose(
+        frequency_response(ctrl, OMEGA), Kc * (Ti * s + 1) / (Ti * s)
+    )
+
+
+@pytest.mark.parametrize(
+    "Kc,Ti,Td,Tf",
+    [
+        (2.0, 5.0, 0.8, 0.1),
+        (0.5, 30.0, 2.0, 0.2),
+        (1.0, 1.0, 0.5, 0.5),  # Td = Tf: a PI controller
+    ],
+)
+def test_SSModelCTPIDInt_frequency_response(Kc, Ti, Td, Tf):
+    """Gc(s) = Kc (Ti s + 1) (Td s + 1) / (Ti s (Tf s + 1))"""
+    s = 1j * OMEGA
+    expected = Kc * (Ti * s + 1) * (Td * s + 1) / (Ti * s * (Tf * s + 1))
+    ctrl = SSModelCTPIDInt(Kc=Kc, Ti=Ti, Td=Td, Tf=Tf)
+    np.testing.assert_allclose(frequency_response(ctrl, OMEGA), expected)
+
+    # Symbolic parameters, values given when evaluated
+    ctrl = SSModelCTPIDInt()
+    assert list(ctrl.params) == ["Kc", "Td", "Tf", "Ti"]
+    values = [Kc, Td, Tf, Ti]
+    np.testing.assert_allclose(
+        frequency_response(ctrl, OMEGA, values), expected
+    )
+
+
+def test_SSModelCTPIDInt_matrices():
+    """The integrator-and-filter realisation (see the docstring), for
+    Kc = 2, Ti = 5, Td = 0.8, Tf = 0.1"""
+    ctrl = SSModelCTPIDInt(Kc=2.0, Ti=5.0, Td=0.8, Tf=0.1)
+    A, B, C, D = linear_matrices(ctrl)
+    np.testing.assert_allclose(A, [[0.0, 0.0], [0.0, -10.0]])
+    np.testing.assert_allclose(B, [[1.0], [10.0]])
+    np.testing.assert_allclose(C, [[0.4, -13.72]])
+    np.testing.assert_allclose(D, [[16.0]])
+    assert ctrl.input_names == ["e"]
+    assert ctrl.output_names == ["u"]
 
 
 def test_tf_models():

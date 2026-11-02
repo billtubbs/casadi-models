@@ -130,6 +130,22 @@ class SSModelCTPIDInt(SSModelCTFromABCDSISO):
                        Ti s (Tf s + 1)
 
         where Tf is the derivative filter time constant.
+
+        State-space realisation, from the partial fractions of Gc(s)
+        (states x1 = integral of the error, as in SSModelCTPIInt, and
+        x2 = the error through a first-order filter of time constant Tf
+        and unit gain):
+
+            dx1/dt = e
+            dx2/dt = (e - x2) / Tf
+                 u = (Kc / Ti) x1 + c2 x2 + (Kc Td / Tf) e
+
+        where c2 = Kc (Td - Tf) (Tf - Ti) / (Tf Ti), which gives
+
+            A = [[0, 0], [0, -1/Tf]], B = [[1], [1/Tf]],
+            C = [[Kc/Ti, c2]], D = Kc Td / Tf.
+
+        With Td = Tf the derivative cancels (c2 = 0): a PI controller.
         """
         if input_name is None:
             input_name = "e"
@@ -140,10 +156,11 @@ class SSModelCTPIDInt(SSModelCTFromABCDSISO):
         Ti = params["Ti"]
         Td = params["Td"]
         Tf = params["Tf"]
-        A = cas.sparsify(cas.blockcat([[0, 1], [0, -1 / Tf]]))
-        B = cas.sparsify(cas.vertcat(0, 1))
-        C = cas.horzcat(Kc, -Kc * Td * Ti**2 + Kc * Td + Kc * Ti)
-        D = cas.SX(Kc * Td * Ti)
+        A = cas.sparsify(cas.blockcat([[0, 0], [0, -1 / Tf]]))
+        B = cas.sparsify(cas.vertcat(1, 1 / Tf))
+        c2 = Kc * (Td - Tf) * (Tf - Ti) / (Tf * Ti)
+        C = cas.horzcat(Kc / Ti, c2)
+        D = cas.SX(Kc * Td / Tf)
         super().__init__(
             A,
             B,

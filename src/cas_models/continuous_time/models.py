@@ -54,6 +54,12 @@ from cas_models.sympy_conversion import (
 )
 from cas_models.validation import validate_casadi_function_dims
 from cas_models.transformations import connect_systems_in_series, sum_systems
+from cas_models.yaml_utils import (
+    base_from_saved_args,
+    base_save_args,
+    load_model,
+    save_model,
+)
 
 # Attribute names for continuous-time state-space models
 
@@ -88,6 +94,14 @@ def validate_h_function(
     return validate_casadi_function_dims(
         h, arg_shapes=arg_shapes, return_shapes=return_shapes
     )
+
+
+def _as_casadi_matrix(M):
+    """M as a CasADi matrix: SX, MX and DM unchanged, anything else (a
+    number, a list of values or of rows, a NumPy array) as a DM."""
+    if isinstance(M, (cas.SX, cas.MX, cas.DM)):
+        return M
+    return cas.DM(M)
 
 
 @dataclass
@@ -266,6 +280,35 @@ class StateSpaceModelCT:
     def __setstate__(self, state):
         setstate(self, state)
 
+    def save(self, folder, overwrite=False):
+        """Save the model to folder: model.yaml, the class and the
+        arguments that rebuild the model, and its data files (matrices
+        as tab-separated text, functions as .casadi files). If the
+        folder isn't empty, overwrite=True replaces the model saved
+        there. See cas_models.yaml_utils.
+        """
+        save_model(self, folder, overwrite=overwrite)
+
+    @classmethod
+    def load(cls, folder):
+        """Load a model saved with save(). The class saved must be cls
+        or one of its subclasses.
+        """
+        return load_model(folder, cls)
+
+    def _save_args(self):
+        """The class and the arguments that rebuild the model: here, the
+        base class and its fields, with the parameters as {name: shape}.
+        Subclasses that can be rebuilt from their own arguments override
+        this and _from_saved_args.
+        """
+        return base_save_args(self, StateSpaceModelCT)
+
+    @classmethod
+    def _from_saved_args(cls, args):
+        """The model from the arguments of _save_args (data files read)."""
+        return base_from_saved_args(cls, args)
+
     def describe(self):
         """Print a human-readable summary of the system."""
         attr = self._attr_names
@@ -391,11 +434,12 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
 
         """
 
-        # Convert to CasADi sparse arrays (could be DM, SX, or MX)
-        A = cas.sparsify(A)
-        B = cas.sparsify(B)
-        C = cas.sparsify(C)
-        D = cas.sparsify(D)
+        # Convert to CasADi sparse arrays (could be DM, SX, or MX, or
+        # lists or arrays, converted to DM)
+        A = cas.sparsify(_as_casadi_matrix(A))
+        B = cas.sparsify(_as_casadi_matrix(B))
+        C = cas.sparsify(_as_casadi_matrix(C))
+        D = cas.sparsify(_as_casadi_matrix(D))
 
         n = A.shape[0]
         assert A.shape[1] == n
@@ -469,6 +513,7 @@ class SSModelCTDirectTransmission(StateSpaceModelCTFromABCD):
             D = cas.SX.eye(nu)
             ny = nu
         else:
+            D = _as_casadi_matrix(D)
             ny, nu = D.shape
         n = 0  # no dynamics
         A = cas.SX.zeros(n, n)
@@ -499,10 +544,11 @@ class SSModelCTFromABCDSISO(StateSpaceModelCTFromABCD):
         state_names=None,
         output_name=None,
     ):
-        # Convert to CasADi sparse arrays (could be DM, SX, or MX)
-        B = cas.sparsify(B)
-        C = cas.sparsify(C)
-        D = cas.sparsify(D)
+        # Convert to CasADi sparse arrays (could be DM, SX, or MX, or
+        # lists or arrays, converted to DM)
+        B = cas.sparsify(_as_casadi_matrix(B))
+        C = cas.sparsify(_as_casadi_matrix(C))
+        D = cas.sparsify(_as_casadi_matrix(D))
         assert B.shape[1] == 1
         assert C.shape[0] == 1
         assert D.shape == (1, 1)

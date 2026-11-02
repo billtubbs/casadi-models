@@ -47,6 +47,12 @@ from cas_models.param_utils import (
 from cas_models.pickle_utils import getstate, setstate
 from cas_models.transformations import connect_systems_in_series, sum_systems
 from cas_models.validation import validate_casadi_function_dims
+from cas_models.yaml_utils import (
+    base_from_saved_args,
+    base_save_args,
+    load_model,
+    save_model,
+)
 
 # Attribute names for discrete-time state-space models
 
@@ -267,6 +273,35 @@ class StateSpaceModelDT:
 
     def __setstate__(self, state):
         setstate(self, state)
+
+    def save(self, folder, overwrite=False):
+        """Save the model to folder: model.yaml, the class and the
+        arguments that rebuild the model, and its data files (matrices
+        as tab-separated text, functions as .casadi files). If the
+        folder isn't empty, overwrite=True replaces the model saved
+        there. See cas_models.yaml_utils.
+        """
+        save_model(self, folder, overwrite=overwrite)
+
+    @classmethod
+    def load(cls, folder):
+        """Load a model saved with save(). The class saved must be cls
+        or one of its subclasses.
+        """
+        return load_model(folder, cls)
+
+    def _save_args(self):
+        """The class and the arguments that rebuild the model: here, the
+        base class and its fields, with the parameters as {name: shape}.
+        Subclasses that can be rebuilt from their own arguments override
+        this and _from_saved_args.
+        """
+        return base_save_args(self, StateSpaceModelDT)
+
+    @classmethod
+    def _from_saved_args(cls, args):
+        """The model from the arguments of _save_args (data files read)."""
+        return base_from_saved_args(cls, args)
 
     def describe(self):
         """Print a human-readable summary of the system."""
