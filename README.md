@@ -17,7 +17,8 @@ for use in nonlinear modelling, dynamic optimization and control.
 
 Add linear dynamical systems to a nonlinear model to introduce simple identifiable dynamics.
 
-Use nonlinear constrained optimization to identify the parameters of linear dynamic systems.
+Use nonlinear constrained optimization to identify the parameters of linear dynamic systems
+(see [Examples: Parameter Estimation](#examples-parameter-estimation)).
 
 Easily construct and evaluate different model structures.
 
@@ -233,3 +234,64 @@ plt.tight_layout()
 plt.show()
 ```
 ![Time series plot of closed-loop step response](plots/example_cl_sr.svg)
+
+## Examples: Parameter Estimation
+
+`estimate_params` fits a model's symbolic parameters to input-output data by
+minimizing the sum of squared output errors (the output-error method) with
+`cas.Opti` and IPOPT. There are two versions with the same arguments:
+
+- `cas_models.discrete_time.estimate`: discrete-time models.
+- `cas_models.continuous_time.estimate`: continuous-time models, simulated
+  with RK4 over the time steps in `t`, which can be irregular (inputs held
+  between samples). `n_sub` sets the number of RK4 substeps per time step.
+  RK4 is unstable if a substep is longer than about 2.8 times the smallest
+  time constant, so bound the time constants from below.
+
+```python
+import numpy as np
+from cas_models.continuous_time.models import SSModelCTLinearFOSISO
+from cas_models.continuous_time.estimate import estimate_params
+from cas_models.continuous_time.simulate import make_n_step_simulation_function_RK4
+
+# Data: a first-order system sampled at irregular times
+rng = np.random.default_rng(0)
+nT = 100
+t = np.cumsum(np.r_[0.0, rng.uniform(0.2, 1.0, nT)])
+U = np.where(t[:-1] % 20 < 10, 1.0, 0.0).reshape(-1, 1)
+simulate = make_n_step_simulation_function_RK4(SSModelCTLinearFOSISO(K=2, T1=3), nT, n_sub=4)
+_, Y = simulate(t, U, np.zeros(1))
+
+# Estimate K and T1 from the data
+sys_model = SSModelCTLinearFOSISO()
+params_est, _, sol = estimate_params(
+    sys_model,
+    t,
+    U,
+    Y.full(),
+    params_init={"K": 1.0, "T1": 1.0},
+    param_bounds={"T1": (0.1, None)},
+    solver_options={"print_level": 0},
+    n_sub=4,
+)
+print(params_est)
+# {'K': 2.000000000020711, 'T1': 3.0000000002056453}
+```
+
+Other options:
+
+- `n_steps`: multiple shooting in segments of `n_steps` time steps (more
+  robust for slow or unstable models; the default is single shooting).
+- `estimate_x0=True`: also estimate the initial state.
+- `solver_options`: IPOPT options, e.g.
+  `{"hessian_approximation": "limited-memory"}` (the exact Hessian is the
+  default and usually converges faster).
+
+`prediction_errors` and `prediction_errors_ms` return the output errors as
+CasADi expressions, for building your own estimation problem.
+[system_identification_example.ipynb](system_identification_example.ipynb)
+is a complete example.
+
+`StateSpaceModelDTARXSISO` is an ARX model with the same polynomials as
+MATLAB's `arx` and `filter([zeros(1, nk) B], [1 A], u)`. Octave's `arx`
+counts the delay `nk` one less (see the class docstring).
