@@ -1,8 +1,8 @@
 import os
+
+import control as con
 import numpy as np
 import pandas as pd
-import control as con
-
 
 # Results will be saved to file
 results = {}

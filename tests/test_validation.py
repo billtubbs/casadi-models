@@ -1,7 +1,8 @@
 """Unit tests for src/cas_models/validation.py module"""
 
-import pytest
 import casadi as cas
+import pytest
+
 from cas_models.validation import validate_casadi_function_dims
 
 

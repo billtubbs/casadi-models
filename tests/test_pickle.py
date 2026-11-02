@@ -258,8 +258,10 @@ MODELS = {
     ),
     "DT ARX real poles": dt_arx_real_poles,
     "DT connected ARX": dt_connected_arx,
-    "DT sum": lambda: StateSpaceModelDTTFSISO(num=[0, 1.0], den=[1, -0.5])
-    + StateSpaceModelDTARXSISO(na=1, nb=1),
+    "DT sum": lambda: (
+        StateSpaceModelDTTFSISO(num=[0, 1.0], den=[1, -0.5])
+        + StateSpaceModelDTARXSISO(na=1, nb=1)
+    ),
 }
 
 

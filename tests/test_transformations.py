@@ -1,13 +1,14 @@
 """Unit tests for src/cas_models/transformations.py module"""
 
-import pytest
-import numpy as np
 import casadi as cas
+import numpy as np
+import pytest
+
 from cas_models.continuous_time.models import (
-    StateSpaceModelCT,
     SSModelCTDirectTransmission,
     SSModelCTLinearFONoGainSISO,
     SSModelCTLinearFOSISO,
+    StateSpaceModelCT,
 )
 from cas_models.continuous_time.regulators import SSModelCTPIInt
 from cas_models.discrete_time.models import (

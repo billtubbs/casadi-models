@@ -1,11 +1,12 @@
 """Test tf2ss conversion functions match Octave/Matlab implementation"""
 
-import pytest
-import numpy as np
 import casadi as cas
+import numpy as np
+import pytest
+
 from cas_models.discrete_time.models import (
-    tf_to_ss_obs_np,
     tf_to_ss_obs_cas,
+    tf_to_ss_obs_np,
 )
 
 

@@ -5,12 +5,12 @@ import numpy as np
 import pytest
 
 from cas_models.continuous_time.models import SSModelCTLinearO2SISO
-from cas_models.discrete_time.models import StateSpaceModelDTFromCTRK4
 from cas_models.discrete_time.estimate import (
     estimate_params,
     prediction_errors,
     prediction_errors_ms,
 )
+from cas_models.discrete_time.models import StateSpaceModelDTFromCTRK4
 from cas_models.discrete_time.simulate import (
     make_n_step_simulation_function_from_model,
 )

@@ -1,14 +1,15 @@
 """Unit tests for src/cas_models/param_utils.py module"""
 
-import pytest
 import casadi as cas
+import pytest
 from casadi import SX
+
 from cas_models.param_utils import (
-    make_list_of_enumerated_names,
     concatenate_lists_of_names,
+    make_list_of_enumerated_names,
     make_list_of_unique_names,
-    merge_param_dicts,
     make_symbolic_vars_from_kwargs,
+    merge_param_dicts,
 )
 
 

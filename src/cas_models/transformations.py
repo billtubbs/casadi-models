@@ -26,10 +26,12 @@ linear_systems_in_series
 """
 
 from functools import reduce
+
 import casadi as cas
+
 from cas_models.param_utils import (
-    make_list_of_unique_names,
     concatenate_lists_of_names,
+    make_list_of_unique_names,
     merge_param_dicts,
 )
 from cas_models.validation import validate_equal_dt

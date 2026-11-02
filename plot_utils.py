@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-import pandas as pd
 
 
 def make_io_plot(

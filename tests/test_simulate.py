@@ -1,21 +1,22 @@
 """Unit tests for src/cas_models/continuous_time/simulate.py module"""
 
-import pytest
-import numpy as np
 import casadi as cas
+import numpy as np
+import pytest
+
 from cas_models.continuous_time.models import StateSpaceModelCT
 from cas_models.continuous_time.simulate import (
-    make_sim_step_function_RK4,
-    make_sim_step_function_RK4_fixed_dt,
     make_sim_step_function_integrator,
     make_sim_step_function_integrator_fixed_dt,
+    make_sim_step_function_RK4,
+    make_sim_step_function_RK4_fixed_dt,
     make_steady_state_solver,
     make_step_function,
 )
+from cas_models.discrete_time.models import validate_F_function
 from cas_models.discrete_time.simulate import (
     make_n_step_simulation_function,
 )
-from cas_models.discrete_time.models import validate_F_function
 
 
 @pytest.fixture

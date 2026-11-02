@@ -1,5 +1,6 @@
-import casadi as cas
 from collections import defaultdict
+
+import casadi as cas
 
 
 def make_list_of_enumerated_names(prefix, n, sep=""):

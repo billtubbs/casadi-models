@@ -1,5 +1,5 @@
-import sympy
 import casadi as cas
+import sympy
 
 
 def sympy2casadi(sympy_expr, sympy_vars, casadi_vars, sparsify=True):

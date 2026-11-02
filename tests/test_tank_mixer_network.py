@@ -8,14 +8,15 @@ This test validates that multi-stage connections work correctly:
 This exercises the iterative connection-filling logic in connect_systems.
 """
 
-import pytest
-import numpy as np
 import casadi as cas
+import numpy as np
+import pytest
+
+from cas_models.continuous_time.models import StateSpaceModelCT
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTFromCTRK4,
 )
-from cas_models.continuous_time.models import StateSpaceModelCT
 from cas_models.transformations import connect_systems
 
 
