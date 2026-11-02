@@ -1,0 +1,5 @@
+cas_models_format: 1
+class: StateSpaceModelDTTFSISO
+args:
+  num: [0.2, 0.1]
+  den: [1, -1.4, 0.49]

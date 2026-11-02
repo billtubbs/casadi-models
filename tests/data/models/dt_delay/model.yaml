@@ -1,0 +1,10 @@
+cas_models_format: 1
+class: StateSpaceModelDTDelay
+args:
+  nk: 3
+  nu: 2
+  G:
+    DM:
+    - [1.0, 0.5]
+    - [0.0, 2.0]
+  dt: 1.0

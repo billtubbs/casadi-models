@@ -1,0 +1,7 @@
+cas_models_format: 1
+class: SSModelCTDirectTransmission
+args:
+  D:
+    DM:
+    - [1.0, 0.0]
+    - [0.5, 2.0]

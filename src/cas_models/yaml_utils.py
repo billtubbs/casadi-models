@@ -62,6 +62,7 @@ read_tsv
     Read a matrix from a tab-separated text file.
 """
 
+import importlib
 import inspect
 from dataclasses import fields
 from pathlib import Path
@@ -97,8 +98,9 @@ def write_tsv(path, value):
     in the shortest form that reads back exactly. Returns its shape."""
     value = _as_matrix(value)
     with open(path, "w") as f:
-        for row in value:
-            f.write("\t".join(repr(float(v)) for v in row) + "\n")
+        f.writelines(
+            "\t".join(repr(float(v)) for v in row) + "\n" for row in value
+        )
     return list(value.shape)
 
 
@@ -194,11 +196,23 @@ def _decode(value, folder):
         if "shape" in value:
             return cas.DM(*value["shape"])
         return cas.DM(value["DM"])
+    if _is_model(value):
+        return _make_model(value, folder, _base_classes())
     if isinstance(value, dict):
         return {k: _decode(v, folder) for k, v in value.items()}
     if isinstance(value, list):
         return [_decode(v, folder) for v in value]
     return value
+
+
+def _is_model(value):
+    """Whether a YAML value is a model ({class: ..., args: ...}), e.g.
+    an argument that is a model."""
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("class"), str)
+        and set(value) <= {"class", "args"}
+    )
 
 
 def _read_model_file(folder):
@@ -277,7 +291,19 @@ def _model_classes(base):
     return classes
 
 
+# The modules with model classes, imported before looking up a class by
+# name (a class is found among its base's subclasses only once its
+# module is imported)
+MODEL_MODULES = [
+    "cas_models.continuous_time.models",
+    "cas_models.continuous_time.regulators",
+    "cas_models.discrete_time.models",
+]
+
+
 def _find_class(name, bases):
+    for module in MODEL_MODULES:
+        importlib.import_module(module)
     for base in bases:
         for cls in _model_classes(base):
             if cls.__name__ == name:
@@ -294,13 +320,20 @@ def load_model(folder, base=None):
     StateSpaceModelDT or one of their subclasses."""
     folder = Path(folder)
     data = _read_model_file(folder)
-    if base is None:
-        from cas_models.continuous_time.models import StateSpaceModelCT
-        from cas_models.discrete_time.models import StateSpaceModelDT
+    bases = _base_classes() if base is None else [base]
+    return _make_model(data, folder, bases)
 
-        bases = [StateSpaceModelCT, StateSpaceModelDT]
-    else:
-        bases = [base]
+
+def _base_classes():
+    from cas_models.continuous_time.models import StateSpaceModelCT
+    from cas_models.discrete_time.models import StateSpaceModelDT
+
+    return [StateSpaceModelCT, StateSpaceModelDT]
+
+
+def _make_model(data, folder, bases):
+    """The model of {class: ..., args: ...} (args optional), its class
+    one of bases or their subclasses, reading data files from folder."""
     cls = _find_class(data["class"], bases)
     args = data.get("args") or {}
     args = {k: _decode(v, folder) for k, v in args.items()}
@@ -323,11 +356,13 @@ def base_save_args(model, base):
 
 
 def base_from_saved_args(cls, args):
-    """A cls model from the arguments of base_save_args(), with new
-    symbols for the parameters."""
+    """A cls model from its saved arguments: the arguments of its
+    __init__, with new symbols for params if given ({name: shape}, as
+    base_save_args() writes them)."""
     args = dict(args)
-    args["params"] = {
-        name: cas.SX.sym(name, *shape)
-        for name, shape in (args.get("params") or {}).items()
-    }
+    if args.get("params"):
+        args["params"] = {
+            name: cas.SX.sym(name, *shape)
+            for name, shape in args["params"].items()
+        }
     return cls(**args)

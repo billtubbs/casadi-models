@@ -1,0 +1,7 @@
+cas_models_format: 1
+class: StateSpaceModelDTFromCTRK4
+args:
+  model_ct:
+    class: SSModelCTLinearO2SISO
+    args: {K: 2.0}
+  dt: 1.0

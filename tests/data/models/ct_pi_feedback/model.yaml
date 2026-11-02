@@ -1,0 +1,13 @@
+cas_models_format: 1
+class: StateSpaceModelCT
+args:
+  f: {file: f.casadi}
+  h: {file: h.casadi}
+  n: 2
+  params:
+    Kc: [1, 1]
+    Ti: [1, 1]
+  name: fbk_ctrl_plant
+  input_names: [y_sp]
+  state_names: [plant_x, ctrl_x]
+  output_names: [y]

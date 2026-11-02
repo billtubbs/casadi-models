@@ -1,0 +1,3 @@
+cas_models_format: 1
+class: SSModelCTLinearO2SISO
+args: {K: 2.0, T1: 3.0, T2: 5.0, name: G, input_name: Q, output_name: T}

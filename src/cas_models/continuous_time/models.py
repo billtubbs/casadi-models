@@ -52,8 +52,8 @@ from cas_models.sympy_conversion import (
     get_free_symbols_in_sympy_ss,
     make_casadi_vars_from_sympy_vars,
 )
-from cas_models.validation import validate_casadi_function_dims
 from cas_models.transformations import connect_systems_in_series, sum_systems
+from cas_models.validation import validate_casadi_function_dims
 from cas_models.yaml_utils import (
     base_from_saved_args,
     base_save_args,

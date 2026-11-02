@@ -7,7 +7,10 @@ field by field: Functions by their signature and serialization and by
 evaluating them at random arguments, the parameters by name and shape.
 """
 
+import subprocess
+import sys
 from dataclasses import fields
+from pathlib import Path
 
 import casadi as cas
 import numpy as np
@@ -15,14 +18,25 @@ import pytest
 import yaml
 
 from cas_models.continuous_time.models import (
+    SSModelCTDirectTransmission,
     SSModelCTLinearFOSISO,
+    SSModelCTLinearIntegratorSISO,
+    SSModelCTLinearO2SISO,
+    SSModelCTLinearO2UnderdampedSISO,
     StateSpaceModelCT,
+    StateSpaceModelCTFromABCD,
 )
-from cas_models.continuous_time.regulators import SSModelCTPIInt
+from cas_models.continuous_time.regulators import (
+    SSModelCTPIDInt,
+    SSModelCTPIInt,
+)
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
+    StateSpaceModelDTDelay,
     StateSpaceModelDTFromCT,
+    StateSpaceModelDTFromCTRK4,
+    StateSpaceModelDTTFSISO,
 )
 from cas_models.transformations import (
     connect_feedback_system,
@@ -276,24 +290,143 @@ def test_without_defaults(args, expected):
         assert result[k] is args[k]
 
 
-def test_load_without_args(tmp_path, monkeypatch):
-    """A model.yaml without args loads the class with no arguments"""
-    folder = tmp_path / "model"
+def write_model_yaml(folder, text):
     folder.mkdir()
-    (folder / "model.yaml").write_text(
-        "cas_models_format: 1\nclass: SSModelCTLinearFOSISO\n"
-    )
-    # Until the subclasses save their own arguments, _from_saved_args
-    # makes the base-class form; here, the class's own __init__
-    monkeypatch.setattr(
-        SSModelCTLinearFOSISO,
-        "_from_saved_args",
-        classmethod(lambda cls, args: cls(**args)),
-        raising=False,
-    )
-    model = StateSpaceModelCT.load(folder)
-    assert type(model) is SSModelCTLinearFOSISO
+    (folder / "model.yaml").write_text("cas_models_format: 1\n" + text)
+
+
+def assert_same_functions(model, expected):
+    """The same class, and the same state and output functions"""
+    assert type(model) is type(expected)
+    for func in ("state_func", "output_func"):
+        name = expected._attr_names[func]
+        f, f_expected = getattr(model, name), getattr(expected, name)
+        assert f.serialize() == f_expected.serialize(), name
+    assert list(model.params) == list(expected.params)
+
+
+def test_load_without_args(tmp_path):
+    """A model.yaml without args loads the class with no arguments"""
+    write_model_yaml(tmp_path / "model", "class: SSModelCTLinearFOSISO\n")
+    model = StateSpaceModelCT.load(tmp_path / "model")
+    assert_same_functions(model, SSModelCTLinearFOSISO())
     assert list(model.params) == ["K", "T1"]
+
+
+# Subclasses from the arguments of their __init__ (as written by hand,
+# until they save their own)
+
+LOAD_CASES = {
+    "O2 mixed": (
+        "class: SSModelCTLinearO2SISO\nargs: {K: 2.0, name: G}\n",
+        lambda: SSModelCTLinearO2SISO(K=2.0, name="G"),
+    ),
+    "PID": (
+        "class: SSModelCTPIDInt\nargs: {Kc: 2.0, Ti: 5.0, Td: 0.8, Tf: 0.1}\n",
+        lambda: SSModelCTPIDInt(Kc=2.0, Ti=5.0, Td=0.8, Tf=0.1),
+    ),
+    "ABCD, DM": (
+        "class: StateSpaceModelCTFromABCD\n"
+        "args:\n"
+        "  A:\n"
+        "    DM:\n"
+        "    - [-1.0, 0.0]\n"
+        "    - [0.5, -2.0]\n"
+        "  B: {DM: [1.0, 0.0]}\n"
+        "  C: {DM: [[0.0, 1.0]]}\n"
+        "  D: {DM: [0.0]}\n",
+        lambda: StateSpaceModelCTFromABCD(
+            cas.DM([[-1.0, 0.0], [0.5, -2.0]]),
+            cas.DM([1.0, 0.0]),
+            cas.DM([[0.0, 1.0]]),
+            cas.DM(0.0),
+        ),
+    ),
+    "ABCD, plain lists": (
+        "class: StateSpaceModelCTFromABCD\n"
+        "args:\n"
+        "  A:\n"
+        "  - [-1.0, 0.0]\n"
+        "  - [0.5, -2.0]\n"
+        "  B: [1.0, 0.0]\n"
+        "  C: [[0.0, 1.0]]\n"
+        "  D: 0.0\n",
+        lambda: StateSpaceModelCTFromABCD(
+            cas.DM([[-1.0, 0.0], [0.5, -2.0]]),
+            cas.DM([1.0, 0.0]),
+            cas.DM([[0.0, 1.0]]),
+            cas.DM(0.0),
+        ),
+    ),
+    "ARX symbolic": (
+        "class: StateSpaceModelDTARXSISO\nargs: {na: 2, nb: 1}\n",
+        lambda: StateSpaceModelDTARXSISO(na=2, nb=1),
+    ),
+    "ARX fixed": (
+        "class: StateSpaceModelDTARXSISO\n"
+        "args:\n"
+        "  A: {DM: [-1.62, 0.65]}\n"
+        "  B: {DM: [0.012, 0.009]}\n",
+        lambda: StateSpaceModelDTARXSISO(
+            A=cas.DM([-1.62, 0.65]), B=cas.DM([0.012, 0.009])
+        ),
+    ),
+    "TF": (
+        "class: StateSpaceModelDTTFSISO\n"
+        "args: {num: [0.2, 0.1], den: [1, -1.4, 0.49]}\n",
+        lambda: StateSpaceModelDTTFSISO(num=[0.2, 0.1], den=[1, -1.4, 0.49]),
+    ),
+    "delay": (
+        "class: StateSpaceModelDTDelay\n"
+        "args:\n"
+        "  nk: 3\n"
+        "  nu: 2\n"
+        "  G:\n"
+        "    DM:\n"
+        "    - [1.0, 0.5]\n"
+        "    - [0.0, 2.0]\n"
+        "  dt: 1.0\n",
+        lambda: StateSpaceModelDTDelay(
+            nk=3, nu=2, G=cas.DM([[1.0, 0.5], [0.0, 2.0]]), dt=1.0
+        ),
+    ),
+    "nested model": (
+        "class: StateSpaceModelDTFromCTRK4\n"
+        "args:\n"
+        "  model_ct:\n"
+        "    class: SSModelCTLinearO2SISO\n"
+        "    args: {K: 2.0}\n"
+        "  dt: 1.0\n",
+        lambda: StateSpaceModelDTFromCTRK4(SSModelCTLinearO2SISO(K=2.0), 1.0),
+    ),
+    "nested model without args": (
+        "class: StateSpaceModelDTFromCTRK4\n"
+        "args:\n"
+        "  model_ct: {class: SSModelCTLinearFOSISO}\n"
+        "  dt: 0.5\n",
+        lambda: StateSpaceModelDTFromCTRK4(SSModelCTLinearFOSISO(), 0.5),
+    ),
+}
+
+
+@pytest.mark.parametrize("name", LOAD_CASES)
+def test_load_subclass_args(name, tmp_path):
+    text, make_model = LOAD_CASES[name]
+    write_model_yaml(tmp_path / "model", text)
+    expected = make_model()
+    assert_same_functions(load_model(tmp_path / "model"), expected)
+    # Loaded by its own class or a base class
+    assert_same_functions(type(expected).load(tmp_path / "model"), expected)
+
+
+def test_load_subclass_wrong_class(tmp_path):
+    write_model_yaml(
+        tmp_path / "model", "class: SSModelCTLinearO2SISO\nargs: {K: 2.0}\n"
+    )
+    with pytest.raises(ValueError, match="isn't StateSpaceModelDTARXSISO"):
+        StateSpaceModelDTARXSISO.load(tmp_path / "model")
+    with pytest.raises(ValueError, match="isn't StateSpaceModelDT"):
+        StateSpaceModelDT.load(tmp_path / "model")
 
 
 def test_save_creates_parent_folders(tmp_path):
@@ -537,3 +670,138 @@ def test_symbolic_expression_not_saved(tmp_path):
     a = cas.SX.sym("a")
     with pytest.raises(NotImplementedError, match="symbolic expression"):
         _encode(cas.vertcat(1, a), tmp_path, "den")
+
+
+def test_load_imports_model_modules(tmp_path):
+    """Classes in modules the caller hasn't imported (here the
+    regulators) are found: run in a new Python process, as this module
+    imports them"""
+    write_model_yaml(tmp_path / "model", "class: SSModelCTPIDInt\n")
+    code = (
+        "import sys\n"
+        "from cas_models.yaml_utils import load_model\n"
+        "assert 'cas_models.continuous_time.regulators' not in sys.modules\n"
+        f"model = load_model({str(tmp_path / 'model')!r})\n"
+        "print(type(model).__name__)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "SSModelCTPIDInt"
+
+
+# Saved model files in tests/data/models: each loads and is the same as
+# the model built directly. They also check that files saved earlier
+# still load.
+
+MODELS_DIR = Path(__file__).parent / "data" / "models"
+
+
+def dt_connected_arx_flow():
+    """As dt_connected_arx(), with the names of the four_racks_dr case"""
+    inputs = ["CRAC1_flow", "CRAC2_flow"]
+    paths = [
+        StateSpaceModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
+        StateSpaceModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
+    ]
+    connections = {f"{name}_u": name for name in inputs}
+    connections["R11_intake"] = [f"{name}_y" for name in inputs]
+    return connect_systems(
+        paths,
+        connections,
+        StateSpaceModelDT,
+        input_names=inputs,
+        output_names=["R11_intake"],
+        keys=inputs,
+        verbose_names=True,
+        name="R11_intake",
+    )
+
+
+def ct_abcd_6_states():
+    rng = np.random.default_rng(1)
+    A = np.round(-np.eye(6) + 0.1 * rng.standard_normal((6, 6)), 3)
+    return StateSpaceModelCTFromABCD(
+        cas.DM(A), cas.DM(np.eye(6, 1)), cas.DM(np.ones((1, 6)) / 6), 0.0
+    )
+
+
+MODEL_FILES = {
+    "ct_fo_symbolic": lambda: SSModelCTLinearFOSISO(),
+    "ct_o2_fixed": lambda: SSModelCTLinearO2SISO(
+        K=2.0, T1=3.0, T2=5.0, name="G", input_name="Q", output_name="T"
+    ),
+    "ct_o2_mixed": lambda: SSModelCTLinearO2SISO(K=2.0),
+    "ct_integrator": lambda: SSModelCTLinearIntegratorSISO(K=0.5),
+    "ct_o2_underdamped": lambda: SSModelCTLinearO2UnderdampedSISO(
+        K=1.0, zeta=0.3, omega_n=2.0
+    ),
+    "ct_pi": lambda: SSModelCTPIInt(Kc=0.5, Ti=30.0, name="ctrl"),
+    "ct_pid": lambda: SSModelCTPIDInt(),
+    "ct_abcd": lambda: StateSpaceModelCTFromABCD(
+        [[-1.0, 0.0, 0.0], [0.5, -2.0, 0.0], [0.0, 0.0, -3.0]],
+        [[1.0, 0.0], [0.0, 0.0], [0.0, 1.0]],
+        [[0.0, 1.0, 0.0], [0.0, 0.0, 2.0]],
+        [[0.0, 0.0], [0.0, 0.0]],
+        input_names=["a", "b"],
+    ),
+    "ct_abcd_6_states": ct_abcd_6_states,
+    "ct_direct": lambda: SSModelCTDirectTransmission(
+        D=[[1.0, 0.0], [0.5, 2.0]]
+    ),
+    "ct_pi_feedback": ct_pi_feedback,
+    "dt_arx_symbolic": lambda: StateSpaceModelDTARXSISO(na=2, nb=2),
+    "dt_arx_fixed": lambda: StateSpaceModelDTARXSISO(
+        A=cas.DM([-1.62, 0.65]), B=cas.DM([0.012, 0.009])
+    ),
+    "dt_tf": lambda: StateSpaceModelDTTFSISO(
+        num=[0.2, 0.1], den=[1, -1.4, 0.49]
+    ),
+    "dt_delay": lambda: StateSpaceModelDTDelay(
+        nk=3, nu=2, G=[[1.0, 0.5], [0.0, 2.0]], dt=1.0
+    ),
+    "dt_from_ct_rk4": lambda: StateSpaceModelDTFromCTRK4(
+        SSModelCTLinearO2SISO(K=2.0), 1.0
+    ),
+    "dt_from_ct_cvodes": lambda: StateSpaceModelDTFromCT(
+        SSModelCTLinearFOSISO(), 1.0, integrator_opts={"abstol": 1e-10}
+    ),
+    "dt_connected_arx": dt_connected_arx_flow,
+}
+
+# Saved by save() (the base-class form); the others hold the arguments
+# of their class's __init__
+SAVED_AS_BASE = {
+    "ct_pi_feedback": StateSpaceModelCT,
+    "dt_connected_arx": StateSpaceModelDT,
+}
+
+
+def test_model_files_all_tested():
+    folders = sorted(p.name for p in MODELS_DIR.iterdir() if p.is_dir())
+    assert folders == sorted(MODEL_FILES)
+
+
+@pytest.mark.parametrize("name", MODEL_FILES)
+def test_load_model_file(name):
+    expected = MODEL_FILES[name]()
+    model = load_model(MODELS_DIR / name)
+    if name in SAVED_AS_BASE:
+        assert_same_model(expected, model, SAVED_AS_BASE[name])
+    else:
+        assert_same_functions(model, expected)
+
+
+@pytest.mark.parametrize("name", SAVED_AS_BASE)
+def test_save_model_file(name, tmp_path):
+    """save() writes the same model.yaml (the .casadi files depend on
+    the CasADi version: they are checked by loading them)"""
+    folder = tmp_path / name
+    MODEL_FILES[name]().save(folder)
+    assert (folder / "model.yaml").read_text() == (
+        MODELS_DIR / name / "model.yaml"
+    ).read_text()
+    assert sorted(p.name for p in folder.iterdir()) == sorted(
+        p.name for p in (MODELS_DIR / name).iterdir()
+    )

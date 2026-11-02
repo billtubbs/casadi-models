@@ -1,0 +1,19 @@
+cas_models_format: 1
+class: StateSpaceModelDT
+args:
+  F: {file: F.casadi}
+  H: {file: H.casadi}
+  n: 6
+  nu: 2
+  params:
+    CRAC1_flow_a_0: [1, 1]
+    CRAC1_flow_a_1: [1, 1]
+    CRAC1_flow_b_0: [1, 1]
+    CRAC1_flow_b_1: [1, 1]
+    CRAC2_flow_a: [1, 1]
+    CRAC2_flow_b: [1, 1]
+  name: R11_intake
+  input_names: [CRAC1_flow, CRAC2_flow]
+  state_names: [CRAC1_flow_x1, CRAC1_flow_x2, CRAC1_flow_x3, CRAC1_flow_x4, CRAC2_flow_x1,
+    CRAC2_flow_x2]
+  output_names: [R11_intake]
