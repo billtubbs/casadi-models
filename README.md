@@ -298,6 +298,73 @@ counts the delay `nk` one less (see the class docstring).
 
 ## Saving and Loading Models
 
+### Model folders
+
+`save()` writes a model to a folder of readable files, which `load_model()`
+reads back:
+
+```python
+from cas_models.yaml_utils import load_model
+
+model.save("models/R11")                      # overwrite=True to replace
+model = load_model("models/R11")              # any model
+model = StateSpaceModelDT.load("models/R11")  # a DT model, or an error
+```
+
+`SomeClass.load()` accepts only that class or one of its subclasses.
+
+The folder holds `model.yaml`: the model's class and the arguments of its
+`__init__` that rebuild it, leaving out those equal to their defaults
+(here `T1` and `T2`, so they are symbolic):
+
+```yaml
+cas_models_format: 1
+class: SSModelCTLinearO2SISO
+args: {K: 2.0}
+```
+
+A model with no arguments to give is written on one line,
+`{cas_models_format: 1, class: SSModelCTLinearFOSISO}`. A model given as
+an argument, such as the `model_ct` of `StateSpaceModelDTFromCTRK4`, is
+written as a nested `{class: ..., args: ...}`.
+
+Vectors of up to 8 elements and matrices of up to 5 x 5 are written in
+`model.yaml`, a column vector as a list and other matrices as a list of
+rows; larger ones go to tab-separated text files in the folder, one row
+per line, which `model.yaml` refers to:
+
+```yaml
+args:
+  A:
+    file: A.tsv
+    shape: [6, 6]
+  B:
+    DM: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  C:
+    DM:
+    - [0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
+  D:
+    DM: [0.0]
+```
+
+Values are written in full precision, and sparse matrices dense (the
+constructors sparsify their matrices).
+
+Models built by connecting others (`connect_systems`, `sum_systems`,
+`connect_feedback_system`, `*`, `+`) are instances of the base classes,
+`StateSpaceModelCT` and `StateSpaceModelDT`, whose arguments are the
+functions `f` and `h` (`F` and `H`). These go to `.casadi` files
+(CasADi's serialization of the expression graph, exact but not readable),
+and `model.yaml` holds the dimensions, the names, and the parameters'
+names and shapes. Symbolic parameters load as new symbols with the same
+names; parameter values (e.g. fitted ones) aren't saved.
+
+For now, `save()` writes every model in this base-class form, so it loads
+as `StateSpaceModelCT` or `StateSpaceModelDT`; files holding a subclass's
+arguments (as in `tests/data/models`) load as that subclass.
+
+### Pickle
+
 Models with fixed parameter values pickle like ordinary Python objects:
 
 ```python
