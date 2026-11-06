@@ -504,12 +504,15 @@ def test_StateSpaceModelDTARXSISO(data_TP04_Q1a_ss):
         ([-1.5, 0.7], [1.0, 0.5], 3),
         ([-0.5], [1.0, 0.5, 0.25], 1),
         ([-1.5, 0.7], [1.0, 0.5], 0),
+        ([], [2.0], 1),  # na = 0, n = 1: a pure delay
     ],
 )
 def test_StateSpaceModelDTARXSISO_matches_filter(A, B, nk):
     """The output equals Matlab's filter([zeros(1, nk) B], [1 A], u),
     computed here with the ARX difference equation."""
-    model = StateSpaceModelDTARXSISO(A=np.c_[A], B=np.c_[B], nk=nk)
+    model = StateSpaceModelDTARXSISO(
+        A=np.reshape(A, (-1, 1)), B=np.c_[B], nk=nk
+    )
     na, nb = len(A), len(B)
     assert model.n == na + nk + nb - 1
 
@@ -530,6 +533,149 @@ def test_StateSpaceModelDTARXSISO_matches_filter(A, B, nk):
         y[k] = float(model.H(k, xk, u[k]))
         xk = model.F(k, xk, u[k])
     assert np.allclose(y, y_expected, rtol=0, atol=1e-12)
+
+
+def arx_coefficients(poles, zeros, gain):
+    """A (without its leading 1) and B of an ARX model from its poles,
+    zeros and leading coefficient gain, with NumPy."""
+    A = np.atleast_1d(np.poly(poles))[1:].real
+    B = gain * np.atleast_1d(np.poly(zeros)).real
+    return A, B
+
+
+def assert_same_arx(model, expected, params=()):
+    """model (its parameter values params) has the same dimensions and
+    state and output functions as expected (numeric)."""
+    assert (model.na, model.nb, model.nk, model.n) == (
+        expected.na,
+        expected.nb,
+        expected.nk,
+        expected.n,
+    )
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        xk, uk = rng.normal(size=model.n), rng.normal()
+        for f, f_expected in [(model.F, expected.F), (model.H, expected.H)]:
+            assert np.allclose(
+                f(0, xk, uk, *params).full(),
+                f_expected(0, xk, uk).full(),
+                rtol=0,
+                atol=1e-12,
+            )
+
+
+@pytest.mark.parametrize(
+    "poles, zeros, gain, nk",
+    [
+        ([0.9], [], 0.1, 1),
+        ([0.9, 0.5], [-0.4], 0.2, 2),
+        ([0.8 + 0.3j, 0.8 - 0.3j, 0.5], [0.3, -0.2], 1.5, 0),
+        ([], [0.5], 2.0, 1),
+    ],
+)
+def test_StateSpaceModelDTARXSISO_poles_zeros(poles, zeros, gain, nk):
+    """Numeric poles and zeros (complex ones in conjugate pairs) give the
+    model of the coefficients they make, as lists, NumPy arrays or DM"""
+    A, B = arx_coefficients(poles, zeros, gain)
+    expected = StateSpaceModelDTARXSISO(
+        A=np.reshape(A, (-1, 1)), B=np.c_[B], nk=nk
+    )
+    model = StateSpaceModelDTARXSISO(
+        poles=poles, zeros=zeros, gain=gain, nk=nk
+    )
+    assert model.params == {}
+    assert model.poles == poles and model.zeros == zeros
+    assert model.gain == gain
+    assert_same_arx(model, expected)
+
+    model = StateSpaceModelDTARXSISO(
+        poles=np.array(poles), zeros=np.array(zeros), gain=gain, nk=nk
+    )
+    assert_same_arx(model, expected)
+    if not np.iscomplexobj(poles):
+        model = StateSpaceModelDTARXSISO(
+            poles=cas.DM(poles), zeros=cas.DM(zeros), gain=cas.DM(gain), nk=nk
+        )
+        assert_same_arx(model, expected)
+
+    # Poles with B, and A with zeros
+    model = StateSpaceModelDTARXSISO(poles=poles, B=cas.DM(B), nk=nk)
+    assert_same_arx(model, expected)
+    model = StateSpaceModelDTARXSISO(
+        A=cas.DM(A), zeros=zeros, gain=gain, nk=nk
+    )
+    assert_same_arx(model, expected)
+
+
+def test_StateSpaceModelDTARXSISO_symbolic_poles_zeros():
+    """Symbolic poles, zeros and gain become the model's parameters"""
+    p = [cas.SX.sym("p_0"), cas.SX.sym("p_1")]
+    z = [cas.SX.sym("z_0")]
+    K = cas.SX.sym("K")
+    model = StateSpaceModelDTARXSISO(poles=p, zeros=z, gain=K)
+    assert sorted(model.params) == ["K", "p_0", "p_1", "z_0"]
+    assert model.na == 2 and model.nb == 2 and model.n == 4
+    values = {"p_0": 0.9, "p_1": 0.6, "z_0": -0.3, "K": 0.5}
+    A, B = arx_coefficients([0.9, 0.6], [-0.3], 0.5)
+    expected = StateSpaceModelDTARXSISO(A=cas.DM(A), B=cas.DM(B))
+    assert_same_arx(model, expected, [values[n] for n in model.params])
+
+    # Without a gain, a symbol named gain
+    model = StateSpaceModelDTARXSISO(poles=p, zeros=z)
+    assert sorted(model.params) == ["gain", "p_0", "p_1", "z_0"]
+
+    # Symbolic poles with symbolic coefficients of B (as in
+    # ffdtools.models.ARXPaths with poles: real)
+    model = StateSpaceModelDTARXSISO(poles=p, nb=2)
+    assert sorted(model.params) == ["b_0", "b_1", "p_0", "p_1"]
+
+    # Symbolic and numeric poles mixed
+    model = StateSpaceModelDTARXSISO(poles=[0.9, p[1]], zeros=[])
+    assert sorted(model.params) == ["gain", "p_1"]
+    expected = StateSpaceModelDTARXSISO(
+        A=cas.DM(arx_coefficients([0.9, 0.6], [], 1.0)[0]), B=cas.DM([0.5])
+    )
+    assert_same_arx(
+        model, expected, [{"p_1": 0.6, "gain": 0.5}[n] for n in model.params]
+    )
+
+    # A symbolic vector
+    model = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
+    assert sorted(model.params) == ["b", "p_0", "p_1"]
+
+
+def test_StateSpaceModelDTARXSISO_fully_symbolic():
+    """na and nb alone still give symbolic coefficients"""
+    model = StateSpaceModelDTARXSISO(na=2, nb=3)
+    assert list(model.params) == ["a_0", "a_1", "b_0", "b_1", "b_2"]
+    assert model.poles is None and model.zeros is None and model.gain is None
+
+
+@pytest.mark.parametrize(
+    "kwargs, error, match",
+    [
+        ({"poles": [0.5], "na": 1, "nb": 1}, AssertionError, "A, na or poles"),
+        (
+            {"poles": [0.5], "A": cas.DM([0.1]), "nb": 1},
+            AssertionError,
+            "A, na or poles",
+        ),
+        ({"na": 1, "zeros": [0.1], "nb": 2}, AssertionError, "B, nb or zeros"),
+        ({"na": 1, "nb": 1, "gain": 1.0}, AssertionError, "only used with"),
+        ({"poles": [0.5 + 0.1j], "nb": 1}, ValueError, "conjugate pairs"),
+        ({"na": 1, "zeros": [0.1, 0.2j], "gain": 1}, ValueError, "conjugate"),
+        (
+            {"poles": [cas.SX.sym("p"), 0.5 + 0.1j], "nb": 1},
+            TypeError,
+            "must all be real",
+        ),
+        ({"poles": cas.MX.sym("p", 2), "nb": 1}, TypeError, "not MX"),
+        ({"poles": cas.SX.sym("p", 2, 2), "nb": 1}, ValueError, "a vector"),
+    ],
+)
+def test_StateSpaceModelDTARXSISO_poles_zeros_errors(kwargs, error, match):
+    with pytest.raises(error, match=match):
+        StateSpaceModelDTARXSISO(**kwargs)
 
 
 # TODO: Introduce this class as an intermediate step to state space models.

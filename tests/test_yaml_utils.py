@@ -167,6 +167,21 @@ MODELS = {
         lambda: StateSpaceModelDTARXSISO(na=2, nb=1),
         True,
     ),
+    "DT ARX symbolic poles and zeros (as base)": (
+        StateSpaceModelDT,
+        lambda: StateSpaceModelDTARXSISO(
+            poles=[cas.SX.sym("p_0"), cas.SX.sym("p_1")],
+            zeros=[cas.SX.sym("z_0")],
+        ),
+        True,
+    ),
+    "DT ARX numeric poles and zeros (as base)": (
+        StateSpaceModelDT,
+        lambda: StateSpaceModelDTARXSISO(
+            poles=[0.8 + 0.3j, 0.8 - 0.3j], zeros=[-0.4], gain=0.2, nk=2
+        ),
+        True,
+    ),
     # CasADi changes the serialization of a cvodes integrator in each
     # serialize-deserialize round trip (the results are the same)
     "DT from CT cvodes (as base)": (
@@ -370,6 +385,27 @@ LOAD_CASES = {
         lambda: StateSpaceModelDTARXSISO(
             A=cas.DM([-1.62, 0.65]), B=cas.DM([0.012, 0.009])
         ),
+    ),
+    "ARX poles and zeros": (
+        "class: StateSpaceModelDTARXSISO\n"
+        "args: {poles: [0.9, 0.5], zeros: [-0.4], gain: 0.2, nk: 2}\n",
+        lambda: StateSpaceModelDTARXSISO(
+            poles=[0.9, 0.5], zeros=[-0.4], gain=0.2, nk=2
+        ),
+    ),
+    "ARX poles and zeros, DM": (
+        "class: StateSpaceModelDTARXSISO\n"
+        "args:\n"
+        "  poles: {DM: [0.9, 0.5]}\n"
+        "  zeros: {DM: [-0.4]}\n"
+        "  gain: 0.2\n",
+        lambda: StateSpaceModelDTARXSISO(
+            poles=[0.9, 0.5], zeros=[-0.4], gain=0.2
+        ),
+    ),
+    "ARX poles, symbolic B": (
+        "class: StateSpaceModelDTARXSISO\nargs: {poles: [0.9], nb: 2}\n",
+        lambda: StateSpaceModelDTARXSISO(poles=[0.9], nb=2),
     ),
     "TF": (
         "class: StateSpaceModelDTTFSISO\n"

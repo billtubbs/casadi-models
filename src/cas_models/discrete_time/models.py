@@ -29,6 +29,8 @@ tf_to_ss_con_cas
     Convert a transfer function (num/den) to controller-canonical SS form (CasADi).
 tf_to_ss_obs_cas
     Convert a transfer function (num/den) to observer-canonical SS form (CasADi).
+poly_coefficients
+    Coefficients of a polynomial in q^-1 from its roots (numeric or symbolic).
 """
 
 from collections import OrderedDict
@@ -1013,6 +1015,59 @@ class StateSpaceModelDTDelay(StateSpaceModelDT):
         )
 
 
+def poly_coefficients(roots):
+    """The coefficients [c_1, ..., c_n] of
+
+        (1 - r_1 q^-1) ... (1 - r_n q^-1) = 1 + c_1 q^-1 + ... + c_n q^-n
+
+    from the roots r_1, ..., r_n (numbers or CasADi SX scalars, e.g.
+    symbols; real only, CasADi has no complex numbers). An empty list
+    gives []. StateSpaceModelDTARXSISO also takes complex numeric roots
+    (in conjugate pairs)."""
+    c = [1]
+    for r in roots:
+        # Multiply by (1 - r q^-1)
+        c = [
+            (c[k] if k < len(c) else 0) - (r * c[k - 1] if k > 0 else 0)
+            for k in range(len(c) + 1)
+        ]
+    return c[1:]
+
+
+def _roots_to_coefficients(roots, name):
+    """poly_coefficients(roots) as a column vector: SX if any root is
+    symbolic (all real), else DM (complex roots allowed, in conjugate
+    pairs). roots is a list, a NumPy array or a CasADi vector."""
+    if isinstance(roots, cas.MX):
+        raise TypeError(f"{name}: give SX symbols, not MX")
+    if isinstance(roots, (cas.SX, cas.DM)):
+        if roots.numel() > 0 and min(roots.shape) != 1:
+            raise ValueError(f"{name}: give a vector, not {roots.shape}")
+        roots = [roots[i] for i in range(roots.numel())]
+    roots = list(np.ravel(roots)) if isinstance(roots, np.ndarray) else roots
+    if any(isinstance(r, cas.SX) and not r.is_constant() for r in roots):
+        for r in roots:
+            if isinstance(r, cas.SX) and r.numel() != 1:
+                raise ValueError(f"{name}: each root must be a scalar")
+            if isinstance(r, (complex, np.complexfloating)):
+                raise TypeError(f"{name}: symbolic roots must all be real")
+        c = poly_coefficients([cas.SX(r) for r in roots])
+        return cas.vertcat(*c) if c else cas.SX(0, 1)
+    values = np.array(
+        [
+            float(cas.DM(r)) if isinstance(r, (cas.SX, cas.DM)) else r
+            for r in roots
+        ],
+        dtype=complex,
+    )
+    c = np.atleast_1d(np.poly(values))[1:]
+    if np.any(np.abs(c.imag) > 1e-12 * np.maximum(1.0, np.abs(c.real))):
+        raise ValueError(
+            f"{name}: complex roots must come in conjugate pairs ({roots})"
+        )
+    return cas.DM(c.real.reshape(-1, 1))
+
+
 class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
     """A discrete-time ARX model of a dynamical system:
 
@@ -1076,6 +1131,9 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         input_name=None,
         state_names=None,
         output_name=None,
+        poles=None,
+        zeros=None,
+        gain=None,
     ):
         """Initialize a discrete-time ARX model:
 
@@ -1110,9 +1168,33 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
                 None, defaults to ["x1", "x2", ...].
             output_name (str, optional): Name for the output variable. If None,
                 defaults to "y".
+            poles (list, optional): The roots p_1, ..., p_na of A, instead
+                of A or na:
+
+                    A(q^-1) = (1 - p_1 q^-1) ... (1 - p_na q^-1)
+
+                Numbers (complex ones in conjugate pairs) or real SX
+                symbols (e.g. [cas.SX.sym("p_0"), cas.SX.sym("p_1")]),
+                which become the model's parameters. A list, NumPy array
+                or CasADi vector; [] for na = 0.
+            zeros (list, optional): The roots z_1, ..., z_{nb-1} of B,
+                instead of B or nb, with gain:
+
+                    B(q^-1) = gain (1 - z_1 q^-1) ... (1 - z_{nb-1} q^-1)
+
+                Numbers or real SX symbols, as for poles; [] for nb = 1.
+            gain (optional): The leading coefficient b_1 of B, used
+                with zeros (as in scipy.signal.zpk2tf; not the static
+                gain B(1) / A(1)). A number or an SX symbol; if None, a
+                symbol named "gain". Must be None without zeros.
 
         Note:
             The total number of states is n = na + nk + nb - 1.
+            A model made from poles and zeros is the same model as the
+            one made from the coefficients they give: only the
+            parameters differ when they are symbolic. The arguments
+            given are kept as attributes poles, zeros and gain (None if
+            not given).
 
         Example:
             >>> # Create ARX model with symbolic parameters
@@ -1121,8 +1203,28 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             >>> A = cas.DM([0.5, 0.3])
             >>> B = cas.DM([1.0, 0.5, 0.2])
             >>> model = StateSpaceModelDTARXSISO(A=A, B=B, nk=1)
+            >>> # Or from poles and zeros (numeric or symbolic)
+            >>> model = StateSpaceModelDTARXSISO(
+            ...     poles=[0.9, 0.5], zeros=[-0.4], gain=0.1
+            ... )
+            >>> p = [cas.SX.sym("p_0"), cas.SX.sym("p_1")]
+            >>> model = StateSpaceModelDTARXSISO(poles=p, nb=2)
 
         """
+        if poles is not None:
+            assert A is None and na is None, "provide one of A, na or poles"
+            A = _roots_to_coefficients(poles, "poles")
+        if zeros is not None:
+            assert B is None and nb is None, "provide one of B, nb or zeros"
+            if gain is None:
+                gain = cas.SX.sym("gain")
+            if isinstance(gain, cas.SX) and not gain.is_constant():
+                assert gain.numel() == 1, "gain must be a scalar"
+            else:
+                gain = float(cas.DM(gain))
+            B = gain * cas.vertcat(1, _roots_to_coefficients(zeros, "zeros"))
+        else:
+            assert gain is None, "gain is only used with zeros"
         if A is None:
             A = cas.SX.sym("a", na)
         else:
@@ -1146,9 +1248,9 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         t = cas.SX.sym("t")
         xk = cas.SX.sym("xk", n)
         uk = cas.SX.sym("uk")
-        # (index xk directly: CasADi returns 1 x 0, not 0 x 1, for an
-        # empty slice of a 1 x 1 slice)
-        y_past = xk[0:na]  # y(k-1), ..., y(k-na)
+        # (reshaped: CasADi returns 1 x 0, not 0 x 1, for an empty
+        # slice of a 1 x 1 vector, e.g. na = 0, n = 1)
+        y_past = cas.reshape(xk[0:na], na, 1)  # y(k-1), ..., y(k-na)
 
         # Inputs u(k), u(k-1), ..., u(k-m) and the output y(k)
         u_lags = cas.vertcat(uk, xk[na:n])
@@ -1182,6 +1284,9 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         self.na = na
         self.nb = nb
         self.nk = nk
+        self.poles = poles
+        self.zeros = zeros
+        self.gain = gain if zeros is not None else None
 
         super().__init__(
             F,
