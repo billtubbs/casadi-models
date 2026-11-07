@@ -175,6 +175,11 @@ MODELS = {
         ),
         True,
     ),
+    "DT ARX with dt (as base)": (
+        StateSpaceModelDT,
+        lambda: StateSpaceModelDTARXSISO(na=2, nb=1, dt=2.0),
+        True,
+    ),
     "DT ARX numeric poles and zeros (as base)": (
         StateSpaceModelDT,
         lambda: StateSpaceModelDTARXSISO(
@@ -402,6 +407,10 @@ LOAD_CASES = {
         lambda: StateSpaceModelDTARXSISO(
             poles=[0.9, 0.5], zeros=[-0.4], gain=0.2
         ),
+    ),
+    "ARX with dt": (
+        "class: StateSpaceModelDTARXSISO\nargs: {na: 1, nb: 1, dt: 2.0}\n",
+        lambda: StateSpaceModelDTARXSISO(na=1, nb=1, dt=2.0),
     ),
     "ARX poles, symbolic B": (
         "class: StateSpaceModelDTARXSISO\nargs: {poles: [0.9], nb: 2}\n",

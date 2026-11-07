@@ -16,7 +16,7 @@ from cas_models.discrete_time.models import (
     StateSpaceModelDTFromCTRK4,
     StateSpaceModelDTTFSISO,
 )
-from cas_models.transformations import sum_systems
+from cas_models.transformations import connect_systems, sum_systems
 from cas_models.validation import is_ss_ct, is_ss_dt
 
 DATA_DIR = Path("tests/data")
@@ -678,6 +678,30 @@ def test_StateSpaceModelDTARXSISO_poles_zeros_errors(kwargs, error, match):
         StateSpaceModelDTARXSISO(**kwargs)
 
 
+def test_StateSpaceModelDT_SISO_dt():
+    """The SISO classes take a time step dt (default None), which sums
+    of them keep"""
+    assert StateSpaceModelDTARXSISO(na=1, nb=1).dt is None
+    arx = StateSpaceModelDTARXSISO(poles=[0.9], zeros=[], gain=0.1, dt=2.0)
+    assert arx.dt == 2.0
+    tf = StateSpaceModelDTTFSISO(num=[0.2], den=[1, -0.8], dt=2.0)
+    assert tf.dt == 2.0
+    assert (arx + tf).dt == 2.0
+    assert (tf * arx).dt == 2.0
+    connected = connect_systems(
+        [arx, tf],
+        {"a_u": "u1", "b_u": "u2", "y": ["a_y", "b_y"]},
+        StateSpaceModelDT,
+        input_names=["u1", "u2"],
+        output_names=["y"],
+        keys=["a", "b"],
+        verbose_names=True,
+    )
+    assert connected.dt == 2.0
+    with pytest.raises(ValueError, match="same dt"):
+        arx + StateSpaceModelDTARXSISO(na=1, nb=1, dt=1.0)
+
+
 # TODO: Introduce this class as an intermediate step to state space models.
 # def test_StateSpaceModelDTFromABCD_FO_SISO(symbolic_FO_SISO):
 #     _, _, _, A, B, C, D, _, _, _, _ = symbolic_FO_SISO
@@ -1060,6 +1084,20 @@ def test_StateSpaceModelDTDelay_varying_input():
 
         x = model.F(t_val, x, u_val)
         t_val += 1
+
+
+def test_StateSpaceModelDTDelay_symbolic_G():
+    """Symbols in G are the model's parameters; numbers and symbols mix"""
+    g = cas.SX.sym("g")
+    model = StateSpaceModelDTDelay(nk=2, nu=2, G=[[1.0, 0.0], [0.0, g]])
+    assert list(model.params) == ["g"]
+    assert not model.G.is_constant()
+    expected = StateSpaceModelDTDelay(nk=2, nu=2, G=[[1.0, 0.0], [0.0, 3.0]])
+    assert isinstance(expected.G, cas.DM)
+    xk, uk = np.arange(1.0, 5.0), np.array([0.5, -1.0])
+    assert np.allclose(model.H(0, xk, uk, 3.0).full(), expected.H(0, xk, uk).full())
+    with pytest.raises(TypeError, match="G: give SX symbols or numbers"):
+        StateSpaceModelDTDelay(nk=2, nu=1, G=cas.MX.sym("G"))
 
 
 def test_StateSpaceModelDTDelay_edge_cases():

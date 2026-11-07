@@ -2,6 +2,8 @@ from collections import defaultdict
 
 import casadi as cas
 
+from cas_models.validation import as_sx_scalar
+
 
 def make_list_of_enumerated_names(prefix, n, sep=""):
     """Convenience function to create default names of vector elements.
@@ -215,6 +217,10 @@ def make_symbolic_vars_from_kwargs(**kwargs):
     >>> make_symbolic_vars_from_kwargs(p=(3, 1))
     {'p': SX([p_0, p_1, p_2])}
 
+    Other values are returned as they are, after checking each is a
+    scalar parameter (see cas_models.validation.as_sx_scalar(): a TypeError for MX or complex
+    values, a ValueError for a vector or matrix).
+
     """
     out_vars = {}
     for key, value in kwargs.items():
@@ -225,5 +231,6 @@ def make_symbolic_vars_from_kwargs(**kwargs):
             # Value indicates shape of symbolic variable
             out_vars[key] = cas.SX.sym(key, value)
         else:
+            as_sx_scalar(value, key)
             out_vars[key] = value
     return out_vars

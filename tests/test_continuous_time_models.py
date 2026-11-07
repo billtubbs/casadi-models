@@ -895,3 +895,43 @@ def test_tf_models():
     sys2 = SSModelCTLinearFOSISO(K=2, T1=2.5)
 
     # TODO: Test discrete time integration and simulation
+
+
+@pytest.mark.parametrize(
+    "make, error, match",
+    [
+        (
+            lambda: StateSpaceModelCTFromABCD(cas.MX.sym("A"), 1.0, 1.0, 0.0),
+            TypeError,
+            "A: give SX symbols or numbers, not MX",
+        ),
+        (
+            lambda: StateSpaceModelCTFromABCD(-1.0, 1j, 1.0, 0.0),
+            TypeError,
+            "complex",
+        ),
+        (
+            lambda: SSModelCTFromABCDSISO(-1.0, 1.0, [[1.0, 2.0], [3.0]], 0.0),
+            ValueError,
+            "C: rows of different lengths",
+        ),
+        (
+            lambda: SSModelCTDirectTransmission(D=cas.MX.sym("D", 2, 2)),
+            TypeError,
+            "D: give SX symbols or numbers, not MX",
+        ),
+    ],
+)
+def test_ABCD_argument_errors(make, error, match):
+    """Matrix arguments are checked by as_sx_matrix()"""
+    with pytest.raises(error, match=match):
+        make()
+
+
+def test_ABCD_mixed_symbols_and_numbers():
+    k = cas.SX.sym("k")
+    model = StateSpaceModelCTFromABCD(
+        [[-k, 0.0], [0.5, -2.0]], np.array([1.0, 0.0]), [[0.0, 1.0]], 0.0
+    )
+    assert list(model.params) == ["k"]
+    assert model.n == 2

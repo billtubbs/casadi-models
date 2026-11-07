@@ -160,6 +160,14 @@ def linear_systems_in_series(
     }
 
 
+def _dt_kwargs(systems):
+    """{"dt": dt} of the systems' common time step (checked equal by
+    validate_systems_are_compatible), or {} if they have none (e.g.
+    continuous-time systems, whose classes take no dt)."""
+    dt = getattr(systems[0], "dt", None)
+    return {} if dt is None else {"dt": dt}
+
+
 # TODO: Consider renaming connect_systems_in_parallel to connect_diagonal_system,
 # since it stacks inputs and outputs block-diagonally rather than implementing
 # the classical parallel (shared-input, summed-output) connection. See sum_systems.
@@ -322,6 +330,7 @@ def connect_systems_in_parallel(
         n,
         nu,
         ny,
+        **_dt_kwargs(systems),
         params=params,
         name=name,
         input_names=input_names,
@@ -478,6 +487,7 @@ def sum_systems(
         n,
         nu,
         ny,
+        **_dt_kwargs(systems),
         params=params,
         name=name,
         input_names=input_names,
@@ -627,6 +637,7 @@ def connect_systems_in_series(
             n,
             nu,
             ny,
+            **_dt_kwargs(systems),
             params=params,
             input_names=input_names,
             output_names=output_names,

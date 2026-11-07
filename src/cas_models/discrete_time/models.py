@@ -48,7 +48,12 @@ from cas_models.param_utils import (
 )
 from cas_models.pickle_utils import getstate, setstate
 from cas_models.transformations import connect_systems_in_series, sum_systems
-from cas_models.validation import validate_casadi_function_dims
+from cas_models.validation import (
+    as_sx_matrix,
+    as_sx_scalar,
+    as_sx_vector,
+    validate_casadi_function_dims,
+)
 from cas_models.yaml_utils import (
     base_from_saved_args,
     base_save_args,
@@ -470,6 +475,7 @@ class StateSpaceModelDTSISO(StateSpaceModelDT):
         input_name=None,
         state_names=None,
         output_name=None,
+        dt=None,
     ):
         input_names = None if input_name is None else [input_name]
         output_names = None if output_name is None else [output_name]
@@ -479,6 +485,7 @@ class StateSpaceModelDTSISO(StateSpaceModelDT):
             n,
             nu=1,
             ny=1,
+            dt=dt,
             params=params,
             name=name,
             input_names=input_names,
@@ -740,6 +747,7 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
         input_name=None,
         state_names=None,
         output_name=None,
+        dt=None,
     ):
         """Initialize a discrete-time model from a transfer function:
 
@@ -754,11 +762,13 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
 
         Args:
             num: Numerator polynomial coefficients in descending degree order
-                [b_0, b_1, ..., b_m]. Can be a CasADi SX/MX/DM expression,
-                numpy array, or Python list. May contain symbolic parameters.
+                [b_0, b_1, ..., b_m]. A vector of numbers and SX
+                symbols or expressions, mixed (see
+                cas_models.validation.as_sx_vector(); not MX).
             den: Denominator polynomial coefficients in descending degree order
-                [a_0, a_1, ..., a_n]. Can be a CasADi SX/MX/DM expression,
-                numpy array, or Python list. May contain symbolic parameters.
+                [a_0, a_1, ..., a_n]. A vector of numbers and SX
+                symbols or expressions, mixed (see
+                cas_models.validation.as_sx_vector(); not MX).
             name (str, optional): Optional name for the model. Default: None.
             input_name (str, optional): Name for the input variable. If None,
                 defaults to "u".
@@ -766,6 +776,9 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
                 None, defaults to ["x1", "x2", ...].
             output_name (str, optional): Name for the output variable. If None,
                 defaults to "y".
+            dt (float, optional): The time step, if the model has one
+                (default: None). Kept as the model's dt; the state and
+                output functions don't depend on it.
 
         Note:
             The number of states n equals len(den) - 1 (the order of the
@@ -785,16 +798,8 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
             >>> model = StateSpaceModelDTTFSISO(num=num, den=den)
 
         """
-        # Convert num and den to CasADi SX format if needed
-        if not isinstance(num, (cas.SX, cas.MX, cas.DM)):
-            num = cas.SX(num)
-        else:
-            num = cas.SX(num)
-
-        if not isinstance(den, (cas.SX, cas.MX, cas.DM)):
-            den = cas.SX(den)
-        else:
-            den = cas.SX(den)
+        num = as_sx_vector(num, "num")
+        den = as_sx_vector(den, "den")
 
         # Ensure column vectors
         if num.shape[1] != 1:
@@ -860,6 +865,7 @@ class StateSpaceModelDTTFSISO(StateSpaceModelDTSISO):
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
+            dt=dt,
         )
 
 
@@ -907,7 +913,9 @@ class StateSpaceModelDTDelay(StateSpaceModelDT):
             nk (int): Delay in time steps (must be >= 1).
             nu (int, optional): Number of inputs. Default: 1.
             G (array-like, optional): Gain matrix of shape (ny, nu) mapping
-                delayed inputs to outputs. If None, defaults to identity
+                delayed inputs to outputs: numbers and SX symbols, mixed
+                (see cas_models.validation.as_sx_matrix()); its symbols
+                are the model's parameters. If None, defaults to identity
                 matrix (ny = nu). If provided, ny is inferred from G.shape[0].
             dt (float, optional): Sample time. Default: None.
             name (str, optional): Optional name for the model. Default: None.
@@ -938,9 +946,9 @@ class StateSpaceModelDTDelay(StateSpaceModelDT):
         # Infer ny from G or default to nu
         if G is None:
             ny = nu
-            G = cas.DM.eye(ny)
+            G = cas.SX.eye(ny)
         else:
-            G = cas.DM(G)
+            G = as_sx_matrix(G, "G")
             ny = G.shape[0]
             assert G.shape[1] == nu, (
                 f"G.shape[1] must equal nu ({nu}), got {G.shape[1]}"
@@ -992,13 +1000,27 @@ class StateSpaceModelDTDelay(StateSpaceModelDT):
         xkp1 = cas.mtimes(A, xk) + cas.mtimes(B, uk)
         yk = cas.mtimes(C, xk) + cas.mtimes(D, uk)
 
-        # Create CasADi Functions for F and H
-        F = cas.Function("F", [t, xk, uk], [xkp1], ["t", "xk", "uk"], ["xkp1"])
-        H = cas.Function("H", [t, xk, uk], [yk], ["t", "xk", "uk"], ["yk"])
+        # Create CasADi Functions for F and H (with any symbols in G as
+        # parameters)
+        params = {v.name(): v for v in cas.symvar(G)}
+        F = cas.Function(
+            "F",
+            [t, xk, uk, *params.values()],
+            [xkp1],
+            ["t", "xk", "uk", *params.keys()],
+            ["xkp1"],
+        )
+        H = cas.Function(
+            "H",
+            [t, xk, uk, *params.values()],
+            [yk],
+            ["t", "xk", "uk", *params.keys()],
+            ["yk"],
+        )
 
         # Store delay-specific attributes
         self.nk = nk
-        self.G = G
+        self.G = cas.DM(G) if G.is_constant() else G
 
         super().__init__(
             F,
@@ -1007,7 +1029,7 @@ class StateSpaceModelDTDelay(StateSpaceModelDT):
             nu=nu,
             ny=ny,
             dt=dt,
-            params={},
+            params=params,
             name=name,
             input_names=input_names,
             state_names=state_names,
@@ -1034,32 +1056,40 @@ def poly_coefficients(roots):
     return c[1:]
 
 
+def _is_complex(value):
+    """Whether value is a complex number, a complex NumPy array or a
+    list or tuple with a complex number in it."""
+    if isinstance(value, (complex, np.complexfloating)):
+        return True
+    if isinstance(value, np.ndarray):
+        return np.iscomplexobj(value) or (
+            value.dtype == object and any(map(_is_complex, value.ravel()))
+        )
+    if isinstance(value, (list, tuple)):
+        return any(map(_is_complex, value))
+    return False
+
+
 def _roots_to_coefficients(roots, name):
     """poly_coefficients(roots) as a column vector: SX if any root is
     symbolic (all real), else DM (complex roots allowed, in conjugate
-    pairs). roots is a list, a NumPy array or a CasADi vector."""
-    if isinstance(roots, cas.MX):
-        raise TypeError(f"{name}: give SX symbols, not MX")
-    if isinstance(roots, (cas.SX, cas.DM)):
-        if roots.numel() > 0 and min(roots.shape) != 1:
-            raise ValueError(f"{name}: give a vector, not {roots.shape}")
-        roots = [roots[i] for i in range(roots.numel())]
-    roots = list(np.ravel(roots)) if isinstance(roots, np.ndarray) else roots
-    if any(isinstance(r, cas.SX) and not r.is_constant() for r in roots):
-        for r in roots:
-            if isinstance(r, cas.SX) and r.numel() != 1:
-                raise ValueError(f"{name}: each root must be a scalar")
-            if isinstance(r, (complex, np.complexfloating)):
-                raise TypeError(f"{name}: symbolic roots must all be real")
-        c = poly_coefficients([cas.SX(r) for r in roots])
-        return cas.vertcat(*c) if c else cas.SX(0, 1)
-    values = np.array(
-        [
-            float(cas.DM(r)) if isinstance(r, (cas.SX, cas.DM)) else r
-            for r in roots
-        ],
-        dtype=complex,
-    )
+    pairs). roots is a vector argument (see as_sx_vector()), or numbers
+    with complex ones (a list, tuple or NumPy array)."""
+    if _is_complex(roots):
+        # Numbers only: as_sx_vector() refuses complex values
+        values = np.ravel(np.array(roots, dtype=object))
+        if any(isinstance(r, (cas.SX, cas.DM, cas.MX)) for r in values):
+            raise TypeError(
+                f"{name}: complex roots must all be numbers (symbolic "
+                "roots must all be real)"
+            )
+        values = values.astype(complex)
+    else:
+        r = as_sx_vector(roots, name)
+        if not r.is_constant():
+            c = poly_coefficients([r[i] for i in range(r.numel())])
+            return cas.vertcat(*c) if c else cas.SX(0, 1)
+        values = np.array(cas.DM(r)).ravel()
     c = np.atleast_1d(np.poly(values))[1:]
     if np.any(np.abs(c.imag) > 1e-12 * np.maximum(1.0, np.abs(c.real))):
         raise ValueError(
@@ -1134,6 +1164,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         poles=None,
         zeros=None,
         gain=None,
+        dt=None,
     ):
         """Initialize a discrete-time ARX model:
 
@@ -1187,6 +1218,9 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
                 with zeros (as in scipy.signal.zpk2tf; not the static
                 gain B(1) / A(1)). A number or an SX symbol; if None, a
                 symbol named "gain". Must be None without zeros.
+            dt (float, optional): The time step, if the model has one
+                (default: None). Kept as the model's dt; the state and
+                output functions don't depend on it.
 
         Note:
             The total number of states is n = na + nk + nb - 1.
@@ -1218,9 +1252,8 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             assert B is None and nb is None, "provide one of B, nb or zeros"
             if gain is None:
                 gain = cas.SX.sym("gain")
-            if isinstance(gain, cas.SX) and not gain.is_constant():
-                assert gain.numel() == 1, "gain must be a scalar"
-            else:
+            gain = as_sx_scalar(gain, "gain")
+            if gain.is_constant():
                 gain = float(cas.DM(gain))
             B = gain * cas.vertcat(1, _roots_to_coefficients(zeros, "zeros"))
         else:
@@ -1229,15 +1262,13 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             A = cas.SX.sym("a", na)
         else:
             assert na is None, "provide A or na, not both"
-            A = cas.SX(A)
-            assert A.shape[1] == 1
+            A = as_sx_vector(A, "A")
             na = A.shape[0]
         if B is None:
             B = cas.SX.sym("b", nb)
         else:
             assert nb is None, "provide B or nb, not both"
-            B = cas.SX(B)
-            assert B.shape[1] == 1
+            B = as_sx_vector(B, "B")
             nb = B.shape[0]
         na, nb, nk = int(na), int(nb), int(nk)
         assert na >= 0 and nb >= 1 and nk >= 0
@@ -1297,4 +1328,5 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             input_name=input_name,
             state_names=state_names,
             output_name=output_name,
+            dt=dt,
         )

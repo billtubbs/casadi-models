@@ -184,3 +184,13 @@ def test_make_symbolic_vars_from_kwargs():
     assert params["A"].shape == (3, 2)
     assert isinstance(params["B"], cas.SX)
     assert params["B"].shape == (3, 1)
+
+
+def test_make_symbolic_vars_from_kwargs_checks_values():
+    """Values given are returned as they are, but must be scalars"""
+    a = SX.sym("a")
+    assert make_symbolic_vars_from_kwargs(K=2, T1=a) == {"K": 2, "T1": a}
+    with pytest.raises(TypeError, match="T1: give SX symbols or numbers"):
+        make_symbolic_vars_from_kwargs(T1=cas.MX.sym("T1"))
+    with pytest.raises(ValueError, match="K: give a scalar"):
+        make_symbolic_vars_from_kwargs(K=[1.0, 2.0])

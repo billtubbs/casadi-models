@@ -53,7 +53,10 @@ from cas_models.sympy_conversion import (
     make_casadi_vars_from_sympy_vars,
 )
 from cas_models.transformations import connect_systems_in_series, sum_systems
-from cas_models.validation import validate_casadi_function_dims
+from cas_models.validation import (
+    as_sx_matrix,
+    validate_casadi_function_dims,
+)
 from cas_models.yaml_utils import (
     base_from_saved_args,
     base_save_args,
@@ -94,14 +97,6 @@ def validate_h_function(
     return validate_casadi_function_dims(
         h, arg_shapes=arg_shapes, return_shapes=return_shapes
     )
-
-
-def _as_casadi_matrix(M):
-    """M as a CasADi matrix: SX, MX and DM unchanged, anything else (a
-    number, a list of values or of rows, a NumPy array) as a DM."""
-    if isinstance(M, (cas.SX, cas.MX, cas.DM)):
-        return M
-    return cas.DM(M)
 
 
 @dataclass
@@ -434,12 +429,12 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
 
         """
 
-        # Convert to CasADi sparse arrays (could be DM, SX, or MX, or
-        # lists or arrays, converted to DM)
-        A = cas.sparsify(_as_casadi_matrix(A))
-        B = cas.sparsify(_as_casadi_matrix(B))
-        C = cas.sparsify(_as_casadi_matrix(C))
-        D = cas.sparsify(_as_casadi_matrix(D))
+        # Convert to CasADi sparse SX matrices (numbers and SX symbols,
+        # see as_sx_matrix())
+        A = cas.sparsify(as_sx_matrix(A, "A"))
+        B = cas.sparsify(as_sx_matrix(B, "B"))
+        C = cas.sparsify(as_sx_matrix(C, "C"))
+        D = cas.sparsify(as_sx_matrix(D, "D"))
 
         n = A.shape[0]
         assert A.shape[1] == n
@@ -513,7 +508,7 @@ class SSModelCTDirectTransmission(StateSpaceModelCTFromABCD):
             D = cas.SX.eye(nu)
             ny = nu
         else:
-            D = _as_casadi_matrix(D)
+            D = as_sx_matrix(D, "D")
             ny, nu = D.shape
         n = 0  # no dynamics
         A = cas.SX.zeros(n, n)
@@ -544,11 +539,11 @@ class SSModelCTFromABCDSISO(StateSpaceModelCTFromABCD):
         state_names=None,
         output_name=None,
     ):
-        # Convert to CasADi sparse arrays (could be DM, SX, or MX, or
-        # lists or arrays, converted to DM)
-        B = cas.sparsify(_as_casadi_matrix(B))
-        C = cas.sparsify(_as_casadi_matrix(C))
-        D = cas.sparsify(_as_casadi_matrix(D))
+        # Convert to CasADi sparse SX matrices (numbers and SX symbols,
+        # see as_sx_matrix())
+        B = cas.sparsify(as_sx_matrix(B, "B"))
+        C = cas.sparsify(as_sx_matrix(C, "C"))
+        D = cas.sparsify(as_sx_matrix(D, "D"))
         assert B.shape[1] == 1
         assert C.shape[0] == 1
         assert D.shape == (1, 1)
