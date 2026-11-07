@@ -16,7 +16,7 @@ from cas_models.discrete_time.models import (
     StateSpaceModelDTFromCTRK4,
     StateSpaceModelDTTFSISO,
 )
-from cas_models.transformations import connect_systems, sum_systems
+from cas_models.transformations import connect_systems, connect_systems_in_parallel
 from cas_models.validation import is_ss_ct, is_ss_dt
 
 DATA_DIR = Path("tests/data")
@@ -1340,8 +1340,8 @@ def test_add_operator_parallel_connection():
     y_combined = float(sys_combined.H(t_val, x, u))
     assert np.isclose(y_combined, y1 + y2)
 
-    # + is equivalent to sum_systems
-    sys_via_func = sum_systems([sys1, sys2], model_class=StateSpaceModelDT)
+    # + is equivalent to connect_systems_in_parallel
+    sys_via_func = connect_systems_in_parallel([sys1, sys2], model_class=StateSpaceModelDT)
     assert str(sys_combined) == str(sys_via_func)
 
 

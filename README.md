@@ -78,6 +78,28 @@ print(sys.h)
 sys = sys_model_2 * sys_model
 ```
 
+## Connecting Models
+
+The functions in `cas_models.transformations` (for continuous-time and
+discrete-time models alike):
+
+| Function | Operator | Inputs | Outputs | Transfer matrix |
+|---|---|---|---|---|
+| `connect_systems_in_series` | `sys2 * sys1` | sys1's | sys2's | G2 G1 |
+| `connect_systems_in_parallel` | `sys1 + sys2` | shared | summed | G1 + G2 |
+| `hstack_systems` | | separate | summed | [G1, G2] |
+| `vstack_systems` | | shared | stacked | [G1; G2] |
+| `block_diag_systems` | | separate | stacked | [G1, 0; 0, G2] |
+| `connect_feedback_system` | | | | feedback loop |
+| `connect_systems` | | named signal connections, the most general | | |
+| `negate_system` | `-sys` | | negated | -G |
+
+`sys1 - sys2` is `sys1 + (-sys2)`. The names follow Matlab and
+python-control: `parallel()` there is `connect_systems_in_parallel`,
+`append()` is `block_diag_systems`. Before 2026-11,
+`connect_systems_in_parallel` was the block-diagonal combination and
+`sum_systems` the parallel one.
+
 ## Examples: Simulation
 
 ```python
@@ -350,8 +372,9 @@ args:
 Values are written in full precision, and sparse matrices dense (the
 constructors sparsify their matrices).
 
-Models built by connecting others (`connect_systems`, `sum_systems`,
-`connect_feedback_system`, `*`, `+`) are instances of the base classes,
+Models built by connecting others (`connect_systems`,
+`connect_systems_in_parallel`, `hstack_systems`, `connect_feedback_system`,
+`*`, `+`, `-`, ...) are instances of the base classes,
 `StateSpaceModelCT` and `StateSpaceModelDT`, whose arguments are the
 functions `f` and `h` (`F` and `H`). These go to `.casadi` files
 (CasADi's serialization of the expression graph, exact but not readable),

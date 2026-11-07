@@ -47,7 +47,11 @@ from cas_models.param_utils import (
     make_list_of_enumerated_names,
 )
 from cas_models.pickle_utils import getstate, setstate
-from cas_models.transformations import connect_systems_in_series, sum_systems
+from cas_models.transformations import (
+    connect_systems_in_parallel,
+    connect_systems_in_series,
+    negate_system,
+)
 from cas_models.validation import (
     as_sx_matrix,
     as_sx_scalar,
@@ -57,8 +61,10 @@ from cas_models.validation import (
 from cas_models.yaml_utils import (
     base_from_saved_args,
     base_save_args,
+    from_yaml,
     load_model,
     save_model,
+    to_yaml,
 )
 
 # Attribute names for discrete-time state-space models
@@ -267,7 +273,25 @@ class StateSpaceModelDT:
         Note:
             Both systems must have the same nu and ny.
         """
-        return sum_systems([self, other], model_class=StateSpaceModelDT)
+        return connect_systems_in_parallel(
+            [self, other], model_class=StateSpaceModelDT
+        )
+
+    def __neg__(self):
+        """The system with its outputs negated, -sys: y = -h(t, x, u)
+        (see cas_models.transformations.negate_system).
+        """
+        return negate_system(self, model_class=StateSpaceModelDT)
+
+    def __sub__(self, other):
+        """Connect two discrete-time systems in parallel with the second's
+        outputs negated, sys1 - sys2 = sys1 + (-sys2): both receive the
+        same input, y = y_self - y_other.
+
+        Note:
+            Both systems must have the same nu and ny.
+        """
+        return self + (-other)
 
     def __getstate__(self):
         """Pickle support: pickle.dump(model, file) works without a
@@ -296,6 +320,22 @@ class StateSpaceModelDT:
         or one of its subclasses.
         """
         return load_model(folder, cls)
+
+    def to_yaml(self):
+        """The model as YAML text, as save() writes model.yaml but with
+        everything inline (functions serialized, matrices of any size),
+        so that from_yaml() rebuilds the model from the text alone. See
+        cas_models.yaml_utils.
+        """
+        return to_yaml(self)
+
+    @classmethod
+    def from_yaml(cls, text, folder=None):
+        """Load a model from YAML text (from to_yaml(), or the text of
+        a saved model.yaml with the folder of its data files). The
+        class must be cls or one of its subclasses.
+        """
+        return from_yaml(text, cls, folder=folder)
 
     def _save_args(self):
         """The class and the arguments that rebuild the model: here, the

@@ -45,9 +45,12 @@ from cas_models.transformations import (
 from cas_models.yaml_utils import (
     _decode,
     _encode,
+    _file_refs,
     _without_defaults,
+    from_yaml,
     load_model,
     read_tsv,
+    to_yaml,
     write_tsv,
 )
 
@@ -850,3 +853,90 @@ def test_save_model_file(name, tmp_path):
     assert sorted(p.name for p in folder.iterdir()) == sorted(
         p.name for p in (MODELS_DIR / name).iterdir()
     )
+
+
+# YAML text: to_yaml() and from_yaml()
+
+
+@pytest.mark.parametrize("name", MODELS)
+def test_to_yaml_from_yaml(name):
+    """The text alone rebuilds the model, by the base class's from_yaml()
+    or from_yaml()"""
+    base, make_model, exact = MODELS[name]
+    model = make_model()
+    text = model.to_yaml()
+    assert text == to_yaml(model)
+    assert _file_refs(yaml.safe_load(text)) == []
+    assert_same_model(model, base.from_yaml(text), base, exact)
+    assert_same_model(model, from_yaml(text), base, exact)
+
+
+def test_to_yaml_same_as_saved(tmp_path):
+    """to_yaml() is model.yaml with the functions inline"""
+    model = dt_connected_arx()
+    model.save(tmp_path / "model")
+    saved = read_model_yaml(tmp_path / "model")
+    data = yaml.safe_load(model.to_yaml())
+    for key in ("F", "H"):
+        assert saved["args"][key] == {"file": f"{key}.casadi"}
+        assert data["args"][key] == {"Function": getattr(model, key).serialize()}
+        del saved["args"][key], data["args"][key]
+    assert data == saved
+
+
+def test_to_yaml_text():
+    """Functions as {Function: <serialization>}, a model of no
+    arguments as just its class"""
+    text = SSModelCTLinearFOSISO().to_yaml()
+    data = yaml.safe_load(text)
+    assert data["class"] == "StateSpaceModelCT"
+    assert set(data["args"]["f"]) == {"Function"}
+    text = StateSpaceModelDTARXSISO(na=2, nb=1).to_yaml()
+    assert text.startswith("cas_models_format: 1\nclass: StateSpaceModelDT\n")
+
+
+@pytest.mark.parametrize("shape", [(9, 1), (1, 9), (6, 5), (20, 20)])
+def test_to_yaml_large_matrix_inline(shape):
+    """Without a folder, matrices of any size are inline"""
+    value = cas.DM(np.arange(float(np.prod(shape))).reshape(shape))
+    encoded = _encode(value, None, "A")
+    assert set(encoded) == {"DM"}
+    loaded = _decode(encoded, None)
+    assert loaded.shape == shape
+    np.testing.assert_array_equal(loaded.full(), value.full())
+
+
+@pytest.mark.parametrize("name", LOAD_CASES)
+def test_from_yaml_subclass_args(name):
+    """Written by hand, as for load_model()"""
+    text, make_model = LOAD_CASES[name]
+    expected = make_model()
+    text = "cas_models_format: 1\n" + text
+    assert_same_functions(from_yaml(text), expected)
+    assert_same_functions(type(expected).from_yaml(text), expected)
+
+
+@pytest.mark.parametrize("name", MODEL_FILES)
+def test_from_yaml_model_file_text(name):
+    """The text of a saved model.yaml, with the folder of its files"""
+    folder = MODELS_DIR / name
+    text = (folder / "model.yaml").read_text()
+    expected = MODEL_FILES[name]()
+    model = from_yaml(text, folder=folder)
+    if name in SAVED_AS_BASE:
+        assert_same_model(expected, model, SAVED_AS_BASE[name])
+    else:
+        assert_same_functions(model, expected)
+    if _file_refs(yaml.safe_load(text)):
+        with pytest.raises(ValueError, match="give the folder it is in"):
+            from_yaml(text)
+
+
+def test_from_yaml_errors():
+    with pytest.raises(ValueError, match="cas_models_format None, not 1"):
+        from_yaml("class: SSModelCTLinearFOSISO\n")
+    with pytest.raises(ValueError, match="cas_models_format 2, not 1"):
+        from_yaml("cas_models_format: 2\nclass: SSModelCTLinearFOSISO\n")
+    text = SSModelCTLinearFOSISO().to_yaml()
+    with pytest.raises(ValueError, match="isn't StateSpaceModelDT"):
+        StateSpaceModelDT.from_yaml(text)

@@ -20,11 +20,14 @@ from cas_models.discrete_time.simulate import (
     make_n_step_simulation_function_from_model,
 )
 from cas_models.transformations import (
+    block_diag_systems,
     connect_feedback_system,
     connect_systems,
     connect_systems_in_parallel,
     connect_systems_in_series,
-    sum_systems,
+    hstack_systems,
+    negate_system,
+    vstack_systems,
 )
 from cas_models.validation import is_ss_ct, is_ss_dt
 
@@ -165,7 +168,7 @@ def expected_parallel_default(system_type):
         )
 
 
-def test_connect_nonlinear_systems_in_parallel(
+def test_block_diag_systems(
     system_type,
     sys1_with_gain,
     sys2_no_gain,
@@ -175,14 +178,14 @@ def test_connect_nonlinear_systems_in_parallel(
 ):
     """Test parallel connection for both CT and DT systems"""
     # With defaults - using new generalized function
-    sys_combined = connect_systems_in_parallel(
+    sys_combined = block_diag_systems(
         [sys1_with_gain, sys2_no_gain], model_class
     )
 
     assert str(sys_combined) == expected_parallel_default
 
     # With custom keys
-    sys_combined = connect_systems_in_parallel(
+    sys_combined = block_diag_systems(
         [sys1_with_gain, sys2_no_gain, sys3_no_gain],
         model_class,
         keys=["a", "b", "c"],
@@ -201,7 +204,7 @@ def test_connect_nonlinear_systems_in_parallel(
         sys1 = SSModelCTLinearFOSISO(K=2)
         sys2 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
         sys3 = SSModelCTLinearFONoGainSISO(T1=sys1.params["T1"])
-        sys_combined = connect_systems_in_parallel(
+        sys_combined = block_diag_systems(
             [sys1, sys2, sys3], StateSpaceModelCT, keys=["a", "b", "c"]
         )
         assert str(sys_combined) == (
@@ -215,11 +218,11 @@ def test_connect_nonlinear_systems_in_parallel(
         )
 
 
-def test_sum_systems(
+def test_connect_systems_in_parallel(
     system_type, sys1_with_gain, sys2_no_gain, sys3_no_gain, model_class
 ):
-    """Test sum_systems (shared input, summed outputs) for CT and DT systems."""
-    sys_combined = sum_systems([sys1_with_gain, sys2_no_gain], model_class)
+    """Test connect_systems_in_parallel (shared input, summed outputs) for CT and DT systems."""
+    sys_combined = connect_systems_in_parallel([sys1_with_gain, sys2_no_gain], model_class)
 
     # Dimensions: states stacked, but nu and ny are unchanged
     assert sys_combined.n == 2
@@ -231,7 +234,7 @@ def test_sum_systems(
     assert "x2" in sys_combined.state_names
 
     # Three systems
-    sys_combined_3 = sum_systems(
+    sys_combined_3 = connect_systems_in_parallel(
         [sys1_with_gain, sys2_no_gain, sys3_no_gain], model_class
     )
     assert sys_combined_3.n == 3
@@ -268,11 +271,11 @@ def test_sum_systems(
 
     # Mismatched dimensions should raise
     if system_type == "ct":
-        sys_mimo = connect_systems_in_parallel(
+        sys_mimo = block_diag_systems(
             [sys1_with_gain, sys2_no_gain], model_class
         )
         with pytest.raises(ValueError):
-            sum_systems([sys1_with_gain, sys_mimo], model_class)
+            connect_systems_in_parallel([sys1_with_gain, sys_mimo], model_class)
 
 
 def test_connect_nonlinear_systems_in_series(
@@ -775,7 +778,7 @@ def test_mixed_ct_dt_systems_error():
         ValueError,
         match="Cannot combine systems with different types",
     ):
-        connect_systems_in_parallel([ct_sys1, dt_sys1], StateSpaceModelCT)
+        block_diag_systems([ct_sys1, dt_sys1], StateSpaceModelCT)
 
     # Test series connection with mixed systems
     with pytest.raises(
@@ -957,7 +960,7 @@ def test_connect_new_output_matches_summing_block():
         keys=keys,
     )
 
-    paths = connect_systems_in_parallel(models, StateSpaceModelCT, keys=keys)
+    paths = block_diag_systems(models, StateSpaceModelCT, keys=keys)
     summer = SSModelCTDirectTransmission(
         D=cas.DM.ones(1, 2), output_names=["R11_intake"]
     )
@@ -1197,7 +1200,7 @@ def test_connect_feedback_system_errors():
     # sys2 dimension mismatch: use a two-output system as feedback for a SISO forward path
     plant_a = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="a")
     plant_b = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="b")
-    mimo_feedback = connect_systems_in_parallel(
+    mimo_feedback = block_diag_systems(
         [plant_a, plant_b], StateSpaceModelCT
     )  # ny=2, nu=2
     with pytest.raises(
@@ -1231,3 +1234,150 @@ def test_connect_feedback_system_detects_algebraic_loop():
     plant = SSModelCTLinearFOSISO(K=2.0, T1=1.0, name="plant")
     sys_cl = connect_feedback_system(plant, model_class=StateSpaceModelCT)
     assert sys_cl.n == 1
+
+
+# Stacking (hstack_systems, vstack_systems, block_diag_systems) and
+# negation, with fixed parameters
+
+
+def fixed_models(kind):
+    """Three fixed-parameter models: SISO, SISO and 2-input 1-output
+    (CT, or DT with dt 1)"""
+    if kind == "ct":
+        from cas_models.continuous_time.models import (
+            SSModelCTLinearO2SISO,
+            StateSpaceModelCTFromABCD,
+        )
+
+        return (
+            SSModelCTLinearFOSISO(K=2.0, T1=3.0, name="a"),
+            SSModelCTLinearO2SISO(K=-1.0, T1=2.0, T2=5.0, name="b"),
+            StateSpaceModelCTFromABCD(
+                -1.0, [[1.0, 0.5]], 2.0, [[0.0, 0.1]], name="c"
+            ),
+        )
+    from cas_models.discrete_time.models import StateSpaceModelDTARXSISO
+
+    return (
+        StateSpaceModelDTARXSISO(poles=[0.9], B=[0.2], dt=1.0, name="a"),
+        StateSpaceModelDTARXSISO(
+            poles=[0.8, 0.5], B=[0.1, -0.05], nk=0, dt=1.0, name="b"
+        ),
+        StateSpaceModelDTARXSISO(poles=[0.7], B=[0.3], dt=1.0, name="c"),
+    )
+
+
+def eval_model(model, x, u):
+    """(next state or derivative, output) of a fixed-parameter model"""
+    attr = model._attr_names
+    f = getattr(model, attr["state_func"])
+    h = getattr(model, attr["output_func"])
+    return f(0.0, x, u).full().ravel(), h(0.0, x, u).full().ravel()
+
+
+@pytest.fixture(params=["ct", "dt"])
+def kind(request):
+    return request.param
+
+
+def base_class(kind):
+    return StateSpaceModelCT if kind == "ct" else StateSpaceModelDT
+
+
+def test_hstack_systems(kind):
+    """Separate inputs, summed outputs: y = G1 u1 + G2 u2"""
+    m1, m2, _ = fixed_models(kind)
+    sys = hstack_systems([m1, m2], base_class(kind))
+    assert (sys.n, sys.nu, sys.ny) == (m1.n + m2.n, 2, 1)
+    assert sys.output_names == m1.output_names
+    assert sys.input_names == ["a_u", "b_u"]
+    if kind == "dt":
+        assert sys.dt == 1.0
+    rng = np.random.default_rng(0)
+    x, u = rng.normal(size=sys.n), rng.normal(size=2)
+    x1, x2 = x[: m1.n], x[m1.n :]
+    f1, y1 = eval_model(m1, x1, u[0])
+    f2, y2 = eval_model(m2, x2, u[1])
+    f, y = eval_model(sys, x, u)
+    assert np.allclose(f, np.r_[f1, f2])
+    assert np.allclose(y, y1 + y2)
+
+
+def test_vstack_systems(kind):
+    """Shared inputs, stacked outputs: y = [G1 u; G2 u]"""
+    m1, m2, _ = fixed_models(kind)
+    sys = vstack_systems([m1, m2], base_class(kind))
+    assert (sys.n, sys.nu, sys.ny) == (m1.n + m2.n, 1, 2)
+    assert sys.input_names == m1.input_names
+    assert sys.output_names == ["a_y", "b_y"]
+    rng = np.random.default_rng(1)
+    x, u = rng.normal(size=sys.n), rng.normal(size=1)
+    x1, x2 = x[: m1.n], x[m1.n :]
+    f1, y1 = eval_model(m1, x1, u)
+    f2, y2 = eval_model(m2, x2, u)
+    f, y = eval_model(sys, x, u)
+    assert np.allclose(f, np.r_[f1, f2])
+    assert np.allclose(y, np.r_[y1, y2])
+
+
+def test_block_diag_systems_fixed(kind):
+    """Separate inputs, stacked outputs: y = [G1 u1; G2 u2]"""
+    m1, m2, _ = fixed_models(kind)
+    sys = block_diag_systems([m1, m2], base_class(kind))
+    assert (sys.n, sys.nu, sys.ny) == (m1.n + m2.n, 2, 2)
+    rng = np.random.default_rng(2)
+    x, u = rng.normal(size=sys.n), rng.normal(size=2)
+    x1, x2 = x[: m1.n], x[m1.n :]
+    _, y1 = eval_model(m1, x1, u[0])
+    _, y2 = eval_model(m2, x2, u[1])
+    _, y = eval_model(sys, x, u)
+    assert np.allclose(y, np.r_[y1, y2])
+
+
+def test_stack_dimension_errors():
+    """hstack needs equal ny, vstack equal nu, parallel both"""
+    m1, _, m3 = fixed_models("ct")  # m3 has 2 inputs, 1 output
+    two_out = vstack_systems([m1, m1], StateSpaceModelCT)  # 1 in, 2 out
+    with pytest.raises(ValueError, match="same ny for hstack_systems"):
+        hstack_systems([m1, two_out], StateSpaceModelCT)
+    with pytest.raises(ValueError, match="same nu for vstack_systems"):
+        vstack_systems([m1, m3], StateSpaceModelCT)
+    with pytest.raises(ValueError, match="same nu for connect_systems_in"):
+        connect_systems_in_parallel([m1, m3], StateSpaceModelCT)
+    # Unequal nu is fine for hstack, unequal ny for vstack
+    assert hstack_systems([m1, m3], StateSpaceModelCT).nu == 3
+    assert vstack_systems([m1, two_out], StateSpaceModelCT).ny == 3
+
+
+def test_negate_and_subtract(kind):
+    """-sys negates the outputs; sys1 - sys2 = sys1 + (-sys2)"""
+    m1, m2, _ = fixed_models(kind)
+    neg = -m1
+    assert isinstance(neg, base_class(kind))
+    assert neg.name == "-a" and neg.output_names == m1.output_names
+    assert neg.n == m1.n and getattr(neg, "dt", None) == getattr(m1, "dt", None)
+    rng = np.random.default_rng(3)
+    x, u = rng.normal(size=m1.n), rng.normal(size=1)
+    f1, y1 = eval_model(m1, x, u)
+    f, y = eval_model(neg, x, u)
+    assert np.allclose(f, f1) and np.allclose(y, -y1)
+
+    diff = m1 - m2
+    x = rng.normal(size=diff.n)
+    x1, x2 = x[: m1.n], x[m1.n :]
+    _, y1 = eval_model(m1, x1, u)
+    _, y2 = eval_model(m2, x2, u)
+    _, y = eval_model(diff, x, u)
+    assert np.allclose(y, y1 - y2)
+
+
+def test_negate_symbolic_params():
+    """The negated system keeps the parameters"""
+    sys = SSModelCTLinearFOSISO()
+    neg = negate_system(sys, StateSpaceModelCT)
+    assert list(neg.params) == ["K", "T1"]
+    x, u = cas.DM([1.5]), cas.DM([0.3])
+    assert np.isclose(
+        float(neg.h(0.0, x, u, 2.0, 4.0)), -float(sys.h(0.0, x, u, 2.0, 4.0))
+    )
+    assert neg.name is None

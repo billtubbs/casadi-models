@@ -1,28 +1,37 @@
 """Transformations for combining state-space models.
 
 Provides functions for combining continuous-time and discrete-time
-state-space models in parallel, series, and feedback configurations.
+state-space models in series, parallel and feedback, and stacked
+horizontally, vertically or block-diagonally (as transfer matrices).
 
 Functions
 ---------
-connect_systems_in_parallel
-    Combine a list of models with independent inputs and outputs side by side.
-sum_systems
-    Combine a list of models with shared inputs and summed outputs.
-connect_systems_in_series
-    Connect models end-to-end, feeding each output into the next input.
 connect_systems
     Connect models with arbitrary named signal connections.
+connect_systems_in_series
+    Connect models end-to-end, feeding each output into the next input
+    (sysN * ... * sys2 * sys1).
+connect_systems_in_parallel
+    Combine models with shared inputs and summed outputs (sys1 + sys2).
 connect_feedback_system
     Close a feedback loop around a forward-path model.
+block_diag_systems
+    Combine models side by side, unconnected: inputs and outputs stacked
+    (transfer matrix [G1 0; 0 G2]).
+hstack_systems
+    Combine models with separate inputs and summed outputs ([G1, G2]).
+vstack_systems
+    Combine models with shared inputs and stacked outputs ([G1; G2]).
+negate_system
+    A model with its outputs negated (-sys; sys1 - sys2 is sys1 + -sys2).
 validate_systems_are_compatible
     Raise if a list of models are not all the same type (CT vs DT).
 block_diag
     Construct a block-diagonal CasADi SX matrix from a list of matrices.
-linear_systems_in_parallel
-    Combine linear systems in A, B, C, D dict form side by side.
-linear_systems_in_series
-    Combine linear systems in A, B, C, D dict form end-to-end.
+
+Before 2026-11, connect_systems_in_parallel was the block-diagonal
+combination (now block_diag_systems) and sum_systems the parallel one
+(now connect_systems_in_parallel).
 """
 
 from functools import reduce
@@ -54,112 +63,6 @@ def block_diag(matrices, square=False):
     return cas.blockcat(rows)
 
 
-# TODO: These linear functions are redundant since no linear models
-# currently defined
-def linear_systems_in_parallel(
-    systems, keys=None, verbose_names=False, prefix="sys"
-):
-    """Combine a collection of linear systems into one large parallel
-    system.
-    """
-    A = cas.sparsify(
-        block_diag(list(sys["A"] for sys in systems), square=True)
-    )
-    B = cas.sparsify(block_diag(list(sys["B"] for sys in systems)))
-    C = cas.sparsify(block_diag(list(sys["C"] for sys in systems)))
-    D = cas.sparsify(block_diag(list(sys["D"] for sys in systems)))
-    params = merge_param_dicts(
-        [sys.params for sys in systems],
-        keys=keys,
-        verbose_names=verbose_names,
-        prefix=prefix,
-    )
-    input_names = concatenate_lists_of_names(
-        [sys.input_names for sys in systems], keys=keys, prefix=prefix
-    )
-    state_names = concatenate_lists_of_names(
-        [sys.state_names for sys in systems], keys=keys, prefix=prefix
-    )
-    output_names = concatenate_lists_of_names(
-        [sys.output_names for sys in systems], keys=keys, prefix=prefix
-    )
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "input_names": input_names,
-        "state_names": state_names,
-        "output_names": output_names,
-    }
-
-
-def linear_systems_in_series(
-    systems, keys=None, verbose_names=False, prefix="sys"
-):
-    """Combine a sequence of linear systems into one system by connecting their
-    outputs and inputs in series.
-    """
-    n_sys = len(systems)
-    col_sizes = [sys["A"].shape[1] for sys in systems]
-    A_rows = []
-    B_rows = []
-    C_row = []
-    for i, sys in enumerate(systems):
-        A = sys["A"]
-        B = sys["B"]
-        C = sys["C"]
-        D = sys["D"]
-
-        # Add rows to A matrix
-        n_rows = A.shape[0]
-        assert n_rows == col_sizes[i], "A matrix not square"
-        A_row = []
-        if i > 0:
-            for j in range(i - 1):
-                A_row.append(cas.SX.zeros(n_rows, col_sizes[j]))
-            A_row.append(B @ systems[i - 1]["C"])
-        A_row.append(A)
-        for j in range(i + 1, n_sys):
-            A_row.append(cas.SX.zeros(n_rows, col_sizes[j]))
-        A_rows.append(A_row)
-
-        # Add rows to B matrix
-        if i > 0:
-            B_rows.append(B @ systems[i - 1]["D"])
-        else:
-            B_rows.append(B)
-
-        # Add columns to C matrix
-        if i < n_sys - 1:
-            C_row.append(systems[i + 1]["D"] @ C)
-        else:
-            C_row.append(C)
-
-    A = cas.sparsify(cas.blockcat(A_rows))
-    B = cas.sparsify(cas.vcat(B_rows))
-    C = cas.sparsify(cas.hcat(C_row))
-    D = reduce(cas.SX.__matmul__, (sys["D"] for sys in systems))
-    params = merge_param_dicts(
-        [sys.params for sys in systems],
-        keys=keys,
-        verbose_names=verbose_names,
-        prefix=prefix,
-    )
-    state_names = concatenate_lists_of_names(
-        [sys.state_names for sys in systems], keys=keys, prefix=prefix
-    )
-    return {
-        "A": A,
-        "B": B,
-        "C": C,
-        "D": D,
-        "params": params,
-        "state_names": state_names,
-    }
-
-
 def _dt_kwargs(systems):
     """{"dt": dt} of the systems' common time step (checked equal by
     validate_systems_are_compatible), or {} if they have none (e.g.
@@ -168,56 +71,36 @@ def _dt_kwargs(systems):
     return {} if dt is None else {"dt": dt}
 
 
-# TODO: Consider renaming connect_systems_in_parallel to connect_diagonal_system,
-# since it stacks inputs and outputs block-diagonally rather than implementing
-# the classical parallel (shared-input, summed-output) connection. See sum_systems.
-def connect_systems_in_parallel(
+def _check_equal_dims(systems, dims, func_name):
+    """Raise ValueError unless the systems all have the same values of
+    the attributes dims (e.g. ["nu", "ny"])."""
+    for dim in dims:
+        expected = getattr(systems[0], dim)
+        for sys in systems[1:]:
+            if getattr(sys, dim) != expected:
+                raise ValueError(
+                    f"All systems must have the same {dim} for {func_name}. "
+                    f"Got {dim}={getattr(sys, dim)}, expected "
+                    f"{dim}={expected}."
+                )
+
+
+def _combine_systems(
     systems,
     model_class,
-    keys=None,
-    verbose_names=False,
-    prefix="sys",
-    name=None,
-    sep="_",
+    shared_inputs,
+    summed_outputs,
+    keys,
+    verbose_names,
+    prefix,
+    name,
+    sep,
 ):
-    """Combine a collection of nonlinear systems into one large parallel
-    system.
-
-    This function works for both continuous-time and discrete-time systems.
-    The attribute names are automatically determined from the model_class.
-
-    Args:
-        systems (list): List of state-space model objects to combine in
-            parallel.
-        model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
-            attribute determines the naming conventions.
-        keys (list, optional): Custom keys for naming subsystems. If None,
-            defaults to [prefix + "1", prefix + "2", ...].
-        verbose_names (bool, optional): If True, use verbose parameter naming.
-            Default: False.
-        prefix (str, optional): Prefix for auto-generated subsystem keys.
-            Default: "sys".
-        name (str, optional): Name for the combined system. If None,
-            auto-generates from system names using sep as separator.
-            Default: None.
-        sep (str, optional): Separator for joining system names when
-            auto-generating the combined system name. Default: "_".
-
-    Returns:
-        StateSpaceModelCT or StateSpaceModelDT: Combined parallel system.
-
-    Example:
-        >>> # For continuous-time models:
-        >>> combined = connect_systems_in_parallel(
-        ...     [sys1, sys2], StateSpaceModelCT
-        ... )
-        >>>
-        >>> # For discrete-time models:
-        >>> combined = connect_systems_in_parallel(
-        ...     [sys1, sys2], StateSpaceModelDT
-        ... )
-    """
+    """The core of block_diag_systems, hstack_systems, vstack_systems
+    and connect_systems_in_parallel: the systems' states stacked, their
+    inputs shared (one input vector for all) or stacked, and their
+    outputs summed or stacked. Signal names are those of the first
+    system where shared or summed, else concatenated."""
     validate_systems_are_compatible(systems)
     attr_names = model_class._attr_names
     if keys is None:
@@ -231,6 +114,8 @@ def connect_systems_in_parallel(
     )
 
     t = cas.SX.sym("t")
+    if shared_inputs:
+        u = cas.SX.sym(attr_names["input_var"], systems[0].nu)
 
     u_signals = []
     x_states = []
@@ -241,240 +126,75 @@ def connect_systems_in_parallel(
         x = cas.SX.sym(attr_names["state_var"], sys.n)
         x_states.append(x)
 
-        u = cas.SX.sym(attr_names["input_var"], sys.nu)
-        u_signals.append(u)
+        if not shared_inputs:
+            u = cas.SX.sym(attr_names["input_var"], sys.nu)
+            u_signals.append(u)
 
         # Get state function and call it: f(t, x, u, *params.values())
         state_func = getattr(sys, attr_names["state_func"])
-        state_out = state_func(t, x, u, *sys.params.values())
-        state_outputs.append(state_out)
+        state_outputs.append(state_func(t, x, u, *sys.params.values()))
 
         # Get output function and call it: h(t, x, u, *params.values())
         output_func = getattr(sys, attr_names["output_func"])
-        y = output_func(t, x, u, *sys.params.values())
-        y_signals.append(y)
+        y_signals.append(output_func(t, x, u, *sys.params.values()))
 
     x = cas.vcat(x_states)
     n = x.shape[0]
-
-    u = cas.vcat(u_signals)
+    if not shared_inputs:
+        u = cas.vcat(u_signals)
     nu = u.shape[0]
-
     state_combined = cas.vcat(state_outputs)
     assert state_combined.shape == x.shape
 
+    if summed_outputs:
+        y = y_signals[0]
+        for y_i in y_signals[1:]:
+            y = y + y_i
+    else:
+        y = cas.vcat(y_signals)
+    ny = y.shape[0]
+
+    arg_names = [
+        "t",
+        attr_names["state_var"],
+        attr_names["input_var"],
+        *params.keys(),
+    ]
     state_function = cas.Function(
         attr_names["state_func"],
         [t, x, u, *params.values()],
         [state_combined],
-        [
-            "t",
-            attr_names["state_var"],
-            attr_names["input_var"],
-            *params.keys(),
-        ],
+        arg_names,
         [attr_names["state_output"]],
     )
-
-    y = cas.vcat(y_signals)
-    ny = y.shape[0]
-
     output_function = cas.Function(
         attr_names["output_func"],
         [t, x, u, *params.values()],
         [y],
-        [
-            "t",
-            attr_names["state_var"],
-            attr_names["input_var"],
-            *params.keys(),
-        ],
+        arg_names,
         [attr_names["output_var"]],
     )
 
-    state_names = concatenate_lists_of_names(
-        [sys.state_names for sys in systems],
-        keys=keys,
-        prefix=prefix,
-        verbose_names=verbose_names,
-    )
-    assert len(state_names) == n
+    def names(attr):
+        return concatenate_lists_of_names(
+            [getattr(sys, attr) for sys in systems],
+            keys=keys,
+            prefix=prefix,
+            verbose_names=verbose_names,
+        )
 
-    input_names = concatenate_lists_of_names(
-        [sys.input_names for sys in systems],
-        keys=keys,
-        prefix=prefix,
-        verbose_names=verbose_names,
+    state_names = names("state_names")
+    assert len(state_names) == n
+    input_names = systems[0].input_names if shared_inputs else names(
+        "input_names"
     )
     assert len(input_names) == nu
-
-    output_names = concatenate_lists_of_names(
-        [sys.output_names for sys in systems],
-        keys=keys,
-        prefix=prefix,
-        verbose_names=verbose_names,
+    output_names = systems[0].output_names if summed_outputs else names(
+        "output_names"
     )
     assert len(output_names) == ny
 
     # Generate combined system name if not provided
-    if name is None:
-        # Use separator to join system names
-        system_names = make_list_of_unique_names(
-            [sys.name for sys in systems], prefix=prefix
-        )
-        name = sep.join(system_names)
-
-    combined_system = model_class(
-        state_function,
-        output_function,
-        n,
-        nu,
-        ny,
-        **_dt_kwargs(systems),
-        params=params,
-        name=name,
-        input_names=input_names,
-        state_names=state_names,
-        output_names=output_names,
-    )
-
-    return combined_system
-
-
-def sum_systems(
-    systems,
-    model_class,
-    keys=None,
-    verbose_names=False,
-    prefix="sys",
-    name=None,
-    sep="+",
-):
-    """Combine a list of systems with shared inputs and summed outputs.
-
-    Each system receives the same input u and the outputs are summed,
-    giving a combined system with the same input and output dimensions
-    as each individual system. This is the classical parallel connection
-    used by control toolboxes (Matlab parallel(), Octave sys1 + sys2, etc.).
-
-    This function works for both continuous-time and discrete-time systems.
-
-    Args:
-        systems (list): List of state-space model objects to combine. All
-            must have the same nu and ny.
-        model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT).
-        keys (list, optional): Custom keys for naming subsystems. If None,
-            defaults to system names or [prefix + "1", prefix + "2", ...].
-        verbose_names (bool, optional): If True, use verbose parameter naming.
-            Default: False.
-        prefix (str, optional): Prefix for auto-generated subsystem keys.
-            Default: "sys".
-        name (str, optional): Name for the combined system. If None,
-            auto-generates by joining system names with sep.
-        sep (str, optional): Separator for joining system names when
-            auto-generating the combined system name. Default: "+".
-
-    Returns:
-        StateSpaceModelCT or StateSpaceModelDT: Combined system with shared
-            inputs and summed outputs.
-
-    Raises:
-        ValueError: If systems do not all have the same nu or ny.
-
-    Example:
-        >>> sys_combined = sum_systems(
-        ...     [sys1, sys2], model_class=StateSpaceModelCT
-        ... )
-        >>> # Equivalent to sys1 + sys2 via the __add__ operator.
-    """
-    validate_systems_are_compatible(systems)
-    nu = systems[0].nu
-    ny = systems[0].ny
-    for sys in systems[1:]:
-        if sys.nu != nu:
-            raise ValueError(
-                f"All systems must have the same nu for sum_systems. "
-                f"Got nu={sys.nu}, expected nu={nu}."
-            )
-        if sys.ny != ny:
-            raise ValueError(
-                f"All systems must have the same ny for sum_systems. "
-                f"Got ny={sys.ny}, expected ny={ny}."
-            )
-
-    attr_names = model_class._attr_names
-    if keys is None:
-        keys = [sys.name for sys in systems]
-    keys = make_list_of_unique_names(keys, prefix=prefix)
-    params = merge_param_dicts(
-        [sys.params for sys in systems],
-        keys,
-        verbose_names=verbose_names,
-        sep=sep,
-    )
-
-    t = cas.SX.sym("t")
-    u = cas.SX.sym(attr_names["input_var"], nu)
-
-    x_states = []
-    state_outputs = []
-    y_sum = None
-
-    for sys in systems:
-        x = cas.SX.sym(attr_names["state_var"], sys.n)
-        x_states.append(x)
-
-        state_func = getattr(sys, attr_names["state_func"])
-        state_out = state_func(t, x, u, *sys.params.values())
-        state_outputs.append(state_out)
-
-        output_func = getattr(sys, attr_names["output_func"])
-        y = output_func(t, x, u, *sys.params.values())
-        y_sum = y if y_sum is None else y_sum + y
-
-    x = cas.vcat(x_states)
-    n = x.shape[0]
-    state_combined = cas.vcat(state_outputs)
-    assert state_combined.shape == x.shape
-
-    state_function = cas.Function(
-        attr_names["state_func"],
-        [t, x, u, *params.values()],
-        [state_combined],
-        [
-            "t",
-            attr_names["state_var"],
-            attr_names["input_var"],
-            *params.keys(),
-        ],
-        [attr_names["state_output"]],
-    )
-
-    output_function = cas.Function(
-        attr_names["output_func"],
-        [t, x, u, *params.values()],
-        [y_sum],
-        [
-            "t",
-            attr_names["state_var"],
-            attr_names["input_var"],
-            *params.keys(),
-        ],
-        [attr_names["output_var"]],
-    )
-
-    state_names = concatenate_lists_of_names(
-        [sys.state_names for sys in systems],
-        keys=keys,
-        prefix=prefix,
-        verbose_names=verbose_names,
-    )
-    assert len(state_names) == n
-
-    input_names = systems[0].input_names
-    output_names = systems[0].output_names
-
     if name is None:
         system_names = make_list_of_unique_names(
             [sys.name for sys in systems], prefix=prefix
@@ -493,6 +213,298 @@ def sum_systems(
         input_names=input_names,
         state_names=state_names,
         output_names=output_names,
+    )
+
+
+def block_diag_systems(
+    systems,
+    model_class,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
+    name=None,
+    sep="_",
+):
+    """Combine systems side by side, unconnected: their inputs and
+    outputs stacked, each system's outputs depending only on its own
+    inputs. As transfer matrices, the block-diagonal matrix
+
+        G = [G1  0 ]    u = [u1]    y = [y1]
+            [ 0  G2]        [u2]        [y2]
+
+    (Matlab append(), python-control append()). Before 2026-11, this
+    was connect_systems_in_parallel, which now sums the outputs.
+
+    This function works for both continuous-time and discrete-time
+    systems. The attribute names are determined from the model_class.
+
+    Args:
+        systems (list): List of state-space model objects to combine.
+        model_class: Class to instantiate for the combined system
+            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
+            attribute determines the naming conventions.
+        keys (list, optional): Custom keys for naming subsystems. If None,
+            defaults to the system names or [prefix + "1", prefix + "2",
+            ...].
+        verbose_names (bool, optional): If True, use verbose parameter
+            naming. Default: False.
+        prefix (str, optional): Prefix for auto-generated subsystem keys.
+            Default: "sys".
+        name (str, optional): Name for the combined system. If None,
+            auto-generates from the system names using sep as separator.
+        sep (str, optional): Separator for joining system names when
+            auto-generating the combined system name (and for the
+            parameter names merge_param_dicts() makes unique).
+
+    Returns:
+        StateSpaceModelCT or StateSpaceModelDT: The combined system, with
+            nu and ny the sums of the systems' (default sep "_").
+
+    Example:
+        >>> combined = block_diag_systems([sys1, sys2], StateSpaceModelCT)
+    """
+    return _combine_systems(
+        systems,
+        model_class,
+        shared_inputs=False,
+        summed_outputs=False,
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+        name=name,
+        sep=sep,
+    )
+
+
+def hstack_systems(
+    systems,
+    model_class,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
+    name=None,
+    sep="_",
+):
+    """Combine systems with separate inputs and summed outputs:
+    y = y1 + y2 + ..., each yi from its own inputs ui. As transfer
+    matrices, the horizontal concatenation
+
+        G = [G1  G2]    u = [u1]    y = G1 u1 + G2 u2
+                            [u2]
+
+    (Matlab [G1, G2]). The output names are the first system's.
+
+    This function works for both continuous-time and discrete-time
+    systems. The attribute names are determined from the model_class.
+
+    Args:
+        systems (list): List of state-space model objects to combine.
+        model_class: Class to instantiate for the combined system
+            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
+            attribute determines the naming conventions.
+        keys (list, optional): Custom keys for naming subsystems. If None,
+            defaults to the system names or [prefix + "1", prefix + "2",
+            ...].
+        verbose_names (bool, optional): If True, use verbose parameter
+            naming. Default: False.
+        prefix (str, optional): Prefix for auto-generated subsystem keys.
+            Default: "sys".
+        name (str, optional): Name for the combined system. If None,
+            auto-generates from the system names using sep as separator.
+        sep (str, optional): Separator for joining system names when
+            auto-generating the combined system name (and for the
+            parameter names merge_param_dicts() makes unique).
+
+    Returns:
+        StateSpaceModelCT or StateSpaceModelDT: The combined system, with
+            nu the sum of the systems' and their common ny.
+
+    Raises:
+        ValueError: If the systems do not all have the same ny.
+
+    Example:
+        >>> # One output, the sum of a path model per input
+        >>> combined = hstack_systems([path1, path2], StateSpaceModelDT)
+    """
+    _check_equal_dims(systems, ["ny"], "hstack_systems")
+    return _combine_systems(
+        systems,
+        model_class,
+        shared_inputs=False,
+        summed_outputs=True,
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+        name=name,
+        sep=sep,
+    )
+
+
+def vstack_systems(
+    systems,
+    model_class,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
+    name=None,
+    sep="_",
+):
+    """Combine systems with shared inputs and stacked outputs: every
+    system gets the same inputs u. As transfer matrices, the vertical
+    concatenation
+
+        G = [G1]    y = [y1] = [G1 u]
+            [G2]        [y2]   [G2 u]
+
+    (Matlab [G1; G2]). The input names are the first system's.
+
+    This function works for both continuous-time and discrete-time
+    systems. The attribute names are determined from the model_class.
+
+    Args:
+        systems (list): List of state-space model objects to combine.
+        model_class: Class to instantiate for the combined system
+            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
+            attribute determines the naming conventions.
+        keys (list, optional): Custom keys for naming subsystems. If None,
+            defaults to the system names or [prefix + "1", prefix + "2",
+            ...].
+        verbose_names (bool, optional): If True, use verbose parameter
+            naming. Default: False.
+        prefix (str, optional): Prefix for auto-generated subsystem keys.
+            Default: "sys".
+        name (str, optional): Name for the combined system. If None,
+            auto-generates from the system names using sep as separator.
+        sep (str, optional): Separator for joining system names when
+            auto-generating the combined system name (and for the
+            parameter names merge_param_dicts() makes unique).
+
+    Returns:
+        StateSpaceModelCT or StateSpaceModelDT: The combined system, with
+            their common nu and ny the sum of the systems'.
+
+    Raises:
+        ValueError: If the systems do not all have the same nu.
+
+    Example:
+        >>> # The outputs of several models of the same inputs
+        >>> combined = vstack_systems([model1, model2], StateSpaceModelDT)
+    """
+    _check_equal_dims(systems, ["nu"], "vstack_systems")
+    return _combine_systems(
+        systems,
+        model_class,
+        shared_inputs=True,
+        summed_outputs=False,
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+        name=name,
+        sep=sep,
+    )
+
+
+def connect_systems_in_parallel(
+    systems,
+    model_class,
+    keys=None,
+    verbose_names=False,
+    prefix="sys",
+    name=None,
+    sep="+",
+):
+    """Combine systems with shared inputs and summed outputs: the
+    classical parallel connection, y = G1 u + G2 u + ... (Matlab
+    parallel(), python-control parallel(), sys1 + sys2). The combined
+    system has the same input and output dimensions, and names, as the
+    first.
+
+    Before 2026-11, this was sum_systems, and connect_systems_in_parallel
+    was what is now block_diag_systems.
+
+    This function works for both continuous-time and discrete-time
+    systems. The attribute names are determined from the model_class.
+
+    Args:
+        systems (list): List of state-space model objects to combine.
+        model_class: Class to instantiate for the combined system
+            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
+            attribute determines the naming conventions.
+        keys (list, optional): Custom keys for naming subsystems. If None,
+            defaults to the system names or [prefix + "1", prefix + "2",
+            ...].
+        verbose_names (bool, optional): If True, use verbose parameter
+            naming. Default: False.
+        prefix (str, optional): Prefix for auto-generated subsystem keys.
+            Default: "sys".
+        name (str, optional): Name for the combined system. If None,
+            auto-generates from the system names using sep as separator.
+        sep (str, optional): Separator for joining system names when
+            auto-generating the combined system name (and for the
+            parameter names merge_param_dicts() makes unique).
+
+    Returns:
+        StateSpaceModelCT or StateSpaceModelDT: The combined system (the
+            default sep is "+").
+
+    Raises:
+        ValueError: If the systems do not all have the same nu and ny.
+
+    Example:
+        >>> combined = connect_systems_in_parallel(
+        ...     [sys1, sys2], StateSpaceModelCT
+        ... )
+        >>> # Equivalent to sys1 + sys2 via the __add__ operator.
+    """
+    _check_equal_dims(systems, ["nu", "ny"], "connect_systems_in_parallel")
+    return _combine_systems(
+        systems,
+        model_class,
+        shared_inputs=True,
+        summed_outputs=True,
+        keys=keys,
+        verbose_names=verbose_names,
+        prefix=prefix,
+        name=name,
+        sep=sep,
+    )
+
+
+def negate_system(sys, model_class):
+    """The system with its outputs negated, y = -h(t, x, u) (the -sys
+    operator; sys1 - sys2 is sys1 + (-sys2)). The states, parameters
+    and names are the same; the name, if any, gets a leading "-"."""
+    attr_names = model_class._attr_names
+    output_func = getattr(sys, attr_names["output_func"])
+    t = cas.SX.sym("t")
+    x = cas.SX.sym(attr_names["state_var"], sys.n)
+    u = cas.SX.sym(attr_names["input_var"], sys.nu)
+    params = sys.params
+    arg_names = [
+        "t",
+        attr_names["state_var"],
+        attr_names["input_var"],
+        *params.keys(),
+    ]
+    output_function = cas.Function(
+        attr_names["output_func"],
+        [t, x, u, *params.values()],
+        [-output_func(t, x, u, *params.values())],
+        arg_names,
+        [attr_names["output_var"]],
+    )
+    return model_class(
+        getattr(sys, attr_names["state_func"]),
+        output_function,
+        sys.n,
+        sys.nu,
+        sys.ny,
+        **_dt_kwargs([sys]),
+        params=params,
+        name=None if sys.name is None else f"-{sys.name}",
+        input_names=sys.input_names,
+        state_names=sys.state_names,
+        output_names=sys.output_names,
     )
 
 
@@ -1101,14 +1113,13 @@ def connect_systems(
         - Connections must not create algebraic loops (no automatic detection)
 
     See Also:
-        connect_systems_in_parallel: Combine systems without
-            connections
+        block_diag_systems: Combine systems without connections
         connect_systems_in_series: Connect systems in series
     """
     attr_names = model_class._attr_names
 
     # Step 1: Create parallel system
-    parallel_sys = connect_systems_in_parallel(
+    parallel_sys = block_diag_systems(
         systems,
         model_class,
         keys=keys,

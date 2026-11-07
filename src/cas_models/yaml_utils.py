@@ -35,6 +35,17 @@ that reads back exactly) and dense: zeros in a sparse matrix are written
 as values (the models' constructors sparsify their matrices). Matrices
 load as CasADi DM.
 
+model.to_yaml() (or to_yaml(model)) gives the same YAML as text, with
+everything in it: matrices inline whatever their size, and functions
+as their CasADi serialization (a long string), not files:
+
+      F: {Function: jhpnnagiieahaaaadaaaa...}
+
+StateSpaceModelCT.from_yaml(text) or StateSpaceModelDT.from_yaml(text)
+(or from_yaml(text)) rebuilds the model. It also reads text that refers
+to data files, e.g. a model.yaml read from a folder, given the folder
+they are in.
+
 Arguments equal to their defaults in the class's __init__ (None, or a
 plain number or string) are left out, and so is args if none are left
 (e.g. a model with symbolic parameters, SSModelCTLinearFOSISO(), is just
@@ -52,6 +63,10 @@ save_model
     Save a model to a folder.
 load_model
     Load a model from a folder.
+to_yaml
+    A model as YAML text.
+from_yaml
+    A model from YAML text.
 base_save_args
     The base-class form of a model, for _save_args.
 base_from_saved_args
@@ -120,8 +135,12 @@ def read_tsv(path, shape):
 
 
 def _encode(value, folder, key):
-    """A YAML value for an argument, writing data files to folder."""
+    """A YAML value for an argument, writing data files to folder (if
+    None, everything inline: functions serialized, matrices of any
+    size)."""
     if isinstance(value, cas.Function):
+        if folder is None:
+            return {"Function": value.serialize()}
         file = folder / f"{key}.casadi"
         value.save(str(file))
         return {"file": file.name}
@@ -136,10 +155,13 @@ def _encode(value, folder, key):
         if matrix.size == 0:
             return {"DM": [], "shape": list(matrix.shape)}
         nrow, ncol = matrix.shape
-        if ncol == 1 and nrow <= MAX_INLINE_VECTOR:
+        inline = folder is None
+        if ncol == 1 and (inline or nrow <= MAX_INLINE_VECTOR):
             return {"DM": [float(v) for v in matrix[:, 0]]}
-        if (nrow == 1 and ncol <= MAX_INLINE_VECTOR) or (
-            nrow <= MAX_INLINE_MATRIX and ncol <= MAX_INLINE_MATRIX
+        if (
+            inline
+            or (nrow == 1 and ncol <= MAX_INLINE_VECTOR)
+            or (nrow <= MAX_INLINE_MATRIX and ncol <= MAX_INLINE_MATRIX)
         ):
             return {"DM": [[float(v) for v in row] for row in matrix]}
         file = folder / f"{key}.tsv"
@@ -185,9 +207,24 @@ def _file_refs(value):
     return []
 
 
+def _is_inline_function(value):
+    return (
+        isinstance(value, dict)
+        and set(value) == {"Function"}
+        and isinstance(value["Function"], str)
+    )
+
+
 def _decode(value, folder):
     """The argument from a YAML value, reading data files from folder."""
+    if _is_inline_function(value):
+        return cas.Function.deserialize(value["Function"])
     if _is_file_ref(value):
+        if folder is None:
+            raise ValueError(
+                f"the YAML refers to a data file, {value['file']}: give "
+                "the folder it is in"
+            )
         file = folder / value["file"]
         if file.suffix == ".casadi":
             return cas.Function.load(str(file))
@@ -220,13 +257,34 @@ def _read_model_file(folder):
     if not path.is_file():
         raise FileNotFoundError(f"{folder}: no {MODEL_FILE}")
     with open(path) as f:
-        data = yaml.safe_load(f)
+        return _check_format(yaml.safe_load(f), path)
+
+
+def _check_format(data, where):
+    """data (a parsed model YAML), if it has this format."""
     if not isinstance(data, dict) or data.get("cas_models_format") != FORMAT:
         found = (
             data.get("cas_models_format") if isinstance(data, dict) else None
         )
-        raise ValueError(f"{path}: cas_models_format {found!r}, not {FORMAT}")
+        raise ValueError(f"{where}: cas_models_format {found!r}, not {FORMAT}")
     return data
+
+
+def _model_data(model, folder):
+    """The model's YAML document as a dict, writing its data files to
+    folder (None: everything inline)."""
+    cls, args = model._save_args()
+    args = _without_defaults(cls, args)
+    data = {"cas_models_format": FORMAT, "class": cls.__name__}
+    if args:
+        data["args"] = {k: _encode(v, folder, k) for k, v in args.items()}
+    return data
+
+
+def _dump(data, stream=None):
+    return yaml.safe_dump(
+        data, stream, sort_keys=False, default_flow_style=None
+    )
 
 
 def save_model(model, folder, overwrite=False):
@@ -246,13 +304,16 @@ def save_model(model, folder, overwrite=False):
                 (folder / name).unlink(missing_ok=True)
             (folder / MODEL_FILE).unlink()
     folder.mkdir(parents=True, exist_ok=True)
-    cls, args = model._save_args()
-    args = _without_defaults(cls, args)
-    data = {"cas_models_format": FORMAT, "class": cls.__name__}
-    if args:
-        data["args"] = {k: _encode(v, folder, k) for k, v in args.items()}
+    data = _model_data(model, folder)
     with open(folder / MODEL_FILE, "w") as f:
-        yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)
+        _dump(data, f)
+
+
+def to_yaml(model):
+    """The model as YAML text: what save_model() writes to model.yaml,
+    with everything inline (functions as their CasADi serialization,
+    matrices of any size) so that the text alone rebuilds it."""
+    return _dump(_model_data(model, None))
 
 
 def _is_default(value, default):
@@ -322,6 +383,17 @@ def load_model(folder, base=None):
     data = _read_model_file(folder)
     bases = _base_classes() if base is None else [base]
     return _make_model(data, folder, bases)
+
+
+def from_yaml(text, base=None, folder=None):
+    """A model from YAML text (as to_yaml() or save_model() write it).
+    With base, the class must be base or one of its subclasses; without,
+    StateSpaceModelCT, StateSpaceModelDT or one of their subclasses.
+    folder is where the data files the text refers to are, if any (e.g.
+    the text of a saved model.yaml)."""
+    data = _check_format(yaml.safe_load(text), "YAML text")
+    bases = _base_classes() if base is None else [base]
+    return _make_model(data, None if folder is None else Path(folder), bases)
 
 
 def _base_classes():

@@ -21,7 +21,7 @@ from cas_models.continuous_time.regulators import (
     SSModelCTPIDInt,
     SSModelCTPIInt,
 )
-from cas_models.transformations import block_diag, sum_systems
+from cas_models.transformations import block_diag, connect_systems_in_parallel
 from cas_models.validation import is_ss_ct, is_ss_dt
 
 
@@ -774,8 +774,8 @@ def test_add_operator_parallel_connection():
     y_combined = float(sys_combined.h(t_val, x, u))
     assert np.isclose(y_combined, y1 + y2)
 
-    # + is equivalent to sum_systems
-    sys_via_func = sum_systems([sys1, sys2], model_class=StateSpaceModelCT)
+    # + is equivalent to connect_systems_in_parallel
+    sys_via_func = connect_systems_in_parallel([sys1, sys2], model_class=StateSpaceModelCT)
     assert str(sys_combined) == str(sys_via_func)
 
 
