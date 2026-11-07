@@ -39,8 +39,14 @@ from cas_models.discrete_time.models import (
     StateSpaceModelDTTFSISO,
 )
 from cas_models.transformations import (
+    block_diag_systems,
     connect_feedback_system,
     connect_systems,
+    connect_systems_in_parallel,
+    connect_systems_in_series,
+    hstack_systems,
+    negate_system,
+    vstack_systems,
 )
 from cas_models.yaml_utils import (
     _decode,
@@ -940,3 +946,441 @@ def test_from_yaml_errors():
     text = SSModelCTLinearFOSISO().to_yaml()
     with pytest.raises(ValueError, match="isn't StateSpaceModelDT"):
         StateSpaceModelDT.from_yaml(text)
+
+
+# Models built by connection functions (function: ..., args: ...)
+
+
+def arx(na, nb, name, **kwargs):
+    return StateSpaceModelDTARXSISO(na=na, nb=nb, name=name, **kwargs)
+
+
+ARX_NODES = (
+    "  - class: StateSpaceModelDTARXSISO\n"
+    "    args: {na: 2, nb: 2, dt: 2.0, name: CRAC1}\n"
+    "  - class: StateSpaceModelDTARXSISO\n"
+    "    args: {na: 1, nb: 1, dt: 2.0, name: CRAC2}\n"
+)
+
+
+def arx_pair():
+    return [arx(2, 2, "CRAC1", dt=2.0), arx(1, 1, "CRAC2", dt=2.0)]
+
+
+# (YAML text without the cas_models_format line, the model built in code)
+FUNCTION_CASES = {
+    "block_diag_systems": (
+        "function: block_diag_systems\nargs:\n  systems:\n" + ARX_NODES,
+        lambda: block_diag_systems(arx_pair(), StateSpaceModelDT),
+    ),
+    "hstack_systems": (
+        "function: hstack_systems\nargs:\n  name: R11\n  systems:\n"
+        + ARX_NODES,
+        lambda: hstack_systems(arx_pair(), StateSpaceModelDT, name="R11"),
+    ),
+    "vstack_systems": (
+        "function: vstack_systems\n"
+        "args:\n"
+        "  systems:\n"
+        "  - {class: SSModelCTLinearFOSISO, args: {K: 2.0, name: a}}\n"
+        "  - {class: SSModelCTLinearO2SISO, args: {name: b}}\n",
+        lambda: vstack_systems(
+            [SSModelCTLinearFOSISO(K=2.0, name="a"), SSModelCTLinearO2SISO(name="b")],
+            StateSpaceModelCT,
+        ),
+    ),
+    "connect_systems_in_parallel": (
+        "function: connect_systems_in_parallel\n"
+        "args:\n"
+        "  systems:\n"
+        "  - {class: SSModelCTLinearFOSISO, args: {name: a}}\n"
+        "  - {class: SSModelCTLinearFOSISO, args: {name: b}}\n"
+        "  keys: [a, b]\n"
+        "  verbose_names: true\n",
+        lambda: connect_systems_in_parallel(
+            [SSModelCTLinearFOSISO(name="a"), SSModelCTLinearFOSISO(name="b")],
+            StateSpaceModelCT,
+            keys=["a", "b"],
+            verbose_names=True,
+        ),
+    ),
+    "connect_systems_in_series": (
+        "function: connect_systems_in_series\n"
+        "args:\n"
+        "  systems:\n"
+        "  - {class: SSModelCTPIInt, args: {Kc: 0.5, Ti: 30.0, name: ctrl}}\n"
+        "  - {class: SSModelCTLinearFOSISO, args: {K: 1, T1: 2, name: plant}}\n",
+        lambda: connect_systems_in_series(
+            [
+                SSModelCTPIInt(Kc=0.5, Ti=30.0, name="ctrl"),
+                SSModelCTLinearFOSISO(K=1, T1=2, name="plant"),
+            ],
+            StateSpaceModelCT,
+        ),
+    ),
+    "connect_systems": (
+        "function: connect_systems\n"
+        "args:\n"
+        "  systems:\n"
+        "  - class: StateSpaceModelDTARXSISO\n"
+        "    args: {na: 2, nb: 2, input_name: u, output_name: y}\n"
+        "  - class: StateSpaceModelDTARXSISO\n"
+        "    args: {na: 1, nb: 1, input_name: u, output_name: y}\n"
+        "  connections:\n"
+        "    CRAC1_u: CRAC1\n"
+        "    CRAC2_u: CRAC2\n"
+        "    R11: [CRAC1_y, CRAC2_y]\n"
+        "  input_names: [CRAC1, CRAC2]\n"
+        "  output_names: [R11]\n"
+        "  keys: [CRAC1, CRAC2]\n"
+        "  verbose_names: true\n"
+        "  name: R11\n",
+        dt_connected_arx,
+    ),
+    "connect_feedback_system": (
+        "function: connect_feedback_system\n"
+        "args:\n"
+        "  sys1:\n"
+        "    function: connect_systems_in_series\n"
+        "    args:\n"
+        "      systems:\n"
+        "      - {class: SSModelCTPIInt, args: {name: ctrl}}\n"
+        "      - {class: SSModelCTLinearFOSISO, args: {K: 1, T1: 2, name: plant}}\n",
+        ct_pi_feedback,
+    ),
+    "negate_system": (
+        "function: negate_system\n"
+        "args:\n"
+        "  sys: {class: SSModelCTLinearFOSISO, args: {K: 2.0, name: a}}\n",
+        lambda: -SSModelCTLinearFOSISO(K=2.0, name="a"),
+    ),
+    "nested": (
+        "function: hstack_systems\n"
+        "args:\n"
+        "  systems:\n"
+        "  - function: vstack_systems\n"
+        "    args:\n"
+        "      systems:\n"
+        "      - {class: SSModelCTLinearFOSISO, args: {name: a}}\n"
+        "      - {class: SSModelCTLinearFOSISO, args: {name: b}}\n"
+        "  - function: block_diag_systems\n"
+        "    args:\n"
+        "      systems:\n"
+        "      - {class: SSModelCTLinearFOSISO, args: {name: c}}\n"
+        "      - {function: negate_system, args: {sys: {class: SSModelCTLinearFOSISO, args: {name: d}}}}\n",
+        lambda: hstack_systems(
+            [
+                vstack_systems(
+                    [SSModelCTLinearFOSISO(name="a"), SSModelCTLinearFOSISO(name="b")],
+                    StateSpaceModelCT,
+                ),
+                block_diag_systems(
+                    [
+                        SSModelCTLinearFOSISO(name="c"),
+                        -SSModelCTLinearFOSISO(name="d"),
+                    ],
+                    StateSpaceModelCT,
+                ),
+            ],
+            StateSpaceModelCT,
+        ),
+    ),
+    "model_class given": (
+        "function: hstack_systems\n"
+        "args:\n  model_class: StateSpaceModelDT\n  systems:\n" + ARX_NODES,
+        lambda: hstack_systems(arx_pair(), StateSpaceModelDT),
+    ),
+    "connection of a class node with a file-free nested model": (
+        "function: connect_systems_in_parallel\n"
+        "args:\n"
+        "  systems:\n"
+        "  - class: StateSpaceModelDTFromCTRK4\n"
+        "    args:\n"
+        "      model_ct: {class: SSModelCTLinearFOSISO, args: {K: 2.0}}\n"
+        "      dt: 1.0\n"
+        "  - class: StateSpaceModelDTTFSISO\n"
+        "    args: {num: [0.2], den: [1, -0.8], dt: 1.0}\n",
+        lambda: connect_systems_in_parallel(
+            [
+                StateSpaceModelDTFromCTRK4(SSModelCTLinearFOSISO(K=2.0), 1.0),
+                StateSpaceModelDTTFSISO(num=[0.2], den=[1, -0.8], dt=1.0),
+            ],
+            StateSpaceModelDT,
+        ),
+    ),
+}
+
+
+def test_function_cases_cover_all_functions():
+    from cas_models.yaml_utils import CONNECTION_FUNCTIONS
+
+    assert set(CONNECTION_FUNCTIONS) <= set(FUNCTION_CASES)
+
+
+def assert_same_connected(model, expected):
+    """The same class, functions (exactly), parameters, dimensions,
+    names and time step"""
+    assert_same_functions(model, expected)
+    for attr in (
+        "n",
+        "nu",
+        "ny",
+        "name",
+        "input_names",
+        "state_names",
+        "output_names",
+    ):
+        assert getattr(model, attr) == getattr(expected, attr), attr
+    assert getattr(model, "dt", None) == getattr(expected, "dt", None)
+
+
+@pytest.mark.parametrize("name", FUNCTION_CASES)
+def test_from_yaml_function(name, tmp_path):
+    """A function node builds the model the function builds, from
+    from_yaml(), the base class's from_yaml() and load_model()"""
+    text, make_model = FUNCTION_CASES[name]
+    expected = make_model()
+    base = (
+        StateSpaceModelCT
+        if isinstance(expected, StateSpaceModelCT)
+        else StateSpaceModelDT
+    )
+    text = "cas_models_format: 1\n" + text
+    assert_same_connected(from_yaml(text), expected)
+    assert_same_connected(base.from_yaml(text), expected)
+    write_model_yaml(tmp_path / "model", text.split("\n", 1)[1])
+    assert_same_connected(load_model(tmp_path / "model"), expected)
+    assert_same_connected(base.load(tmp_path / "model"), expected)
+
+
+def test_from_yaml_function_with_data_file():
+    """Nested class nodes can refer to data files (given the folder)"""
+    folder = MODELS_DIR / "ct_abcd_6_states"
+    text = (
+        "cas_models_format: 1\n"
+        "function: connect_systems_in_parallel\n"
+        "args:\n"
+        "  systems:\n"
+        "  - " + (folder / "model.yaml").read_text().split("\n", 1)[1]
+        .replace("\n", "\n    ").rstrip()
+        + "\n  - class: StateSpaceModelCTFromABCD\n"
+        "    args: {A: {file: A.tsv, shape: [6, 6]}, B: {DM: [1, 0, 0, 0, 0, 0]},"
+        " C: {DM: [[0.1667, 0.1667, 0.1667, 0.1667, 0.1667, 0.1667]]}, D: 0.0}\n"
+    )
+    model = from_yaml(text, folder=folder)
+    assert (model.n, model.nu, model.ny) == (12, 1, 1)
+    with pytest.raises(ValueError, match="give the folder it is in"):
+        from_yaml(text)
+
+
+FUNCTION_ERRORS = {
+    "unknown function": (
+        "function: no_such_function\nargs: {systems: []}\n",
+        "'no_such_function' isn't one of block_diag_systems",
+    ),
+    "format in a nested model": (
+        "function: hstack_systems\n"
+        "args:\n"
+        "  systems:\n"
+        "  - cas_models_format: 1\n"
+        "    class: SSModelCTLinearFOSISO\n",
+        "a model has only class and args, not cas_models_format",
+    ),
+    "class and function": (
+        "function: hstack_systems\nclass: SSModelCTLinearFOSISO\n",
+        "a class or a function, not both",
+    ),
+    "positional args": (
+        "function: hstack_systems\nargs: [1, 2]\n",
+        "positional arguments aren't supported",
+    ),
+    "no model": ("args: {K: 1.0}\n", "no model"),
+    "no models to infer model_class": (
+        "function: block_diag_systems\nargs: {systems: []}\n",
+        "Cannot validate empty system list",
+    ),
+    "unknown model_class": (
+        "function: hstack_systems\n"
+        "args:\n"
+        "  model_class: NoSuchClass\n"
+        "  systems: [{class: SSModelCTLinearFOSISO}]\n",
+        "'NoSuchClass' isn't",
+    ),
+}
+
+
+@pytest.mark.parametrize("name", FUNCTION_ERRORS)
+def test_from_yaml_function_errors(name):
+    text, match = FUNCTION_ERRORS[name]
+    with pytest.raises(ValueError, match=match):
+        from_yaml("cas_models_format: 1\n" + text)
+
+
+def test_from_yaml_function_wrong_base():
+    """With a base class, the function's model must be one"""
+    text = (
+        "cas_models_format: 1\nfunction: hstack_systems\n"
+        "args:\n  systems:\n" + ARX_NODES
+    )
+    with pytest.raises(ValueError, match="makes a StateSpaceModelDT, which isn't"):
+        StateSpaceModelCT.from_yaml(text)
+    with pytest.raises(ValueError, match="isn't StateSpaceModelDTARXSISO"):
+        StateSpaceModelDTARXSISO.from_yaml(text)
+
+
+def test_from_yaml_function_mixed_ct_dt():
+    """The function's own checks apply (CT and DT can't be combined)"""
+    text = (
+        "cas_models_format: 1\nfunction: hstack_systems\nargs:\n"
+        "  systems:\n"
+        "  - {class: SSModelCTLinearFOSISO}\n"
+        "  - {class: StateSpaceModelDTARXSISO, args: {na: 1, nb: 1}}\n"
+    )
+    with pytest.raises(ValueError, match="Cannot combine systems with different types"):
+        from_yaml(text)
+
+
+# Symbols: {symbol: name} and {symbol: name, shape: [...]}
+
+H = "cas_models_format: 1\n"
+
+SHARED = (
+    "function: vstack_systems\n"
+    "args:\n"
+    "  systems:\n"
+    "  - class: SSModelCTLinearO2SISO\n"
+    "    args: {K: {symbol: K}, T1: {symbol: T1}, T2: 5.0, name: a}\n"
+    "  - class: SSModelCTLinearFOSISO\n"
+    "    args: {K: {symbol: K}, T1: {symbol: T1}, name: b}\n"
+)
+
+
+def test_symbol_shared_parameters(tmp_path):
+    """The same name is the same symbol: one parameter for both models,
+    as when the models are built with the same symbols in code"""
+    model = from_yaml(H + SHARED)
+    assert list(model.params) == ["K", "T1"]
+    K, T1 = cas.SX.sym("K"), cas.SX.sym("T1")
+    expected = vstack_systems(
+        [
+            SSModelCTLinearO2SISO(K=K, T1=T1, T2=5.0, name="a"),
+            SSModelCTLinearFOSISO(K=K, T1=T1, name="b"),
+        ]
+    )
+    assert_same_connected(model, expected)
+    write_model_yaml(tmp_path / "model", SHARED)
+    assert_same_connected(load_model(tmp_path / "model"), expected)
+
+
+def test_symbol_shared_verbose_names():
+    """With verbose_names, a shared parameter names all its systems"""
+    text = SHARED.replace("args:\n  systems:", "args:\n  verbose_names: true\n  systems:")
+    model = from_yaml(H + text)
+    assert list(model.params) == ["a_b_K", "a_b_T1"]
+
+
+def test_symbol_shared_across_nested_functions():
+    text = (
+        "function: connect_systems_in_parallel\n"
+        "args:\n"
+        "  systems:\n"
+        "  - function: connect_systems_in_series\n"
+        "    args:\n"
+        "      systems:\n"
+        "      - {class: SSModelCTLinearFOSISO, args: {K: {symbol: K}, T1: 1.0}}\n"
+        "      - {class: SSModelCTLinearFOSISO, args: {K: 2.0, T1: {symbol: T}}}\n"
+        "  - {class: SSModelCTLinearFOSISO, args: {K: {symbol: K}, T1: {symbol: T}}}\n"
+    )
+    model = from_yaml(H + text)
+    assert sorted(model.params) == ["K", "T"]
+
+
+def test_symbol_separate_models_get_separate_symbols():
+    """Without symbols (or across documents), parameters aren't shared"""
+    text = SHARED.replace("{symbol: K}", "null").replace("{symbol: T1}", "null")
+    model = from_yaml(H + text)
+    assert len(model.params) == 4  # renamed apart: a_K, b_K, ...
+    m1, m2 = from_yaml(H + SHARED), from_yaml(H + SHARED)
+    assert m1.params["K"] is not m2.params["K"]
+
+
+@pytest.mark.parametrize(
+    "args, params",
+    [
+        # A scalar (the default shape)
+        ("{poles: [{symbol: p}], nb: 1}", ["p", "b"]),
+        # A vector: [n] is a column
+        ("{poles: {symbol: p, shape: [2]}, nb: 1}", ["p_0", "p_1", "b"]),
+        ("{poles: {symbol: p, shape: [2, 1]}, nb: 1}", ["p_0", "p_1", "b"]),
+        # In a list, with numbers
+        ("{poles: [{symbol: p_0}, 0.5], B: [{symbol: g}, 0.1]}", ["p_0", "g"]),
+        # The same symbol twice in one model
+        ("{poles: [{symbol: p}, {symbol: p}], nb: 1}", ["p", "b"]),
+    ],
+)
+def test_symbol_arx(args, params):
+    model = from_yaml(H + f"class: StateSpaceModelDTARXSISO\nargs: {args}\n")
+    assert list(model.params) == params
+
+
+def test_symbol_vector_matches_code():
+    model = from_yaml(
+        H + "class: StateSpaceModelDTARXSISO\n"
+        "args: {poles: {symbol: p, shape: [2]}, zeros: [{symbol: z}], gain: 0.5}\n"
+    )
+    expected = StateSpaceModelDTARXSISO(
+        poles=cas.SX.sym("p", 2), zeros=[cas.SX.sym("z")], gain=0.5
+    )
+    assert_same_functions(model, expected)
+
+
+def test_symbol_matrices():
+    model = from_yaml(
+        H + "class: StateSpaceModelCTFromABCD\n"
+        "args:\n"
+        "  A: {symbol: A, shape: [2, 2]}\n"
+        "  B: [[1.0], [0.0]]\n"
+        "  C: [[0.0, 1.0]]\n"
+        "  D: 0.0\n"
+    )
+    assert sorted(model.params) == ["A_0", "A_1", "A_2", "A_3"]
+    model = from_yaml(
+        H + "class: StateSpaceModelDTDelay\n"
+        "args: {nk: 2, nu: 2, G: [[1.0, 0.0], [0.0, {symbol: g}]]}\n"
+    )
+    assert list(model.params) == ["g"]
+
+
+SYMBOL_ERRORS = {
+    "zero size": ("{symbol: p, shape: [0]}", "positive integers"),
+    "negative": ("{symbol: p, shape: [-1]}", "positive integers"),
+    "three dimensions": ("{symbol: p, shape: [2, 2, 2]}", "one or two"),
+    "not a list": ("{symbol: p, shape: 2}", "a list of one or two"),
+    "empty": ("{symbol: p, shape: []}", "a list of one or two"),
+    "bool": ("{symbol: p, shape: [true]}", "positive integers"),
+    "extra key": ("{symbol: p, value: 2}", "only symbol and shape, not value"),
+    "not an identifier": ("{symbol: 'p 1'}", "valid identifier"),
+}
+
+
+@pytest.mark.parametrize("name", SYMBOL_ERRORS)
+def test_symbol_errors(name):
+    node, match = SYMBOL_ERRORS[name]
+    with pytest.raises(ValueError, match=match):
+        from_yaml(H + f"class: StateSpaceModelDTARXSISO\nargs: {{poles: {node}, nb: 1}}\n")
+
+
+def test_symbol_shape_must_agree():
+    text = (
+        "class: StateSpaceModelDTARXSISO\n"
+        "args: {poles: {symbol: p, shape: [2]}, B: [{symbol: p}]}\n"
+    )
+    with pytest.raises(ValueError, match=r"symbol p: shape \[1, 1\] here, \[2, 1\]"):
+        from_yaml(H + text)
+
+
+def test_symbol_vector_for_a_scalar_argument():
+    """The class's own checks apply"""
+    text = "class: SSModelCTLinearFOSISO\nargs: {K: {symbol: K, shape: [2]}}\n"
+    with pytest.raises(ValueError, match="K: give a scalar, not 2 values"):
+        from_yaml(H + text)

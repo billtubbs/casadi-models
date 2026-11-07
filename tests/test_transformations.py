@@ -1194,8 +1194,17 @@ def test_connect_feedback_system_errors():
     """Error handling for invalid arguments."""
     plant = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="plant")
 
-    with pytest.raises(ValueError, match="model_class must be specified"):
-        connect_feedback_system(plant, model_class=None)
+    # model_class can be left out: it is the plant's base class
+    inferred = connect_feedback_system(plant)
+    given = connect_feedback_system(plant, model_class=StateSpaceModelCT)
+    assert type(inferred) is StateSpaceModelCT
+    assert inferred.f.serialize() == given.f.serialize()
+    assert inferred.h.serialize() == given.h.serialize()
+
+    # CT and DT can't be mixed
+    dt_sys = StateSpaceModelDTTFSISO(num=[0.2], den=[1, -0.8])
+    with pytest.raises(ValueError, match="continuous-time and discrete-time"):
+        connect_feedback_system(plant, sys2=dt_sys)
 
     # sys2 dimension mismatch: use a two-output system as feedback for a SISO forward path
     plant_a = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="a")
@@ -1381,3 +1390,69 @@ def test_negate_symbolic_params():
         float(neg.h(0.0, x, u, 2.0, 4.0)), -float(sys.h(0.0, x, u, 2.0, 4.0))
     )
     assert neg.name is None
+
+
+# model_class left out: the systems' base class (infer_model_class)
+
+
+def test_infer_model_class():
+    from cas_models.discrete_time.models import StateSpaceModelDTARXSISO
+    from cas_models.transformations import infer_model_class
+
+    ct = [SSModelCTLinearFOSISO(), SSModelCTLinearFONoGainSISO()]
+    dt = [StateSpaceModelDTARXSISO(na=1, nb=1), StateSpaceModelDTTFSISO(num=[1], den=[1, -0.5])]
+    assert infer_model_class(ct) is StateSpaceModelCT
+    assert infer_model_class(dt) is StateSpaceModelDT
+    with pytest.raises(ValueError, match="no systems"):
+        infer_model_class([])
+    with pytest.raises(ValueError, match="continuous-time and discrete-time"):
+        infer_model_class([ct[0], dt[0]])
+    with pytest.raises(ValueError, match="system 1 isn't a StateSpaceModelCT"):
+        infer_model_class([ct[0], 2.0])
+
+
+@pytest.mark.parametrize(
+    "func",
+    [
+        block_diag_systems,
+        hstack_systems,
+        vstack_systems,
+        connect_systems_in_parallel,
+        connect_systems_in_series,
+    ],
+)
+def test_model_class_optional(func, kind):
+    """Without model_class, the same model as with the base class"""
+    m1, m2, _ = fixed_models(kind)
+    base = base_class(kind)
+    inferred, given = func([m1, m2]), func([m1, m2], base)
+    assert type(inferred) is base
+    attr = base._attr_names
+    for f in ("state_func", "output_func"):
+        assert (
+            getattr(inferred, attr[f]).serialize()
+            == getattr(given, attr[f]).serialize()
+        )
+    assert inferred.input_names == given.input_names
+    assert inferred.output_names == given.output_names
+
+
+def test_model_class_optional_connect_systems_and_negate(kind):
+    m1, m2, _ = fixed_models(kind)
+    base = base_class(kind)
+    connections = {"a_u": "u1", "b_u": "u2", "y": ["a_y", "b_y"]}
+    kwargs = dict(
+        input_names=["u1", "u2"],
+        output_names=["y"],
+        keys=["a", "b"],
+        verbose_names=True,
+    )
+    inferred = connect_systems([m1, m2], connections, **kwargs)
+    given = connect_systems([m1, m2], connections, base, **kwargs)
+    assert type(inferred) is base
+    attr = base._attr_names
+    assert (
+        getattr(inferred, attr["output_func"]).serialize()
+        == getattr(given, attr["output_func"]).serialize()
+    )
+    assert type(negate_system(m1)) is base

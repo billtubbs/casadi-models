@@ -46,6 +46,48 @@ StateSpaceModelCT.from_yaml(text) or StateSpaceModelDT.from_yaml(text)
 to data files, e.g. a model.yaml read from a folder, given the folder
 they are in.
 
+A model can also be built by a connection function of
+cas_models.transformations (block_diag_systems, hstack_systems,
+vstack_systems, connect_systems_in_parallel, connect_systems_in_series,
+connect_systems, connect_feedback_system, negate_system) from models
+given in the same way, to any depth:
+
+    cas_models_format: 1
+    function: hstack_systems
+    args:
+      name: R11
+      systems:
+      - class: StateSpaceModelDTARXSISO
+        args: {na: 2, nb: 2, dt: 2.0, name: CRAC1}
+      - class: StateSpaceModelDTARXSISO
+        args: {na: 1, nb: 1, dt: 2.0, name: CRAC2}
+
+Every model in the document is a mapping of a class or a function name
+and its arguments, args (named; positional arguments aren't supported);
+cas_models_format is only at the top. model_class is the base class of
+the models connected unless given (a class name, e.g.
+StateSpaceModelDT). These are written by hand: save_model() and
+to_yaml() write the model made (its class and arguments), not how it
+was made.
+
+A symbolic argument is a symbol node, {symbol: name}, a scalar SX
+symbol, or {symbol: name, shape: [n]} (a column vector) or [n, m] (a
+matrix). It can be used wherever a value can, e.g. in a list:
+poles: [{symbol: p_0}, 0.5]. The same name in a document is the same
+symbol, so models that use it share the parameter:
+
+    cas_models_format: 1
+    function: vstack_systems
+    args:
+      systems:
+      - class: SSModelCTLinearO2SISO
+        args: {K: {symbol: K}, T1: {symbol: T1}, T2: 5.0}
+      - class: SSModelCTLinearFOSISO
+        args: {K: {symbol: K}, T1: {symbol: T1}}
+
+The parameter is named after the symbol (its elements name_0, ... for
+a vector, as CasADi names them), not the argument.
+
 Arguments equal to their defaults in the class's __init__ (None, or a
 plain number or string) are left out, and so is args if none are left
 (e.g. a model with symbolic parameters, SSModelCTLinearFOSISO(), is just
@@ -88,6 +130,20 @@ import yaml
 
 FORMAT = 1
 MODEL_FILE = "model.yaml"
+# The keys that name what a model node builds
+NODE_KINDS = ("class", "function")
+# The functions a model node can call (cas_models.transformations): the
+# ones that combine models into one
+CONNECTION_FUNCTIONS = (
+    "block_diag_systems",
+    "hstack_systems",
+    "vstack_systems",
+    "connect_systems_in_parallel",
+    "connect_systems_in_series",
+    "connect_systems",
+    "connect_feedback_system",
+    "negate_system",
+)
 # Largest vectors (elements) and matrices (rows and columns) written in
 # model.yaml
 MAX_INLINE_VECTOR = 8
@@ -215,8 +271,14 @@ def _is_inline_function(value):
     )
 
 
-def _decode(value, folder):
-    """The argument from a YAML value, reading data files from folder."""
+def _decode(value, folder, symbols=None):
+    """The argument from a YAML value, reading data files from folder.
+    symbols is the document's symbol table ({name: SX}, see
+    _make_symbol()), a new one if None."""
+    if symbols is None:
+        symbols = {}
+    if _is_symbol(value):
+        return _make_symbol(value, symbols)
     if _is_inline_function(value):
         return cas.Function.deserialize(value["Function"])
     if _is_file_ref(value):
@@ -234,22 +296,93 @@ def _decode(value, folder):
             return cas.DM(*value["shape"])
         return cas.DM(value["DM"])
     if _is_model(value):
-        return _make_model(value, folder, _base_classes())
+        return _make_model(value, folder, _base_classes(), symbols)
     if isinstance(value, dict):
-        return {k: _decode(v, folder) for k, v in value.items()}
+        return {k: _decode(v, folder, symbols) for k, v in value.items()}
     if isinstance(value, list):
-        return [_decode(v, folder) for v in value]
+        return [_decode(v, folder, symbols) for v in value]
     return value
 
 
+def _is_symbol(value):
+    """Whether a YAML value is a symbol node, {symbol: name} or {symbol:
+    name, shape: [...]}. A mapping with a symbol name and other keys is
+    an error."""
+    if not (isinstance(value, dict) and isinstance(value.get("symbol"), str)):
+        return False
+    extra = set(value) - {"symbol", "shape"}
+    if extra:
+        raise ValueError(
+            f"symbol {value['symbol']}: a symbol has only symbol and "
+            f"shape, not {', '.join(sorted(extra))}"
+        )
+    return True
+
+
+def _make_symbol(value, symbols):
+    """The SX symbol of a symbol node: {symbol: name} a scalar, {symbol:
+    name, shape: [n]} a column vector, {symbol: name, shape: [n, m]} a
+    matrix. The same name in a document is the same symbol (from
+    symbols, the document's table), so the models that use it share the
+    parameter; its shape must be the same everywhere."""
+    name = value["symbol"]
+    if not name.isidentifier():
+        raise ValueError(
+            f"symbol {name!r}: a name must be a valid identifier"
+        )
+    shape = value.get("shape", [1, 1])
+    if (
+        not isinstance(shape, list)
+        or not 1 <= len(shape) <= 2
+        or not all(
+            isinstance(d, int) and not isinstance(d, bool) and d >= 1
+            for d in shape
+        )
+    ):
+        raise ValueError(
+            f"symbol {name}: shape must be a list of one or two positive "
+            f"integers ([n] or [n, m]), not {shape!r}"
+        )
+    shape = tuple(shape) if len(shape) == 2 else (shape[0], 1)
+    if name in symbols:
+        if symbols[name].shape != shape:
+            raise ValueError(
+                f"symbol {name}: shape {list(shape)} here, "
+                f"{list(symbols[name].shape)} where it was first used"
+            )
+        return symbols[name]
+    symbols[name] = cas.SX.sym(name, *shape)
+    return symbols[name]
+
+
+def _model_kind(value):
+    """"class" or "function" if a YAML value is a model node ({class:
+    ..., args: ...} or {function: ..., args: ...}, args optional), else
+    None. A mapping with a class or function name and other keys is an
+    error (e.g. cas_models_format, which is only at the top)."""
+    if not isinstance(value, dict):
+        return None
+    kinds = [k for k in NODE_KINDS if isinstance(value.get(k), str)]
+    if not kinds:
+        return None
+    if len(kinds) > 1:
+        raise ValueError(
+            f"a model has a class or a function, not both ({value})"
+        )
+    extra = set(value) - {kinds[0], "args"}
+    if extra:
+        raise ValueError(
+            f"{kinds[0]} {value[kinds[0]]}: a model has only "
+            f"{kinds[0]} and args, not {', '.join(sorted(extra))} "
+            "(cas_models_format only at the top of the document)"
+        )
+    return kinds[0]
+
+
 def _is_model(value):
-    """Whether a YAML value is a model ({class: ..., args: ...}), e.g.
-    an argument that is a model."""
-    return (
-        isinstance(value, dict)
-        and isinstance(value.get("class"), str)
-        and set(value) <= {"class", "args"}
-    )
+    """Whether a YAML value is a model node, e.g. an argument that is a
+    model (see _model_kind())."""
+    return _model_kind(value) is not None
 
 
 def _read_model_file(folder):
@@ -261,13 +394,20 @@ def _read_model_file(folder):
 
 
 def _check_format(data, where):
-    """data (a parsed model YAML), if it has this format."""
+    """The model node of data (a parsed model YAML document: its
+    cas_models_format and a class or function with its args), if it has
+    this format and is a model."""
     if not isinstance(data, dict) or data.get("cas_models_format") != FORMAT:
         found = (
             data.get("cas_models_format") if isinstance(data, dict) else None
         )
         raise ValueError(f"{where}: cas_models_format {found!r}, not {FORMAT}")
-    return data
+    node = {k: v for k, v in data.items() if k != "cas_models_format"}
+    if not _is_model(node):
+        raise ValueError(
+            f"{where}: no model (a class or a function name, with its args)"
+        )
+    return node
 
 
 def _model_data(model, folder):
@@ -376,9 +516,11 @@ def _find_class(name, bases):
 
 
 def load_model(folder, base=None):
-    """Load a model saved in folder. With base, the class saved must be
-    base or one of its subclasses; without, StateSpaceModelCT,
-    StateSpaceModelDT or one of their subclasses."""
+    """Load a model saved in folder (its model.yaml: a class and its
+    arguments, or a connection function and its arguments, see the
+    module docstring). With base, the model must be base or one of its
+    subclasses; without, StateSpaceModelCT, StateSpaceModelDT or one of
+    their subclasses."""
     folder = Path(folder)
     data = _read_model_file(folder)
     bases = _base_classes() if base is None else [base]
@@ -386,8 +528,10 @@ def load_model(folder, base=None):
 
 
 def from_yaml(text, base=None, folder=None):
-    """A model from YAML text (as to_yaml() or save_model() write it).
-    With base, the class must be base or one of its subclasses; without,
+    """A model from YAML text (as to_yaml() or save_model() write it, or
+    written by hand: a class and its arguments, or a connection function
+    and its arguments, see the module docstring). With base, the model
+    must be base or one of its subclasses; without,
     StateSpaceModelCT, StateSpaceModelDT or one of their subclasses.
     folder is where the data files the text refers to are, if any (e.g.
     the text of a saved model.yaml)."""
@@ -403,13 +547,49 @@ def _base_classes():
     return [StateSpaceModelCT, StateSpaceModelDT]
 
 
-def _make_model(data, folder, bases):
-    """The model of {class: ..., args: ...} (args optional), its class
-    one of bases or their subclasses, reading data files from folder."""
-    cls = _find_class(data["class"], bases)
+def _make_model(data, folder, bases, symbols=None):
+    """The model of a model node, {class: ..., args: ...} or {function:
+    ..., args: ...} (args optional), its class one of bases or their
+    subclasses, reading data files from folder. symbols is the
+    document's symbol table (a new one if None)."""
+    if symbols is None:
+        symbols = {}
     args = data.get("args") or {}
-    args = {k: _decode(v, folder) for k, v in args.items()}
+    if not isinstance(args, dict):
+        raise ValueError(
+            f"args must be a mapping of argument names to values, not "
+            f"{type(args).__name__} (positional arguments aren't supported)"
+        )
+    if "function" in data:
+        return _call_function(data["function"], args, folder, bases, symbols)
+    cls = _find_class(data["class"], bases)
+    args = {k: _decode(v, folder, symbols) for k, v in args.items()}
     return cls._from_saved_args(args)
+
+
+def _call_function(name, args, folder, bases, symbols):
+    """The model a connection function (CONNECTION_FUNCTIONS) makes from
+    args. model_class, if given, is a class name; if not, the function
+    takes it from the models it connects (see
+    cas_models.transformations.infer_model_class()). The result must be
+    one of bases or their subclasses."""
+    from cas_models import transformations
+
+    if name not in CONNECTION_FUNCTIONS:
+        raise ValueError(
+            f"function {name!r} isn't one of {', '.join(CONNECTION_FUNCTIONS)}"
+        )
+    args = {k: _decode(v, folder, symbols) for k, v in args.items()}
+    if args.get("model_class") is not None:
+        args["model_class"] = _find_class(args["model_class"], _base_classes())
+    model = getattr(transformations, name)(**args)
+    if not isinstance(model, tuple(bases)):
+        raise ValueError(
+            f"function {name} makes a {type(model).__name__}, which isn't "
+            f"{' or '.join(b.__name__ for b in bases)} or one of their "
+            "subclasses"
+        )
+    return model
 
 
 def base_save_args(model, base):

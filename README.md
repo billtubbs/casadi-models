@@ -386,6 +386,56 @@ For now, `save()` writes every model in this base-class form, so it loads
 as `StateSpaceModelCT` or `StateSpaceModelDT`; files holding a subclass's
 arguments (as in `tests/data/models`) load as that subclass.
 
+### Models built from others
+
+A model file (or YAML text, `from_yaml()`) can also say how to build a
+model from others: a connection function of `cas_models.transformations`
+and its arguments, with the models it connects given in the same way,
+to any depth:
+
+```yaml
+cas_models_format: 1
+function: hstack_systems
+args:
+  name: R11
+  systems:
+  - class: StateSpaceModelDTARXSISO
+    args: {na: 2, nb: 2, dt: 2.0, name: CRAC1}
+  - class: StateSpaceModelDTARXSISO
+    args: {na: 1, nb: 1, dt: 2.0, name: CRAC2}
+```
+
+Every model is a mapping of `class` or `function` and its `args` (named
+arguments only); `cas_models_format` is only at the top. The functions:
+`block_diag_systems`, `hstack_systems`, `vstack_systems`,
+`connect_systems_in_parallel`, `connect_systems_in_series`,
+`connect_systems`, `connect_feedback_system` and `negate_system`.
+`model_class` can be left out: it is the base class
+(`StateSpaceModelCT` or `StateSpaceModelDT`) of the models connected.
+
+A symbolic argument is `{symbol: name}` (a scalar), or `{symbol: name,
+shape: [n]}` (a column vector) or `shape: [n, m]` (a matrix), wherever a
+value can go, e.g. `poles: [{symbol: p_0}, 0.5]`. The same name in one
+document is the same symbol, so the models that use it share the
+parameter (one `K` here, not `a_K` and `b_K`):
+
+```yaml
+cas_models_format: 1
+function: vstack_systems
+args:
+  systems:
+  - class: SSModelCTLinearO2SISO
+    args: {K: {symbol: K}, T1: {symbol: T1}, T2: 5.0, name: a}
+  - class: SSModelCTLinearFOSISO
+    args: {K: {symbol: K}, T1: {symbol: T1}, name: b}
+```
+
+The parameter is named after the symbol, not the argument (a vector's
+elements are `name_0`, `name_1`, ..., as CasADi names them).
+
+These files are written by hand for now: `save()` and `to_yaml()` write
+the model made, not how it was made.
+
 ### Pickle
 
 Models with fixed parameter values pickle like ordinary Python objects:

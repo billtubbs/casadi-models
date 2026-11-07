@@ -26,6 +26,9 @@ negate_system
     A model with its outputs negated (-sys; sys1 - sys2 is sys1 + -sys2).
 validate_systems_are_compatible
     Raise if a list of models are not all the same type (CT vs DT).
+infer_model_class
+    The base class (StateSpaceModelCT or StateSpaceModelDT) of a list of
+    models: model_class when it isn't given.
 block_diag
     Construct a block-diagonal CasADi SX matrix from a list of matrices.
 
@@ -71,6 +74,41 @@ def _dt_kwargs(systems):
     return {} if dt is None else {"dt": dt}
 
 
+def infer_model_class(systems):
+    """The base class, StateSpaceModelCT or StateSpaceModelDT, of the
+    systems (a list of models): the model_class of the connection
+    functions when it isn't given.
+
+    Raises:
+        ValueError: If there are no systems, one isn't a state-space
+            model, or they aren't all continuous time or all discrete
+            time.
+    """
+    # Imported here: the model modules import this one
+    from cas_models.continuous_time.models import StateSpaceModelCT
+    from cas_models.discrete_time.models import StateSpaceModelDT
+
+    if not systems:
+        raise ValueError("no systems to take model_class from")
+    found = set()
+    for i, sys in enumerate(systems):
+        for base in (StateSpaceModelCT, StateSpaceModelDT):
+            if isinstance(sys, base):
+                found.add(base)
+                break
+        else:
+            raise ValueError(
+                f"system {i} isn't a StateSpaceModelCT or StateSpaceModelDT "
+                f"({type(sys).__name__})"
+            )
+    if len(found) > 1:
+        raise ValueError(
+            "Cannot combine continuous-time and discrete-time systems "
+            "(give them all one kind, or model_class)"
+        )
+    return found.pop()
+
+
 def _check_equal_dims(systems, dims, func_name):
     """Raise ValueError unless the systems all have the same values of
     the attributes dims (e.g. ["nu", "ny"])."""
@@ -102,6 +140,8 @@ def _combine_systems(
     outputs summed or stacked. Signal names are those of the first
     system where shared or summed, else concatenated."""
     validate_systems_are_compatible(systems)
+    if model_class is None:
+        model_class = infer_model_class(systems)
     attr_names = model_class._attr_names
     if keys is None:
         keys = [sys.name for sys in systems]
@@ -218,7 +258,7 @@ def _combine_systems(
 
 def block_diag_systems(
     systems,
-    model_class,
+    model_class=None,
     keys=None,
     verbose_names=False,
     prefix="sys",
@@ -240,9 +280,10 @@ def block_diag_systems(
 
     Args:
         systems (list): List of state-space model objects to combine.
-        model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
-            attribute determines the naming conventions.
+        model_class (optional): Class to instantiate for the combined
+            system (StateSpaceModelCT or StateSpaceModelDT). If None, the
+            systems' base class (see infer_model_class()). The
+            _attr_names class attribute determines the naming conventions.
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to the system names or [prefix + "1", prefix + "2",
             ...].
@@ -278,7 +319,7 @@ def block_diag_systems(
 
 def hstack_systems(
     systems,
-    model_class,
+    model_class=None,
     keys=None,
     verbose_names=False,
     prefix="sys",
@@ -299,9 +340,10 @@ def hstack_systems(
 
     Args:
         systems (list): List of state-space model objects to combine.
-        model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
-            attribute determines the naming conventions.
+        model_class (optional): Class to instantiate for the combined
+            system (StateSpaceModelCT or StateSpaceModelDT). If None, the
+            systems' base class (see infer_model_class()). The
+            _attr_names class attribute determines the naming conventions.
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to the system names or [prefix + "1", prefix + "2",
             ...].
@@ -342,7 +384,7 @@ def hstack_systems(
 
 def vstack_systems(
     systems,
-    model_class,
+    model_class=None,
     keys=None,
     verbose_names=False,
     prefix="sys",
@@ -363,9 +405,10 @@ def vstack_systems(
 
     Args:
         systems (list): List of state-space model objects to combine.
-        model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
-            attribute determines the naming conventions.
+        model_class (optional): Class to instantiate for the combined
+            system (StateSpaceModelCT or StateSpaceModelDT). If None, the
+            systems' base class (see infer_model_class()). The
+            _attr_names class attribute determines the naming conventions.
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to the system names or [prefix + "1", prefix + "2",
             ...].
@@ -406,7 +449,7 @@ def vstack_systems(
 
 def connect_systems_in_parallel(
     systems,
-    model_class,
+    model_class=None,
     keys=None,
     verbose_names=False,
     prefix="sys",
@@ -427,9 +470,10 @@ def connect_systems_in_parallel(
 
     Args:
         systems (list): List of state-space model objects to combine.
-        model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
-            attribute determines the naming conventions.
+        model_class (optional): Class to instantiate for the combined
+            system (StateSpaceModelCT or StateSpaceModelDT). If None, the
+            systems' base class (see infer_model_class()). The
+            _attr_names class attribute determines the naming conventions.
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to the system names or [prefix + "1", prefix + "2",
             ...].
@@ -470,10 +514,13 @@ def connect_systems_in_parallel(
     )
 
 
-def negate_system(sys, model_class):
+def negate_system(sys, model_class=None):
     """The system with its outputs negated, y = -h(t, x, u) (the -sys
     operator; sys1 - sys2 is sys1 + (-sys2)). The states, parameters
-    and names are the same; the name, if any, gets a leading "-"."""
+    and names are the same; the name, if any, gets a leading "-".
+    model_class is sys's base class unless given."""
+    if model_class is None:
+        model_class = infer_model_class([sys])
     attr_names = model_class._attr_names
     output_func = getattr(sys, attr_names["output_func"])
     t = cas.SX.sym("t")
@@ -510,7 +557,7 @@ def negate_system(sys, model_class):
 
 def connect_systems_in_series(
     systems,
-    model_class,
+    model_class=None,
     keys=None,
     verbose_names=False,
     prefix="sys",
@@ -526,9 +573,10 @@ def connect_systems_in_series(
     Args:
         systems (list): List of state-space model objects to combine in series.
             The output of each system is connected to the input of the next.
-        model_class: Class to instantiate for the combined system
-            (StateSpaceModelCT or StateSpaceModelDT). The _attr_names class
-            attribute determines the naming conventions.
+        model_class (optional): Class to instantiate for the combined
+            system (StateSpaceModelCT or StateSpaceModelDT). If None, the
+            systems' base class (see infer_model_class()). The
+            _attr_names class attribute determines the naming conventions.
         keys (list, optional): Custom keys for naming subsystems. If None,
             defaults to [prefix + "1", prefix + "2", ...].
         verbose_names (bool, optional): If True, use verbose parameter naming.
@@ -551,6 +599,8 @@ def connect_systems_in_series(
         ... )
     """
     validate_systems_are_compatible(systems)
+    if model_class is None:
+        model_class = infer_model_class(systems)
     attr_names = model_class._attr_names
     if keys is None:
         keys = [sys.name for sys in systems]
@@ -965,7 +1015,7 @@ def _build_internal_input_vector(
 def connect_systems(
     systems,
     connections,
-    model_class,
+    model_class=None,
     input_names=None,
     output_names=None,
     keys=None,
@@ -1012,9 +1062,10 @@ def connect_systems(
             Note: If a subsystem input appears as a source for another
             subsystem input, it must be an external input (not
             connected). This prevents circular dependencies.
-        model_class: Target model class (StateSpaceModelCT or
-            StateSpaceModelDT). The _attr_names class attribute determines
-            the naming conventions.
+        model_class (optional): Target model class (StateSpaceModelCT or
+            StateSpaceModelDT). If None, the systems' base class (see
+            infer_model_class()). The _attr_names class attribute
+            determines the naming conventions.
         input_names (list, optional): List of external input signal names to
             expose. If None, exposes all inputs that are not connected.
             Names that are not subsystem inputs are new external inputs.
@@ -1116,6 +1167,8 @@ def connect_systems(
         block_diag_systems: Combine systems without connections
         connect_systems_in_series: Connect systems in series
     """
+    if model_class is None:
+        model_class = infer_model_class(systems)
     attr_names = model_class._attr_names
 
     # Step 1: Create parallel system
@@ -1348,8 +1401,10 @@ def connect_feedback_system(
               as many inputs as sys1 has outputs and vice-versa.
               sys2 itself may have direct feedthrough only when sys1 does
               not (guaranteed by the algebraic-loop check above).
-        model_class: Class used to instantiate the returned model (e.g.
-            StateSpaceModelCT or StateSpaceModelDT).  Required.
+        model_class (optional): Class used to instantiate the returned
+            model (e.g. StateSpaceModelCT or StateSpaceModelDT). If None,
+            the base class of sys1 (and sys2 if it is a model; see
+            infer_model_class()).
         sign: Sign applied to the feedback signal at the summing junction.
             Use -1 (default) for negative feedback, +1 for positive feedback.
         input_names: Names of the closed-loop reference inputs.  Default:
@@ -1376,13 +1431,16 @@ def connect_feedback_system(
         closed-loop system.
 
     Raises:
-        ValueError: If ``model_class`` is None, if sys2 dimension mismatches
-            sys1, or if an algebraic loop is detected.
+        ValueError: If sys1 and sys2 are of different kinds, if sys2
+            dimension mismatches sys1, or if an algebraic loop is detected.
         NotImplementedError: If a scalar ``sys2`` is passed with a
             discrete-time ``model_class``.
     """
     if model_class is None:
-        raise ValueError("model_class must be specified")
+        model_class = infer_model_class(
+            [sys1] if sys2 is None or isinstance(sys2, (int, float))
+            else [sys1, sys2]
+        )
 
     unity_feedback = sys2 is None or (
         isinstance(sys2, (int, float)) and sys2 == 1
