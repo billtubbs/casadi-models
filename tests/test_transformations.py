@@ -229,7 +229,10 @@ def test_connect_systems_in_parallel(
     assert sys_combined.nu == 1
     assert sys_combined.ny == 1
     assert sys_combined.input_names == sys1_with_gain.input_names
-    assert sys_combined.output_names == sys1_with_gain.output_names
+    # Outputs y1 and y2: the sum is named after both, not the first
+    assert sys1_with_gain.output_names == ["y1"]
+    assert sys2_no_gain.output_names == ["y2"]
+    assert sys_combined.output_names == ["sum_y1_y2"]
     assert "x1" in sys_combined.state_names
     assert "x2" in sys_combined.state_names
 
@@ -1310,6 +1313,25 @@ def test_hstack_systems(kind):
     f, y = eval_model(sys, x, u)
     assert np.allclose(f, np.r_[f1, f2])
     assert np.allclose(y, y1 + y2)
+
+
+def test_hstack_systems_output_names():
+    """Summed outputs keep a name all the systems share, else are named
+    after all of them (not after the first)"""
+    from cas_models.discrete_time.models import StateSpaceModelDTARXSISO
+
+    def path(name, output_name):
+        return StateSpaceModelDTARXSISO(
+            na=1, nb=1, input_name=f"{name}_flow", output_name=output_name, name=name
+        )
+
+    same = hstack_systems([path("CRAC1", "y"), path("CRAC2", "y")])
+    assert same.output_names == ["y"]
+    sys = hstack_systems([path("CRAC1", "y1"), path("CRAC2", "y2")], name="R11")
+    assert sys.output_names == ["sum_y1_y2"]
+    assert sys.input_names == ["CRAC1_flow", "CRAC2_flow"]
+    three = hstack_systems([path("a", "y1"), path("b", "y2"), path("c", "y1")])
+    assert three.output_names == ["sum_y1_y2_y1"]
 
 
 def test_vstack_systems(kind):

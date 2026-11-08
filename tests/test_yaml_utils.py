@@ -62,10 +62,11 @@ from cas_models.yaml_utils import (
 
 
 def assert_same_model(model, loaded, base, exact=True):
-    """Check a loaded model has the same base-class fields as the
-    original. Functions are compared by their serialization only if
-    exact."""
-    assert type(loaded) is base
+    """Check a loaded model is of the original's class (a subclass of
+    base) and has the same base-class fields. Functions are compared by
+    their serialization only if exact."""
+    assert isinstance(loaded, base)
+    assert type(loaded) is type(model)
     for field in fields(base):
         value, loaded_value = (
             getattr(model, field.name),
@@ -169,14 +170,15 @@ MODELS = {
     ),
     "DT custom": (StateSpaceModelDT, dt_custom, True),
     "DT connected ARX": (StateSpaceModelDT, dt_connected_arx, True),
-    # Subclasses without their own saved arguments: saved as their base
-    "CT FO (as base)": (StateSpaceModelCT, SSModelCTLinearFOSISO, True),
-    "DT ARX (as base)": (
+    # Subclasses: saved as their class and the arguments given (their
+    # recipe, see cas_models.recipes)
+    "CT FO": (StateSpaceModelCT, SSModelCTLinearFOSISO, True),
+    "DT ARX": (
         StateSpaceModelDT,
         lambda: StateSpaceModelDTARXSISO(na=2, nb=1),
         True,
     ),
-    "DT ARX symbolic poles and zeros (as base)": (
+    "DT ARX symbolic poles and zeros": (
         StateSpaceModelDT,
         lambda: StateSpaceModelDTARXSISO(
             poles=[cas.SX.sym("p_0"), cas.SX.sym("p_1")],
@@ -184,12 +186,12 @@ MODELS = {
         ),
         True,
     ),
-    "DT ARX with dt (as base)": (
+    "DT ARX with dt": (
         StateSpaceModelDT,
         lambda: StateSpaceModelDTARXSISO(na=2, nb=1, dt=2.0),
         True,
     ),
-    "DT ARX numeric poles and zeros (as base)": (
+    "DT ARX numeric poles and zeros": (
         StateSpaceModelDT,
         lambda: StateSpaceModelDTARXSISO(
             poles=[0.8 + 0.3j, 0.8 - 0.3j], zeros=[-0.4], gain=0.2, nk=2
@@ -198,7 +200,7 @@ MODELS = {
     ),
     # CasADi changes the serialization of a cvodes integrator in each
     # serialize-deserialize round trip (the results are the same)
-    "DT from CT cvodes (as base)": (
+    "DT from CT cvodes": (
         StateSpaceModelDT,
         lambda: StateSpaceModelDTFromCT(SSModelCTLinearFOSISO(), 1.0),
         False,
@@ -217,9 +219,46 @@ def test_save_load(name, tmp_path):
 
 
 def test_saved_files(tmp_path):
-    """The folder holds model.yaml and the functions' files"""
+    """A connected model is saved as its recipe: model.yaml alone"""
     model = dt_connected_arx()
     folder = tmp_path / "R11"
+    model.save(folder)
+    assert sorted(p.name for p in folder.iterdir()) == ["model.yaml"]
+    data = read_model_yaml(folder)
+    assert data == {
+        "cas_models_format": 1,
+        "function": "connect_systems",
+        "args": {
+            "systems": [
+                {
+                    "class": "StateSpaceModelDTARXSISO",
+                    "args": {"na": 2, "nb": 2, "input_name": "u", "output_name": "y"},
+                },
+                {
+                    "class": "StateSpaceModelDTARXSISO",
+                    "args": {"na": 1, "nb": 1, "input_name": "u", "output_name": "y"},
+                },
+            ],
+            "connections": {
+                "CRAC1_u": "CRAC1",
+                "CRAC2_u": "CRAC2",
+                "R11": ["CRAC1_y", "CRAC2_y"],
+            },
+            "model_class": "StateSpaceModelDT",
+            "input_names": ["CRAC1", "CRAC2"],
+            "output_names": ["R11"],
+            "keys": ["CRAC1", "CRAC2"],
+            "verbose_names": True,
+            "name": "R11",
+        },
+    }
+
+
+def test_saved_files_base(tmp_path):
+    """A model made from functions (no recipe) is saved as its base
+    class and fields, the functions in files"""
+    model = dt_custom()
+    folder = tmp_path / "custom"
     model.save(folder)
     assert sorted(p.name for p in folder.iterdir()) == [
         "F.casadi",
@@ -227,35 +266,8 @@ def test_saved_files(tmp_path):
         "model.yaml",
     ]
     data = read_model_yaml(folder)
-    assert data == {
-        "cas_models_format": 1,
-        "class": "StateSpaceModelDT",
-        "args": {
-            "F": {"file": "F.casadi"},
-            "H": {"file": "H.casadi"},
-            "n": 6,
-            "nu": 2,
-            "params": {
-                "CRAC1_a_0": [1, 1],
-                "CRAC1_a_1": [1, 1],
-                "CRAC1_b_0": [1, 1],
-                "CRAC1_b_1": [1, 1],
-                "CRAC2_a": [1, 1],
-                "CRAC2_b": [1, 1],
-            },
-            "name": "R11",
-            "input_names": ["CRAC1", "CRAC2"],
-            "state_names": [
-                "CRAC1_x1",
-                "CRAC1_x2",
-                "CRAC1_x3",
-                "CRAC1_x4",
-                "CRAC2_x1",
-                "CRAC2_x2",
-            ],
-            "output_names": ["R11"],
-        },
-    }
+    assert data["class"] == "StateSpaceModelDT"
+    assert data["args"]["F"] == {"file": "F.casadi"}
 
 
 def test_saved_files_ct(tmp_path):
@@ -525,10 +537,13 @@ def test_load_wrong_class(tmp_path):
     dt_custom().save(folder)
     with pytest.raises(ValueError, match="isn't StateSpaceModelCT"):
         StateSpaceModelCT.load(folder)
-    # A subclass saved in its base form loads only as the base
+    # A subclass loads as itself, not as another subclass
     StateSpaceModelDTARXSISO(na=1, nb=1).save(tmp_path / "arx")
-    with pytest.raises(ValueError, match="isn't StateSpaceModelDTARXSISO"):
-        StateSpaceModelDTARXSISO.load(tmp_path / "arx")
+    assert type(StateSpaceModelDTARXSISO.load(tmp_path / "arx")) is (
+        StateSpaceModelDTARXSISO
+    )
+    with pytest.raises(ValueError, match="isn't StateSpaceModelDTTFSISO"):
+        StateSpaceModelDTTFSISO.load(tmp_path / "arx")
 
 
 def test_load_errors(tmp_path):
@@ -822,10 +837,15 @@ MODEL_FILES = {
         SSModelCTLinearFOSISO(), 1.0, integrator_opts={"abstol": 1e-10}
     ),
     "dt_connected_arx": dt_connected_arx_flow,
+    "ct_pi_feedback_recipe": ct_pi_feedback,
+    "dt_connected_arx_recipe": dt_connected_arx_flow,
 }
 
-# Saved by save() (the base-class form); the others hold the arguments
-# of their class's __init__
+# Written by save() as recipes
+SAVED_AS_RECIPE = ["ct_pi_feedback_recipe", "dt_connected_arx_recipe"]
+
+# Written by save() before models had recipes (the base-class form,
+# still loaded); the others hold the arguments of their class's __init__
 SAVED_AS_BASE = {
     "ct_pi_feedback": StateSpaceModelCT,
     "dt_connected_arx": StateSpaceModelDT,
@@ -847,10 +867,9 @@ def test_load_model_file(name):
         assert_same_functions(model, expected)
 
 
-@pytest.mark.parametrize("name", SAVED_AS_BASE)
+@pytest.mark.parametrize("name", SAVED_AS_RECIPE)
 def test_save_model_file(name, tmp_path):
-    """save() writes the same model.yaml (the .casadi files depend on
-    the CasADi version: they are checked by loading them)"""
+    """save() writes the same model.yaml, and no other files"""
     folder = tmp_path / name
     MODEL_FILES[name]().save(folder)
     assert (folder / "model.yaml").read_text() == (
@@ -879,7 +898,7 @@ def test_to_yaml_from_yaml(name):
 
 def test_to_yaml_same_as_saved(tmp_path):
     """to_yaml() is model.yaml with the functions inline"""
-    model = dt_connected_arx()
+    model = dt_custom()
     model.save(tmp_path / "model")
     saved = read_model_yaml(tmp_path / "model")
     data = yaml.safe_load(model.to_yaml())
@@ -888,17 +907,26 @@ def test_to_yaml_same_as_saved(tmp_path):
         assert data["args"][key] == {"Function": getattr(model, key).serialize()}
         del saved["args"][key], data["args"][key]
     assert data == saved
+    # A recipe has nothing in files: the same
+    model = dt_connected_arx()
+    model.save(tmp_path / "recipe")
+    assert yaml.safe_load(model.to_yaml()) == read_model_yaml(tmp_path / "recipe")
 
 
 def test_to_yaml_text():
     """Functions as {Function: <serialization>}, a model of no
     arguments as just its class"""
-    text = SSModelCTLinearFOSISO().to_yaml()
-    data = yaml.safe_load(text)
-    assert data["class"] == "StateSpaceModelCT"
-    assert set(data["args"]["f"]) == {"Function"}
+    assert SSModelCTLinearFOSISO().to_yaml() == (
+        "cas_models_format: 1\nclass: SSModelCTLinearFOSISO\n"
+    )
     text = StateSpaceModelDTARXSISO(na=2, nb=1).to_yaml()
-    assert text.startswith("cas_models_format: 1\nclass: StateSpaceModelDT\n")
+    assert text == (
+        "cas_models_format: 1\nclass: StateSpaceModelDTARXSISO\n"
+        "args: {na: 2, nb: 1}\n"
+    )
+    data = yaml.safe_load(dt_custom().to_yaml())
+    assert data["class"] == "StateSpaceModelDT"
+    assert set(data["args"]["F"]) == {"Function"}
 
 
 @pytest.mark.parametrize("shape", [(9, 1), (1, 9), (6, 5), (20, 20)])
@@ -1184,7 +1212,7 @@ FUNCTION_ERRORS = {
         "  systems:\n"
         "  - cas_models_format: 1\n"
         "    class: SSModelCTLinearFOSISO\n",
-        "a model has only class and args, not cas_models_format",
+        "a model has only class, args and values, not cas_models_format",
     ),
     "class and function": (
         "function: hstack_systems\nclass: SSModelCTLinearFOSISO\n",

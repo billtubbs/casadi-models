@@ -58,6 +58,7 @@ from cas_models.validation import (
     as_sx_vector,
     validate_casadi_function_dims,
 )
+from cas_models.recipes import record_subclass_init
 from cas_models.yaml_utils import (
     base_from_saved_args,
     base_save_args,
@@ -121,6 +122,12 @@ class StateSpaceModelDT:
         "state_output": "xkp1",
         "output_var": "yk",
     }
+
+    def __init_subclass__(cls, **kwargs):
+        """Record how each model of a subclass is made (its class and
+        arguments, see cas_models.recipes), for saving it."""
+        super().__init_subclass__(**kwargs)
+        record_subclass_init(cls)
 
     F: cas.Function
     H: cas.Function
@@ -305,14 +312,15 @@ class StateSpaceModelDT:
     def __setstate__(self, state):
         setstate(self, state)
 
-    def save(self, folder, overwrite=False):
+    def save(self, folder, overwrite=False, params=None):
         """Save the model to folder: model.yaml, the class and the
         arguments that rebuild the model, and its data files (matrices
         as tab-separated text, functions as .casadi files). If the
         folder isn't empty, overwrite=True replaces the model saved
-        there. See cas_models.yaml_utils.
+        there. params ({name: value} of self.params) are saved as
+        values in place of their symbols. See cas_models.yaml_utils.
         """
-        save_model(self, folder, overwrite=overwrite)
+        save_model(self, folder, overwrite=overwrite, params=params)
 
     @classmethod
     def load(cls, folder):
@@ -321,13 +329,14 @@ class StateSpaceModelDT:
         """
         return load_model(folder, cls)
 
-    def to_yaml(self):
+    def to_yaml(self, params=None):
         """The model as YAML text, as save() writes model.yaml but with
         everything inline (functions serialized, matrices of any size),
         so that from_yaml() rebuilds the model from the text alone. See
-        cas_models.yaml_utils.
+        cas_models.yaml_utils. params ({name: value} of self.params)
+        are written as values in place of their symbols.
         """
-        return to_yaml(self)
+        return to_yaml(self, params)
 
     @classmethod
     def from_yaml(cls, text, folder=None):

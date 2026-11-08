@@ -1,0 +1,18 @@
+cas_models_format: 1
+function: connect_systems
+args:
+  systems:
+  - class: StateSpaceModelDTARXSISO
+    args: {na: 2, nb: 2, input_name: u, output_name: y}
+  - class: StateSpaceModelDTARXSISO
+    args: {na: 1, nb: 1, input_name: u, output_name: y}
+  connections:
+    CRAC1_flow_u: CRAC1_flow
+    CRAC2_flow_u: CRAC2_flow
+    R11_intake: [CRAC1_flow_y, CRAC2_flow_y]
+  model_class: StateSpaceModelDT
+  input_names: [CRAC1_flow, CRAC2_flow]
+  output_names: [R11_intake]
+  keys: [CRAC1_flow, CRAC2_flow]
+  verbose_names: true
+  name: R11_intake

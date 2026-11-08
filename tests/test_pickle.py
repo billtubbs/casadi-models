@@ -76,6 +76,9 @@ def assert_same_value(value, loaded, name, exact=True):
         assert len(loaded) == len(value), name
         for i, (v, lv) in enumerate(zip(value, loaded)):
             assert_same_value(v, lv, f"{name}[{i}]", exact)
+    elif isinstance(value, (StateSpaceModelCT, StateSpaceModelDT)):
+        # A sub-model in a recipe (cas_models.recipes)
+        assert_same_model(value, loaded, exact)
     else:
         assert loaded == value, name
 

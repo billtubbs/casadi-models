@@ -1,0 +1,13 @@
+cas_models_format: 1
+function: connect_feedback_system
+args:
+  sys1:
+    function: connect_systems_in_series
+    args:
+      systems:
+      - class: SSModelCTPIInt
+        args: {name: ctrl}
+      - class: SSModelCTLinearFOSISO
+        args: {K: 1, T1: 2, name: plant}
+      model_class: StateSpaceModelCT
+  model_class: StateSpaceModelCT

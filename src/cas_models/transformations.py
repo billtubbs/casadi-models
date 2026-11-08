@@ -24,6 +24,8 @@ vstack_systems
     Combine models with shared inputs and stacked outputs ([G1; G2]).
 negate_system
     A model with its outputs negated (-sys; sys1 - sys2 is sys1 + -sys2).
+set_param_values
+    A model with values in place of some of its parameters.
 validate_systems_are_compatible
     Raise if a list of models are not all the same type (CT vs DT).
 infer_model_class
@@ -46,6 +48,7 @@ from cas_models.param_utils import (
     make_list_of_unique_names,
     merge_param_dicts,
 )
+from cas_models.recipes import recipe, records
 from cas_models.validation import validate_equal_dt
 
 
@@ -123,6 +126,16 @@ def _check_equal_dims(systems, dims, func_name):
                 )
 
 
+def _summed_names(name_lists):
+    """The names of summed outputs, one per output, from each system's
+    output names: the names if all the systems have the same, else
+    sum_<name1>_<name2>... of the systems' names for that output (e.g.
+    sum_y1_y2), so that the sum isn't named after one of its terms."""
+    if all(names == name_lists[0] for names in name_lists):
+        return list(name_lists[0])
+    return ["sum_" + "_".join(names) for names in zip(*name_lists)]
+
+
 def _combine_systems(
     systems,
     model_class,
@@ -137,8 +150,10 @@ def _combine_systems(
     """The core of block_diag_systems, hstack_systems, vstack_systems
     and connect_systems_in_parallel: the systems' states stacked, their
     inputs shared (one input vector for all) or stacked, and their
-    outputs summed or stacked. Signal names are those of the first
-    system where shared or summed, else concatenated."""
+    outputs summed or stacked. Stacked signals keep their systems'
+    names (concatenated); shared inputs have the first system's names;
+    summed outputs have the systems' names if they are all the same,
+    else sum_<name1>_<name2>... (see _summed_names())."""
     validate_systems_are_compatible(systems)
     if model_class is None:
         model_class = infer_model_class(systems)
@@ -229,8 +244,10 @@ def _combine_systems(
         "input_names"
     )
     assert len(input_names) == nu
-    output_names = systems[0].output_names if summed_outputs else names(
-        "output_names"
+    output_names = (
+        _summed_names([sys.output_names for sys in systems])
+        if summed_outputs
+        else names("output_names")
     )
     assert len(output_names) == ny
 
@@ -256,6 +273,7 @@ def _combine_systems(
     )
 
 
+@records
 def block_diag_systems(
     systems,
     model_class=None,
@@ -317,6 +335,7 @@ def block_diag_systems(
     )
 
 
+@records
 def hstack_systems(
     systems,
     model_class=None,
@@ -333,7 +352,8 @@ def hstack_systems(
         G = [G1  G2]    u = [u1]    y = G1 u1 + G2 u2
                             [u2]
 
-    (Matlab [G1, G2]). The output names are the first system's.
+    (Matlab [G1, G2]). The output names are the systems' if they are
+    all the same, else sum_<name1>_<name2>... (e.g. sum_y1_y2).
 
     This function works for both continuous-time and discrete-time
     systems. The attribute names are determined from the model_class.
@@ -382,6 +402,7 @@ def hstack_systems(
     )
 
 
+@records
 def vstack_systems(
     systems,
     model_class=None,
@@ -447,6 +468,7 @@ def vstack_systems(
     )
 
 
+@records
 def connect_systems_in_parallel(
     systems,
     model_class=None,
@@ -459,8 +481,9 @@ def connect_systems_in_parallel(
     """Combine systems with shared inputs and summed outputs: the
     classical parallel connection, y = G1 u + G2 u + ... (Matlab
     parallel(), python-control parallel(), sys1 + sys2). The combined
-    system has the same input and output dimensions, and names, as the
-    first.
+    system has the same input and output dimensions as each, the first
+    system's input names, and their output names if they are all the
+    same, else sum_<name1>_<name2>... (e.g. sum_y1_y2).
 
     Before 2026-11, this was sum_systems, and connect_systems_in_parallel
     was what is now block_diag_systems.
@@ -514,6 +537,7 @@ def connect_systems_in_parallel(
     )
 
 
+@records
 def negate_system(sys, model_class=None):
     """The system with its outputs negated, y = -h(t, x, u) (the -sys
     operator; sys1 - sys2 is sys1 + (-sys2)). The states, parameters
@@ -555,6 +579,83 @@ def negate_system(sys, model_class=None):
     )
 
 
+def set_param_values(sys, values, model_class=None):
+    """sys with values ({name: value} of sys.params, e.g. fitted values)
+    in place of those parameters: a model of sys's base class (or
+    model_class), its functions taking only the other parameters (the
+    same symbols, so sharing with other models is kept). The states,
+    inputs, outputs and names are the same.
+
+    Its recipe (cas_models.recipes) is sys's with the values added, so
+    it is saved as sys's YAML with values: beside the arguments, and
+    loads as sys built again with these values set. A sys without a
+    recipe gives one without (saved from its fields, the functions with
+    the values in them).
+    """
+    unknown = [name for name in values if name not in sys.params]
+    if unknown:
+        raise ValueError(
+            f"{', '.join(unknown)}: not parameters of the model "
+            f"({', '.join(sys.params) or 'none'})"
+        )
+    if model_class is None:
+        model_class = infer_model_class([sys])
+    attr_names = model_class._attr_names
+    fixed = {}
+    for name, value in values.items():
+        value = cas.DM(value)
+        shape = sys.params[name].shape
+        if value.shape != shape:
+            raise ValueError(
+                f"{name} is {shape[0]} x {shape[1]}, the value "
+                f"{value.shape[0]} x {value.shape[1]}"
+            )
+        fixed[name] = value
+    params = {k: p for k, p in sys.params.items() if k not in fixed}
+    args = [fixed.get(k, p) for k, p in sys.params.items()]
+    t = cas.SX.sym("t")
+    x = cas.SX.sym(attr_names["state_var"], sys.n)
+    u = cas.SX.sym(attr_names["input_var"], sys.nu)
+    arg_names = [
+        "t",
+        attr_names["state_var"],
+        attr_names["input_var"],
+        *params.keys(),
+    ]
+    functions = {}
+    for func, out in (("state_func", "state_output"), ("output_func", "output_var")):
+        f = getattr(sys, attr_names[func])
+        functions[func] = cas.Function(
+            attr_names[func],
+            [t, x, u, *params.values()],
+            [f(t, x, u, *args)],
+            arg_names,
+            [attr_names[out]],
+        )
+    model = model_class(
+        functions["state_func"],
+        functions["output_func"],
+        sys.n,
+        sys.nu,
+        sys.ny,
+        **_dt_kwargs([sys]),
+        params=params,
+        name=sys.name,
+        input_names=sys.input_names,
+        state_names=sys.state_names,
+        output_names=sys.output_names,
+    )
+    r = recipe(sys)
+    if r is not None:
+        given = {k: float(v) if v.is_scalar() else v for k, v in fixed.items()}
+        model.__dict__["_recipe"] = {
+            **r,
+            "values": {**r.get("values", {}), **given},
+        }
+    return model
+
+
+@records
 def connect_systems_in_series(
     systems,
     model_class=None,
@@ -1012,6 +1113,7 @@ def _build_internal_input_vector(
     return cas.vertcat(*u_internal_parts)
 
 
+@records
 def connect_systems(
     systems,
     connections,
@@ -1364,6 +1466,7 @@ def connect_systems(
     return connected_sys
 
 
+@records
 def connect_feedback_system(
     sys1,
     sys2=None,
