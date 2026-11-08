@@ -10,8 +10,9 @@ for use in nonlinear modelling, dynamic optimization and control.
  - Python classes keep track of variable names (inputs, states, outputs and parameters) when connecting and combining models.
  - Built with CasADi's high-performance functions which are automatically differentiable
  - Uses CasADi's built-in integrators to simulate or discretize continuous time models
- - Model parameters can be symbolic, allowing them to be included in optimization problems
+ - Model parameters can be symbolic, allowing them to be estimated using CasADi's optimization tools
  - Supports both continuous and discrete time models
+ - Saving and loading of models as human-readable text files
 
 ## Use Cases
 
@@ -300,6 +301,30 @@ print(params_est)
 # {'K': 2.000000000020711, 'T1': 3.0000000002056453}
 ```
 
+`set_param_values` makes the fitted model: `sys_model` with the
+estimated values in place of its symbolic parameters.
+
+```python
+from cas_models.transformations import set_param_values
+
+fitted_model = set_param_values(sys_model, params_est)
+fitted_model.describe()
+# StateSpaceModelCT:
+#   Name: None
+#   f:(t,x,u)->(rhs) SXFunction
+#   h:(t,x,u)->(y) SXFunction
+#   States (n=1): ['x']
+#   Inputs (nu=1): ['u']
+#   Outputs (ny=1): ['y']
+#   Parameters: []
+```
+
+It works on any model, continuous- or discrete-time, however it was
+built (connected models included: use the names in its `params`). Values
+can be given for some parameters only; the others stay symbolic. Saving
+`fitted_model` writes its structure and the values (see
+[Fitted models](#fitted-models)).
+
 Other options:
 
 - `n_steps`: multiple shooting in segments of `n_steps` time steps (more
@@ -320,24 +345,36 @@ counts the delay `nk` one less (see the class docstring).
 
 ## Saving and Loading Models
 
-### Model folders
+### Model specs
 
-`save()` writes a model to a folder of readable files, which `load_model()`
-reads back:
+A model spec is a human-readable YAML description of how to build a
+model: its class and the arguments given to it, or the transformation
+function (see below) and its arguments, to any depth. Every model records
+how it was made (its recipe, see `cas_models/recipes.py`), and `save()`
+and `to_yaml()` write that as its spec; `load_model()` and `from_yaml()`
+build the model from a spec again.
 
 ```python
-from cas_models.yaml_utils import load_model
+from cas_models.yaml_utils import from_yaml, load_model
 
-model.save("models/R11")                      # overwrite=True to replace
+model.save("models/R11")                      # model.yaml in the folder
+model.save()                                  # a folder named model.name
+model.save("models/R11", overwrite=True)      # replace a saved model
 model = load_model("models/R11")              # any model
 model = StateSpaceModelDT.load("models/R11")  # a DT model, or an error
+
+text = model.to_yaml()                        # the spec as text
+model = from_yaml(text)
 ```
 
 `SomeClass.load()` accepts only that class or one of its subclasses.
+Without a folder, `save()` uses one named after the model, with any
+characters a folder name can't have replaced by `_`
+(`safe_folder_name()`). `save()` and `save_model()` return the folder.
 
-The folder holds `model.yaml`: the model's class and the arguments of its
-`__init__` that rebuild it, leaving out those equal to their defaults
-(here `T1` and `T2`, so they are symbolic):
+The spec of a model made by a class holds the class and the arguments
+given, leaving out those equal to their defaults (here `T1` and `T2`, so
+they are symbolic), and loads as that class:
 
 ```yaml
 cas_models_format: 1
@@ -345,15 +382,16 @@ class: SSModelCTLinearO2SISO
 args: {K: 2.0}
 ```
 
-A model with no arguments to give is written on one line,
-`{cas_models_format: 1, class: SSModelCTLinearFOSISO}`. A model given as
-an argument, such as the `model_ct` of `StateSpaceModelDTFromCTRK4`, is
-written as a nested `{class: ..., args: ...}`.
+A model with no arguments given is just its class
+(`class: SSModelCTLinearFOSISO`). A model given as an argument, such as
+the `model_ct` of `StateSpaceModelDTFromCTRK4`, is a nested
+`{class: ..., args: ...}`.
 
 Vectors of up to 8 elements and matrices of up to 5 x 5 are written in
-`model.yaml`, a column vector as a list and other matrices as a list of
+the spec, a column vector as a list and other matrices as a list of
 rows; larger ones go to tab-separated text files in the folder, one row
-per line, which `model.yaml` refers to:
+per line, which `model.yaml` refers to (`to_yaml()` writes everything
+inline):
 
 ```yaml
 args:
@@ -370,54 +408,50 @@ args:
 ```
 
 Values are written in full precision, and sparse matrices dense (the
-constructors sparsify their matrices).
-
-Models built by connecting others (`connect_systems`,
-`connect_systems_in_parallel`, `hstack_systems`, `connect_feedback_system`,
-`*`, `+`, `-`, ...) are instances of the base classes,
-`StateSpaceModelCT` and `StateSpaceModelDT`, whose arguments are the
-functions `f` and `h` (`F` and `H`). These go to `.casadi` files
-(CasADi's serialization of the expression graph, exact but not readable),
-and `model.yaml` holds the dimensions, the names, and the parameters'
-names and shapes. Symbolic parameters load as new symbols with the same
-names; parameter values (e.g. fitted ones) aren't saved.
-
-For now, `save()` writes every model in this base-class form, so it loads
-as `StateSpaceModelCT` or `StateSpaceModelDT`; files holding a subclass's
-arguments (as in `tests/data/models`) load as that subclass.
+constructors sparsify their matrices). Tuples are written as
+`{tuple: [...]}` and complex numbers (e.g. ARX poles) as
+`{complex: [re, im]}`.
 
 ### Models built from others
 
-A model file (or YAML text, `from_yaml()`) can also say how to build a
-model from others: a connection function of `cas_models.transformations`
-and its arguments, with the models it connects given in the same way,
-to any depth:
+The spec of a model built by a transformation function of
+`cas_models.transformations` is the function and its arguments, with the
+models it takes given in the same way, to any depth:
+
+- `connect_systems`: arbitrary named signal connections
+- `connect_systems_in_series` (`sys2 * sys1`)
+- `connect_systems_in_parallel` (`sys1 + sys2`; `sys1 - sys2` is
+  `sys1 + (-sys2)`)
+- `connect_feedback_system`
+- `block_diag_systems`, `hstack_systems`, `vstack_systems`
+- `negate_system` (`-sys`)
+- `set_param_values` (see [Fitted models](#fitted-models))
 
 ```yaml
 cas_models_format: 1
 function: hstack_systems
 args:
-  name: R11
   systems:
   - class: StateSpaceModelDTARXSISO
     args: {na: 2, nb: 2, dt: 2.0, name: CRAC1}
   - class: StateSpaceModelDTARXSISO
     args: {na: 1, nb: 1, dt: 2.0, name: CRAC2}
+  name: R11
 ```
 
-Every model is a mapping of `class` or `function` and its `args` (named
-arguments only); `cas_models_format` is only at the top. The functions:
-`block_diag_systems`, `hstack_systems`, `vstack_systems`,
-`connect_systems_in_parallel`, `connect_systems_in_series`,
-`connect_systems`, `connect_feedback_system` and `negate_system`.
+Every model in a spec is a mapping of `class` or `function` and its
+`args` (named arguments only); `cas_models_format` is only at the top.
 `model_class` can be left out: it is the base class
 (`StateSpaceModelCT` or `StateSpaceModelDT`) of the models connected.
+Specs can also be written by hand.
 
 A symbolic argument is `{symbol: name}` (a scalar), or `{symbol: name,
 shape: [n]}` (a column vector) or `shape: [n, m]` (a matrix), wherever a
-value can go, e.g. `poles: [{symbol: p_0}, 0.5]`. The same name in one
-document is the same symbol, so the models that use it share the
-parameter (one `K` here, not `a_K` and `b_K`):
+value can go, e.g. `poles: [{symbol: p_0}, 0.5]`; a matrix of numbers and
+single symbols is written element by element,
+`A: [[{symbol: A_0}, {symbol: A_1}], [0.0, 1.0]]`. The same name in one
+spec is the same symbol, so the models that use it share the parameter
+(one `K` here, not `a_K` and `b_K`):
 
 ```yaml
 cas_models_format: 1
@@ -431,16 +465,42 @@ args:
 ```
 
 The parameter is named after the symbol, not the argument (a vector's
-elements are `name_0`, `name_1`, ..., as CasADi names them).
+elements are `name_0`, `name_1`, ..., as CasADi names them). Two
+different symbols with the same name can't be saved (they would load as
+one): saving raises an error.
 
-`save()` and `to_yaml()` write these files too: every model records how
-it was made (its class and the arguments given, or the connection
-function and its arguments, the operators `*`, `+` and `-` included;
-see `cas_models/recipes.py`), and that is what they write, to any
-depth. A model made from functions, or with an argument that can't be
-written (an expression such as `2 * K`), is written from its fields
-instead. A model with fitted values, `set_param_values(model, values)`,
-is written as that call: its structure from scratch and the values.
+### Fitted models
+
+A model made by `set_param_values` (e.g. the `fitted_model` of
+[Examples: Parameter Estimation](#examples-parameter-estimation)) is saved
+as that call: the spec of the model with symbolic parameters, from
+scratch, and the values.
+
+```yaml
+cas_models_format: 1
+function: set_param_values
+args:
+  sys:
+    class: SSModelCTLinearFOSISO
+  values: {K: 2.000000000020711, T1: 3.0000000002056453}
+```
+
+It loads as the model built again with the values set (by name: the same
+structure gives the same names). Estimation statistics (standard errors,
+fit errors) aren't part of the spec (see [To do](#to-do)).
+
+### Models without a spec
+
+A model made directly from functions (by a base class's `__init__`), or
+with an argument that can't be written in a spec (an expression such as
+`2 * K`, a SymPy object, a Python function), is saved from its fields
+instead: the base class, `StateSpaceModelCT` or `StateSpaceModelDT`, with
+the functions `f` and `h` (`F` and `H`) in `.casadi` files (CasADi's
+serialization of the expression graph: exact, but not human-readable),
+and the dimensions, the names, and the parameters' names and shapes in
+`model.yaml`. It loads as the base class, its symbolic parameters as new
+symbols with the same names. Files saved in this form by earlier versions
+still load.
 
 ### Pickle
 
