@@ -47,6 +47,7 @@ from cas_models.param_utils import (
     make_symbolic_vars_from_kwargs,
 )
 from cas_models.pickle_utils import getstate, setstate
+from cas_models.recipes import record_subclass_init
 from cas_models.sympy_conversion import (
     convert_sympy_state_space_to_casadi_SX,
     get_free_symbols_in_sympy_ss,
@@ -61,7 +62,6 @@ from cas_models.validation import (
     as_sx_matrix,
     validate_casadi_function_dims,
 )
-from cas_models.recipes import record_subclass_init
 from cas_models.yaml_utils import (
     base_from_saved_args,
     base_save_args,
@@ -306,15 +306,16 @@ class StateSpaceModelCT:
     def __setstate__(self, state):
         setstate(self, state)
 
-    def save(self, folder, overwrite=False, params=None):
-        """Save the model to folder: model.yaml, the class and the
-        arguments that rebuild the model, and its data files (matrices
-        as tab-separated text, functions as .casadi files). If the
-        folder isn't empty, overwrite=True replaces the model saved
-        there. params ({name: value} of self.params) are saved as
-        values in place of their symbols. See cas_models.yaml_utils.
+    def save(self, folder=None, overwrite=False):
+        """Save the model to folder (None: a folder named self.name in
+        the current folder): model.yaml, the class and the arguments
+        that rebuild the model, and its data files (matrices as
+        tab-separated text, functions as .casadi files). If the folder
+        isn't empty, overwrite=True replaces the model saved there.
+        Returns the folder (a Path). See
+        cas_models.yaml_utils.
         """
-        save_model(self, folder, overwrite=overwrite, params=params)
+        return save_model(self, folder, overwrite=overwrite)
 
     @classmethod
     def load(cls, folder):
@@ -323,14 +324,13 @@ class StateSpaceModelCT:
         """
         return load_model(folder, cls)
 
-    def to_yaml(self, params=None):
+    def to_yaml(self):
         """The model as YAML text, as save() writes model.yaml but with
         everything inline (functions serialized, matrices of any size),
         so that from_yaml() rebuilds the model from the text alone. See
-        cas_models.yaml_utils. params ({name: value} of self.params)
-        are written as values in place of their symbols.
+        cas_models.yaml_utils.
         """
-        return to_yaml(self, params)
+        return to_yaml(self)
 
     @classmethod
     def from_yaml(cls, text, folder=None):

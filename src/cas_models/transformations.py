@@ -39,8 +39,6 @@ combination (now block_diag_systems) and sum_systems the parallel one
 (now connect_systems_in_parallel).
 """
 
-from functools import reduce
-
 import casadi as cas
 
 from cas_models.param_utils import (
@@ -48,7 +46,7 @@ from cas_models.param_utils import (
     make_list_of_unique_names,
     merge_param_dicts,
 )
-from cas_models.recipes import recipe, records
+from cas_models.recipes import records
 from cas_models.validation import validate_equal_dt
 
 
@@ -240,8 +238,8 @@ def _combine_systems(
 
     state_names = names("state_names")
     assert len(state_names) == n
-    input_names = systems[0].input_names if shared_inputs else names(
-        "input_names"
+    input_names = (
+        systems[0].input_names if shared_inputs else names("input_names")
     )
     assert len(input_names) == nu
     output_names = (
@@ -579,18 +577,28 @@ def negate_system(sys, model_class=None):
     )
 
 
+@records
 def set_param_values(sys, values, model_class=None):
     """sys with values ({name: value} of sys.params, e.g. fitted values)
     in place of those parameters: a model of sys's base class (or
     model_class), its functions taking only the other parameters (the
     same symbols, so sharing with other models is kept). The states,
-    inputs, outputs and names are the same.
+    inputs, outputs and names are the same. Works on continuous-time
+    and discrete-time models, made in any way.
 
-    Its recipe (cas_models.recipes) is sys's with the values added, so
-    it is saved as sys's YAML with values: beside the arguments, and
-    loads as sys built again with these values set. A sys without a
-    recipe gives one without (saved from its fields, the functions with
-    the values in them).
+    Use it after building a model (from code or YAML) with symbolic
+    parameters and finding values for some or all of them, e.g. by
+    estimate_params(): fitted = set_param_values(model, params_est).
+    Like the connection functions, it records its recipe
+    (cas_models.recipes), so the fitted model is saved as this call:
+    sys's YAML (its structure, from scratch) and the values,
+
+        function: set_param_values
+        args:
+          sys: {class: SSModelCTLinearFOSISO, args: {name: G}}
+          values: {K: 2.0, T1: 15.0}
+
+    and loads as sys built again with these values set.
     """
     unknown = [name for name in values if name not in sys.params]
     if unknown:
@@ -623,7 +631,10 @@ def set_param_values(sys, values, model_class=None):
         *params.keys(),
     ]
     functions = {}
-    for func, out in (("state_func", "state_output"), ("output_func", "output_var")):
+    for func, out in (
+        ("state_func", "state_output"),
+        ("output_func", "output_var"),
+    ):
         f = getattr(sys, attr_names[func])
         functions[func] = cas.Function(
             attr_names[func],
@@ -645,13 +656,6 @@ def set_param_values(sys, values, model_class=None):
         state_names=sys.state_names,
         output_names=sys.output_names,
     )
-    r = recipe(sys)
-    if r is not None:
-        given = {k: float(v) if v.is_scalar() else v for k, v in fixed.items()}
-        model.__dict__["_recipe"] = {
-            **r,
-            "values": {**r.get("values", {}), **given},
-        }
     return model
 
 
@@ -1541,7 +1545,8 @@ def connect_feedback_system(
     """
     if model_class is None:
         model_class = infer_model_class(
-            [sys1] if sys2 is None or isinstance(sys2, (int, float))
+            [sys1]
+            if sys2 is None or isinstance(sys2, (int, float))
             else [sys1, sys2]
         )
 

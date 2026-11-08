@@ -2,7 +2,8 @@
 made, and save_model() / to_yaml() write that (the class or connection
 function and its arguments, to any depth) so that from_yaml() and
 load_model() rebuild the same model, with symbols shared as in the
-original and, optionally, values in place of some parameters."""
+original. A model with values set by set_param_values() is written
+as that call: its structure from scratch and the values."""
 
 import pickle
 
@@ -35,7 +36,13 @@ from cas_models.transformations import (
     set_param_values,
     vstack_systems,
 )
-from cas_models.yaml_utils import _decode, _encode, from_yaml, load_model, to_yaml
+from cas_models.yaml_utils import (
+    _decode,
+    _encode,
+    from_yaml,
+    load_model,
+    to_yaml,
+)
 
 # Recording
 
@@ -51,8 +58,13 @@ def test_class_recipe():
 
 def test_class_recipe_outermost_init():
     """A subclass calling its base's __init__ records its own arguments"""
-    model = SSModelCTLinearFOSISO(K=2.0)  # its __init__ calls SSModelCTFromABCDSISO's
-    assert recipe(model) == {"class": SSModelCTLinearFOSISO, "args": {"K": 2.0}}
+    model = SSModelCTLinearFOSISO(
+        K=2.0
+    )  # its __init__ calls SSModelCTFromABCDSISO's
+    assert recipe(model) == {
+        "class": SSModelCTLinearFOSISO,
+        "args": {"K": 2.0},
+    }
     assert recipe(SSModelCTPIInt(name="c")) == {
         "class": SSModelCTPIInt,
         "args": {"name": "c"},
@@ -66,7 +78,9 @@ def test_base_class_has_no_recipe():
 
 def test_function_recipe():
     a, b = SSModelCTLinearFOSISO(name="a"), SSModelCTLinearFOSISO(name="b")
-    model = connect_systems_in_series([a, b], StateSpaceModelCT, keys=["a", "b"])
+    model = connect_systems_in_series(
+        [a, b], StateSpaceModelCT, keys=["a", "b"]
+    )
     r = recipe(model)
     assert r["function"] == "connect_systems_in_series"
     assert r["args"]["systems"][0] is a and r["args"]["systems"][1] is b
@@ -76,7 +90,10 @@ def test_function_recipe():
 
 def test_operators_recipe():
     """*, + and - go through the connection functions"""
-    a, b = SSModelCTLinearFOSISO(name="a"), SSModelCTLinearFOSISO(K=2, name="b")
+    a, b = (
+        SSModelCTLinearFOSISO(name="a"),
+        SSModelCTLinearFOSISO(K=2, name="b"),
+    )
     assert recipe(a * b)["function"] == "connect_systems_in_series"
     assert recipe(a + b)["function"] == "connect_systems_in_parallel"
     assert recipe(-a)["function"] == "negate_system"
@@ -87,7 +104,10 @@ def test_operators_recipe():
 
 def test_recipe_args_copied():
     """Changing a list given afterwards doesn't change the recipe"""
-    systems = [SSModelCTLinearFOSISO(name="a"), SSModelCTLinearFOSISO(name="b")]
+    systems = [
+        SSModelCTLinearFOSISO(name="a"),
+        SSModelCTLinearFOSISO(name="b"),
+    ]
     model = vstack_systems(systems)
     systems.append(SSModelCTLinearFOSISO(name="c"))
     assert len(recipe(model)["args"]["systems"]) == 2
@@ -154,7 +174,9 @@ def test_unwritable_args_fall_back_to_base():
 def test_tuple_and_complex_values():
     value = (1, (2.0, "a"), 0.5 + 0.25j)
     node = _encode(value, None, "x")
-    assert node == {"tuple": [1, {"tuple": [2.0, "a"]}, {"complex": [0.5, 0.25]}]}
+    assert node == {
+        "tuple": [1, {"tuple": [2.0, "a"]}, {"complex": [0.5, 0.25]}]
+    }
     assert _decode(node, None) == value
     model = StateSpaceModelDTARXSISO(poles=[0.8 + 0.3j, 0.8 - 0.3j], nb=1)
     data = yaml.safe_load(to_yaml(model))
@@ -214,7 +236,9 @@ def test_symbols_element_of_vector_clash():
     model = vstack_systems(
         [
             StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1, name="a"),
-            StateSpaceModelDTARXSISO(poles=[cas.SX.sym("p_0")], nb=1, name="b"),
+            StateSpaceModelDTARXSISO(
+                poles=[cas.SX.sym("p_0")], nb=1, name="b"
+            ),
         ]
     )
     with pytest.raises(ValueError, match="an element of a vector symbol"):
@@ -255,116 +279,127 @@ ARX_VALUES = {
 }
 
 
-def test_params_values():
-    """Values in place of the symbols: the model with those values"""
-    model = dt_connected_arx()
-    assert list(model.params) == list(ARX_VALUES)
-    text = to_yaml(model, params=ARX_VALUES)
-    loaded = from_yaml(text)
-    assert loaded.params == {}
-    np.testing.assert_allclose(
-        eval_F(loaded), eval_F(model, ARX_VALUES.values()), rtol=1e-14
-    )
-    assert loaded.state_names == model.state_names
-
-
-def test_params_some_values():
-    """Parameters without values stay symbolic, with the same names"""
-    model = dt_connected_arx()
-    some = {k: v for k, v in ARX_VALUES.items() if k.startswith("CRAC1")}
-    loaded = from_yaml(to_yaml(model, params=some))
-    assert list(loaded.params) == ["CRAC2_a", "CRAC2_b"]
-    np.testing.assert_allclose(
-        eval_F(loaded, [-0.8, 0.2]),
-        eval_F(model, ARX_VALUES.values()),
-        rtol=1e-14,
-    )
-
-
-def test_params_vector_elements():
-    """Values for some elements of a vector symbol"""
-    model = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
-    data = yaml.safe_load(to_yaml(model, params={"p_0": 0.9}))
-    assert data["args"]["poles"] == [0.9, {"symbol": "p_1"}]
-    loaded = from_yaml(to_yaml(model, params={"p_0": 0.9}))
-    assert list(loaded.params) == ["p_1", "b"]
-    np.testing.assert_allclose(
-        eval_F(loaded, [0.5, 0.2]), eval_F(model, [0.9, 0.5, 0.2]), rtol=1e-14
-    )
-
-
-def test_params_save(tmp_path):
-    model = dt_connected_arx()
-    model.save(tmp_path / "fitted", params=ARX_VALUES)
-    loaded = load_model(tmp_path / "fitted")
-    assert loaded.params == {}
-    np.testing.assert_allclose(
-        eval_F(loaded), eval_F(model, ARX_VALUES.values()), rtol=1e-14
-    )
-
-
-def test_params_errors():
-    model = dt_connected_arx()
-    with pytest.raises(ValueError, match="params: K isn't a parameter"):
-        to_yaml(model, params={"K": 1.0})
-    with pytest.raises(ValueError, match="params: CRAC2_a is 1 x 1"):
-        to_yaml(model, params={"CRAC2_a": [1.0, 2.0]})
-
-
 def test_dt_model_class_name():
     """model_class is written by name and found on reading"""
     data = yaml.safe_load(to_yaml(dt_connected_arx()))
     assert data["args"]["model_class"] == "StateSpaceModelDT"
-    assert isinstance(from_yaml(to_yaml(dt_connected_arx())), StateSpaceModelDT)
-
-
-def test_params_internal_symbols_as_node_values():
-    """Parameters a class makes in its __init__ (na=2: a_0, a_1) aren't
-    in its arguments: their values go in values: beside them"""
-    data = yaml.safe_load(to_yaml(dt_connected_arx(), params=ARX_VALUES))
-    path = data["args"]["systems"][0]
-    assert path["args"] == {"na": 2, "nb": 2, "input_name": "u", "output_name": "y"}
-    assert path["values"] == {"a_0": -1.5, "a_1": 0.56, "b_0": 0.1, "b_1": 0.05}
-    assert data["args"]["systems"][1]["values"] == {"a": -0.8, "b": 0.2}
-
-
-def test_params_base_form(tmp_path):
-    """A model made from functions takes values too"""
-    model = dt_custom()
-    values = {name: 0.5 for name in model.params}
-    loaded = from_yaml(to_yaml(model, params=values))
-    assert loaded.params == {}
-    np.testing.assert_allclose(
-        eval_F(loaded), eval_F(model, [0.5] * len(values)), rtol=1e-14
+    assert isinstance(
+        from_yaml(to_yaml(dt_connected_arx())), StateSpaceModelDT
     )
 
 
 def test_set_param_values():
+    """Values in place of some parameters, after building the model"""
     model = dt_connected_arx()
+    assert list(model.params) == list(ARX_VALUES)
     fixed = set_param_values(model, {"CRAC2_a": -0.8, "CRAC2_b": 0.2})
     assert type(fixed) is StateSpaceModelDT
-    assert list(fixed.params) == ["CRAC1_a_0", "CRAC1_a_1", "CRAC1_b_0", "CRAC1_b_1"]
-    assert fixed.params["CRAC1_a_0"] is model.params["CRAC1_a_0"]  # same symbols
+    assert list(fixed.params) == [
+        "CRAC1_a_0",
+        "CRAC1_a_1",
+        "CRAC1_b_0",
+        "CRAC1_b_1",
+    ]
+    assert (
+        fixed.params["CRAC1_a_0"] is model.params["CRAC1_a_0"]
+    )  # same symbols
+    assert fixed.state_names == model.state_names
     np.testing.assert_allclose(
         eval_F(fixed, [-1.5, 0.56, 0.1, 0.05]),
         eval_F(model, ARX_VALUES.values()),
         rtol=1e-14,
     )
-    # Its recipe: the model's, with the values
-    text = to_yaml(fixed)
-    data = yaml.safe_load(text)
-    assert data["function"] == "connect_systems"
-    assert data["values"] == {"CRAC2_a": -0.8, "CRAC2_b": 0.2}
-    loaded = from_yaml(text)
-    assert list(loaded.params) == list(fixed.params)
-    np.testing.assert_allclose(
-        eval_F(loaded, [-1.5, 0.56, 0.1, 0.05]), eval_F(fixed, [-1.5, 0.56, 0.1, 0.05])
-    )
-    assert to_yaml(loaded) == text
-    # Then all of them: the values add up
+    # Then the rest: no parameters left
     rest = {k: v for k, v in ARX_VALUES.items() if k.startswith("CRAC1")}
-    data = yaml.safe_load(to_yaml(set_param_values(fixed, rest)))
-    assert data["values"] == ARX_VALUES | {"CRAC2_a": -0.8, "CRAC2_b": 0.2}
+    fitted = set_param_values(fixed, rest)
+    assert fitted.params == {}
+    np.testing.assert_allclose(
+        eval_F(fitted), eval_F(model, ARX_VALUES.values()), rtol=1e-14
+    )
+
+
+def test_set_param_values_from_yaml():
+    """The YAML is the symbolic model; values are set after loading it"""
+    loaded = from_yaml(to_yaml(dt_connected_arx()))
+    fitted = set_param_values(loaded, ARX_VALUES)
+    np.testing.assert_allclose(
+        eval_F(fitted),
+        eval_F(dt_connected_arx(), ARX_VALUES.values()),
+        rtol=1e-14,
+    )
+
+
+def test_set_param_values_recipe(tmp_path):
+    """A fitted model is saved as the set_param_values call: the
+    structure from scratch and the values; it loads as the same model"""
+    model = dt_connected_arx()
+    fitted = set_param_values(model, ARX_VALUES)
+    r = recipe(fitted)
+    assert r["function"] == "set_param_values"
+    assert r["args"]["sys"] is model
+    text = to_yaml(fitted)
+    data = yaml.safe_load(text)
+    assert data["function"] == "set_param_values"
+    assert data["args"]["sys"]["function"] == "connect_systems"
+    assert data["args"]["values"] == ARX_VALUES
+    loaded = from_yaml(text)
+    assert loaded.params == {}
+    np.testing.assert_allclose(eval_F(loaded), eval_F(fitted), rtol=1e-14)
+    assert to_yaml(loaded) == text
+    folder = fitted.save(tmp_path / "fitted")
+    np.testing.assert_allclose(eval_F(load_model(folder)), eval_F(fitted), rtol=1e-14)
+
+
+def test_set_param_values_some_and_nested():
+    """Some values (the rest stay symbolic, with the same names); values
+    set twice; a fitted model inside a connection"""
+    model = dt_connected_arx()
+    some = {k: v for k, v in ARX_VALUES.items() if k.startswith("CRAC1")}
+    partly = set_param_values(model, some)
+    loaded = from_yaml(to_yaml(partly))
+    assert list(loaded.params) == ["CRAC2_a", "CRAC2_b"]
+    np.testing.assert_allclose(
+        eval_F(loaded, [-0.8, 0.2]), eval_F(model, ARX_VALUES.values()), rtol=1e-14
+    )
+    twice = set_param_values(partly, {"CRAC2_a": -0.8, "CRAC2_b": 0.2})
+    data = yaml.safe_load(to_yaml(twice))
+    assert data["args"]["sys"]["function"] == "set_param_values"
+    assert from_yaml(to_yaml(twice)).params == {}
+    plant = set_param_values(SSModelCTLinearFOSISO(name="plant"), {"K": 2.0, "T1": 5.0})
+    loop = SSModelCTPIInt(name="ctrl") * plant
+    data = yaml.safe_load(to_yaml(loop))
+    assert data["args"]["systems"][0]["function"] == "set_param_values"
+    loaded = from_yaml(to_yaml(loop))
+    assert list(loaded.params) == ["Kc", "Ti"]
+    assert_same_connected(loaded, loop)
+
+
+def test_set_param_values_numpy_values():
+    """Values as estimate_params() may give them (numpy numbers, arrays)"""
+    arx = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
+    fitted = set_param_values(arx, {"p_0": np.float64(0.9), "b": np.array([0.2])})
+    loaded = from_yaml(to_yaml(fitted))
+    assert list(loaded.params) == ["p_1"]
+    np.testing.assert_allclose(eval_F(loaded, [0.5]), eval_F(fitted, [0.5]), rtol=1e-14)
+
+
+def test_set_param_values_ct_and_vector():
+    """Continuous-time models, and vector symbols one element at a time"""
+    model = SSModelCTLinearO2SISO(name="G")
+    fixed = set_param_values(model, {"K": 2.0, "T2": 5.0})
+    assert type(fixed) is StateSpaceModelCT
+    assert list(fixed.params) == ["T1"]
+    x, u = np.array([0.3, -0.2]), np.array([1.0])
+    np.testing.assert_allclose(
+        np.asarray(fixed.f(0.0, x, u, 10.0)),
+        np.asarray(model.f(0.0, x, u, 2.0, 10.0, 5.0)),
+    )
+    arx = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
+    fixed = set_param_values(arx, {"p_0": 0.9})
+    assert list(fixed.params) == ["p_1", "b"]
+    np.testing.assert_allclose(
+        eval_F(fixed, [0.5, 0.2]), eval_F(arx, [0.9, 0.5, 0.2])
+    )
 
 
 def test_set_param_values_errors():
@@ -373,7 +408,49 @@ def test_set_param_values_errors():
         set_param_values(model, {"K": 1.0})
     with pytest.raises(ValueError, match="CRAC2_a is 1 x 1, the value 2 x 1"):
         set_param_values(model, {"CRAC2_a": [1.0, 2.0]})
-    with pytest.raises(ValueError, match="values must be a mapping"):
+    with pytest.raises(ValueError, match="only class and args, not values"):
         from_yaml(
-            "cas_models_format: 1\nclass: SSModelCTLinearFOSISO\nvalues: [1]\n"
+            "cas_models_format: 1\nclass: SSModelCTLinearFOSISO\nvalues: {K: 1}\n"
         )
+
+
+def test_symbols_and_numbers_in_a_matrix():
+    """A matrix of numbers and single symbols is written element by
+    element (rows), and loads as the same model of the same class"""
+    from cas_models.discrete_time.models import StateSpaceModelDTFromABCD
+
+    A = cas.vertcat(cas.SX.sym("A", 1, 2), cas.SX([[0, 1]]))
+    model = StateSpaceModelDTFromABCD(
+        A=A, B=cas.DM([[0], [1]]), C=cas.DM([[1, 0]]), D=cas.DM([[0]])
+    )
+    data = yaml.safe_load(to_yaml(model))
+    assert data["class"] == "StateSpaceModelDTFromABCD"
+    assert data["args"]["A"] == [
+        [{"symbol": "A_0"}, {"symbol": "A_1"}],
+        [0.0, 1.0],
+    ]
+    loaded = from_yaml(to_yaml(model))
+    assert type(loaded) is StateSpaceModelDTFromABCD
+    assert list(loaded.params) == ["A_0", "A_1"]
+    assert loaded.F.serialize() == model.F.serialize()
+    assert to_yaml(loaded) == to_yaml(model)
+
+
+def test_symbols_and_numbers_in_a_vector():
+    """A column vector is written as a list"""
+    g = cas.SX.sym("g")
+    B = cas.vertcat(g, 0.5)
+    model = StateSpaceModelCTFromABCD(
+        [[-1.0, 0.0], [0.0, -2.0]], B, [[1.0, 1.0]], 0.0
+    )
+    data = yaml.safe_load(to_yaml(model))
+    assert data["args"]["B"] == [{"symbol": "g"}, 0.5]
+    assert_same_functions(from_yaml(to_yaml(model)), model)
+
+
+def test_expression_in_a_matrix_falls_back_to_base():
+    K = cas.SX.sym("K")
+    model = StateSpaceModelCTFromABCD([[-1.0]], [[2 * K]], [[1.0]], 0.0)
+    data = yaml.safe_load(to_yaml(model))
+    assert data["class"] == "StateSpaceModelCT"
+    assert list(from_yaml(to_yaml(model)).params) == ["K"]

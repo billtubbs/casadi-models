@@ -433,8 +433,14 @@ args:
 The parameter is named after the symbol, not the argument (a vector's
 elements are `name_0`, `name_1`, ..., as CasADi names them).
 
-These files are written by hand for now: `save()` and `to_yaml()` write
-the model made, not how it was made.
+`save()` and `to_yaml()` write these files too: every model records how
+it was made (its class and the arguments given, or the connection
+function and its arguments, the operators `*`, `+` and `-` included;
+see `cas_models/recipes.py`), and that is what they write, to any
+depth. A model made from functions, or with an argument that can't be
+written (an expression such as `2 * K`), is written from its fields
+instead. A model with fitted values, `set_param_values(model, values)`,
+is written as that call: its structure from scratch and the values.
 
 ### Pickle
 
@@ -465,3 +471,14 @@ with cas.global_pickle_context():
 
 Pickle files are binary and tied to the class names in this package and to
 the CasADi version.
+
+## To do
+
+- **Estimation statistics in fitted models:** a model saved after
+  `set_param_values(model, params_est)` holds its structure and the
+  values, but nothing about how they were found (standard errors,
+  RMSE on the estimation and validation data, the data sets, solver
+  status). Decide whether the fitted model (its recipe and YAML) should
+  carry these, e.g. as an optional `info` mapping that loading keeps
+  but ignores, or whether the user keeps them alongside, as
+  `ffd-fit-models` does now (`models.yaml`, `stats.csv`).

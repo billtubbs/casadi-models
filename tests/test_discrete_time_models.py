@@ -12,11 +12,16 @@ from cas_models.discrete_time.models import (
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
     StateSpaceModelDTDelay,
+    StateSpaceModelDTFromABCD,
     StateSpaceModelDTFromCT,
     StateSpaceModelDTFromCTRK4,
     StateSpaceModelDTTFSISO,
 )
-from cas_models.transformations import connect_systems, connect_systems_in_parallel
+from cas_models.transformations import (
+    connect_systems,
+    connect_systems_in_parallel,
+    set_param_values,
+)
 from cas_models.validation import is_ss_ct, is_ss_dt
 
 DATA_DIR = Path("tests/data")
@@ -1095,7 +1100,9 @@ def test_StateSpaceModelDTDelay_symbolic_G():
     expected = StateSpaceModelDTDelay(nk=2, nu=2, G=[[1.0, 0.0], [0.0, 3.0]])
     assert isinstance(expected.G, cas.DM)
     xk, uk = np.arange(1.0, 5.0), np.array([0.5, -1.0])
-    assert np.allclose(model.H(0, xk, uk, 3.0).full(), expected.H(0, xk, uk).full())
+    assert np.allclose(
+        model.H(0, xk, uk, 3.0).full(), expected.H(0, xk, uk).full()
+    )
     with pytest.raises(TypeError, match="G: give SX symbols or numbers"):
         StateSpaceModelDTDelay(nk=2, nu=1, G=cas.MX.sym("G"))
 
@@ -1341,7 +1348,9 @@ def test_add_operator_parallel_connection():
     assert np.isclose(y_combined, y1 + y2)
 
     # + is equivalent to connect_systems_in_parallel
-    sys_via_func = connect_systems_in_parallel([sys1, sys2], model_class=StateSpaceModelDT)
+    sys_via_func = connect_systems_in_parallel(
+        [sys1, sys2], model_class=StateSpaceModelDT
+    )
     assert str(sys_combined) == str(sys_via_func)
 
 
@@ -1359,3 +1368,134 @@ def test_describe(capsys):
     assert "Inputs (nu=1)" in out
     assert "Outputs (ny=1)" in out
     assert "Parameters" in out
+
+
+# StateSpaceModelDTFromABCD
+
+
+def simulate_abcd(A, B, C, D, x0, U):
+    """y(k) of x(k+1) = Ax(k) + Bu(k), y(k) = Cx(k) + Du(k), by numpy"""
+    A, B, C, D = (
+        np.atleast_2d(np.asarray(m, dtype=float)) for m in (A, B, C, D)
+    )
+    x, Y = np.asarray(x0, dtype=float), []
+    for u in U:
+        Y.append(C @ x + D @ u)
+        x = A @ x + B @ u
+    return np.array(Y)
+
+
+def simulate_model(model, x0, U, *params):
+    x, Y = cas.DM(x0), []
+    for u in U:
+        Y.append(np.asarray(model.H(0.0, x, u, *params)).ravel())
+        x = model.F(0.0, x, u, *params)
+    return np.array(Y)
+
+
+def test_StateSpaceModelDTFromABCD_MIMO():
+    """2 inputs, 3 states, 2 outputs, with direct transmission"""
+    A = [[0.9, 0.1, 0.0], [0.0, 0.8, 0.2], [0.0, 0.0, 0.5]]
+    B = [[1.0, 0.0], [0.0, 0.5], [0.3, 1.0]]
+    C = [[1.0, 0.0, 0.0], [0.0, 1.0, 1.0]]
+    D = [[0.0, 0.1], [0.2, 0.0]]
+    model = StateSpaceModelDTFromABCD(A, B, C, D, dt=2.0)
+    assert is_ss_dt(model)
+    assert (model.n, model.nu, model.ny, model.dt) == (3, 2, 2, 2.0)
+    assert model.params == {}
+    assert model.input_names == ["u1", "u2"]
+    assert model.state_names == ["x1", "x2", "x3"]
+    assert model.output_names == ["y1", "y2"]
+    assert str(model.F) == "F:(t,xk[3],uk[2])->(xkp1[3]) SXFunction"
+    assert str(model.H) == "H:(t,xk[3],uk[2])->(yk[2]) SXFunction"
+    rng = np.random.default_rng(0)
+    U = rng.standard_normal((20, 2))
+    x0 = [1.0, -0.5, 0.2]
+    np.testing.assert_allclose(
+        simulate_model(model, x0, U),
+        simulate_abcd(A, B, C, D, x0, U),
+        rtol=1e-12,
+    )
+
+
+def test_StateSpaceModelDTFromABCD_scalars_and_names():
+    """Numbers for 1 x 1 matrices; the same model as the transfer
+    function 0.5 q^-1 / (1 - 0.8 q^-1)"""
+    model = StateSpaceModelDTFromABCD(
+        0.8, 1.0, 0.5, 0.0, name="G", input_names=["flow"], output_names=["T"]
+    )
+    assert (model.n, model.nu, model.ny) == (1, 1, 1)
+    assert model.name == "G"
+    assert model.input_names == ["flow"] and model.output_names == ["T"]
+    tf = StateSpaceModelDTTFSISO(num=[0, 0.5], den=[1, -0.8])
+    U = np.r_[np.zeros(2), np.ones(15)].reshape(-1, 1)
+    np.testing.assert_allclose(
+        simulate_model(model, [0.0], U),
+        simulate_model(tf, [0.0], U),
+        atol=1e-14,
+    )
+
+
+def test_StateSpaceModelDTFromABCD_symbolic():
+    """The symbols in the matrices are the parameters, sorted by name"""
+    a, b = cas.SX.sym("a"), cas.SX.sym("b")
+    model = StateSpaceModelDTFromABCD(
+        [[a, 0.0], [0.0, 0.5]], [[b], [1.0]], [[1.0, 1.0]], 0.0
+    )
+    assert list(model.params) == ["a", "b"]
+    assert str(model.F) == "F:(t,xk[2],uk,a,b)->(xkp1[2]) SXFunction"
+    U = np.ones((10, 1))
+    np.testing.assert_allclose(
+        simulate_model(model, [0.0, 0.0], U, 0.7, 2.0),
+        simulate_abcd(
+            [[0.7, 0.0], [0.0, 0.5]],
+            [[2.0], [1.0]],
+            [[1.0, 1.0]],
+            [[0.0]],
+            [0.0, 0.0],
+            U,
+        ),
+        rtol=1e-12,
+    )
+    model = StateSpaceModelDTFromABCD(
+        cas.SX.sym("A", 2, 2), [[1.0], [0.0]], [[0.0, 1.0]], 0.0
+    )
+    assert list(model.params) == ["A_0", "A_1", "A_2", "A_3"]
+
+
+@pytest.mark.parametrize(
+    "A, B, C, D, match",
+    [
+        ([[1.0, 0.0]], [[1.0]], [[1.0]], 0.0, "A must be square, not 1 x 2"),
+        ([[0.5]], [[1.0], [1.0]], [[1.0]], 0.0, "B must have 1 rows"),
+        ([[0.5]], [[1.0]], [[1.0, 0.0]], 0.0, "C must have 1 columns"),
+        ([[0.5]], [[1.0]], [[1.0]], [[0.0, 0.0]], "D must be 1 x 1"),
+    ],
+)
+def test_StateSpaceModelDTFromABCD_errors(A, B, C, D, match):
+    with pytest.raises(ValueError, match=match):
+        StateSpaceModelDTFromABCD(A, B, C, D)
+
+
+def test_StateSpaceModelDTFromABCD_connect_and_save(tmp_path):
+    """Connects with other DT models, saves as its class and arguments
+    (its recipe), and takes values for its symbols"""
+    k = cas.SX.sym("k")
+    model = StateSpaceModelDTFromABCD(0.8, 1.0, k, 0.0, dt=1.0, name="G")
+    arx = StateSpaceModelDTARXSISO(A=[-0.5], B=[1.0], dt=1.0, name="H")
+    series = arx * model
+    assert (series.n, list(series.params)) == (1 + arx.n, ["k"])
+    text = model.to_yaml()
+    assert text.splitlines()[1] == "class: StateSpaceModelDTFromABCD"
+    loaded = StateSpaceModelDT.from_yaml(text)
+    assert type(loaded) is StateSpaceModelDTFromABCD
+    assert loaded.F.serialize() == model.F.serialize()
+    assert loaded.H.serialize() == model.H.serialize()
+    fixed = set_param_values(loaded, {"k": 0.5})
+    assert fixed.params == {}
+    U = np.ones((5, 1))
+    np.testing.assert_allclose(
+        simulate_model(fixed, [0.0], U), simulate_model(model, [0.0], U, 0.5)
+    )
+    folder = model.save(tmp_path / "G")
+    assert StateSpaceModelDTFromABCD.load(folder).dt == 1.0

@@ -49,8 +49,8 @@ they are in.
 A model can also be built by a connection function of
 cas_models.transformations (block_diag_systems, hstack_systems,
 vstack_systems, connect_systems_in_parallel, connect_systems_in_series,
-connect_systems, connect_feedback_system, negate_system) from models
-given in the same way, to any depth:
+connect_systems, connect_feedback_system, negate_system, and
+set_param_values) from models given in the same way, to any depth:
 
     cas_models_format: 1
     function: hstack_systems
@@ -78,19 +78,21 @@ a SymPy object, a Python function), is written as its base class and
 fields instead (still exact). Tuples are written as {tuple: [...]} and
 complex numbers as {complex: [re, im]}.
 
-Values for parameters: to_yaml(model, params={name: value}) (and
-save_model(..., params=...)), with the names of model.params, writes
-the values in place of the symbols: inline where a symbol is an
-argument, and in values: beside args where the class makes the
-symbol itself (e.g. a_0, a_1 for na=2), named as in that model:
+Parameter values: a model with its parameters symbolic is written
+with them as symbols. A model with fitted values, made by
+cas_models.transformations.set_param_values(model, values), is
+written as that call, a function node like the connection functions:
+the model's structure (from scratch) and the values,
 
-      - class: StateSpaceModelDTARXSISO
-        args: {na: 2, nb: 2}
-        values: {a_0: -1.5, a_1: 0.56, b_0: 0.1, b_1: 0.05}
+    function: set_param_values
+    args:
+      sys:
+        function: hstack_systems
+        args: {...}
+      values: {sys2_a_0: 99.0, ...}
 
-A model node's values: are set after it is built
-(cas_models.transformations.set_param_values()), so it loads as a
-model of its base class with the other parameters still symbolic.
+so it loads as the model built again with those values set (by name:
+the structure gives the same names).
 
 A symbolic argument is a symbol node, {symbol: name}, a scalar SX
 symbol, or {symbol: name, shape: [n]} (a column vector) or [n, m] (a
@@ -124,7 +126,7 @@ _from_saved_args) is saved in this form and loads as its base class.
 Functions
 ---------
 save_model
-    Save a model to a folder.
+    Save a model to a folder (by default, one named after the model).
 load_model
     Load a model from a folder.
 to_yaml
@@ -135,6 +137,8 @@ base_save_args
     The base-class form of a model, for _save_args.
 base_from_saved_args
     Rebuild a base-class model, for _from_saved_args.
+safe_folder_name
+    A model's name made safe as a folder name.
 write_tsv
     Write a matrix to a tab-separated text file.
 read_tsv
@@ -143,6 +147,7 @@ read_tsv
 
 import importlib
 import inspect
+import re
 from dataclasses import fields
 from pathlib import Path
 
@@ -157,7 +162,8 @@ MODEL_FILE = "model.yaml"
 # The keys that name what a model node builds
 NODE_KINDS = ("class", "function")
 # The functions a model node can call (cas_models.transformations): the
-# ones that combine models into one
+# ones that combine models into one, and set_param_values (a model with
+# values for some of its parameters)
 CONNECTION_FUNCTIONS = (
     "block_diag_systems",
     "hstack_systems",
@@ -167,6 +173,7 @@ CONNECTION_FUNCTIONS = (
     "connect_systems",
     "connect_feedback_system",
     "negate_system",
+    "set_param_values",
 )
 # Largest vectors (elements) and matrices (rows and columns) written in
 # model.yaml
@@ -216,18 +223,16 @@ def read_tsv(path, shape):
 
 class _Writer:
     """The state of writing one YAML document: the folder for data
-    files (None: everything inline), the symbols written so far ({name:
-    SX}, so that one name is one symbol) and the values to write in
-    place of symbols ([(SX, value)], see to_yaml())."""
+    files (None: everything inline) and the symbols written so far
+    ({name: SX}, so that one name is one symbol)."""
 
-    def __init__(self, folder, values=()):
+    def __init__(self, folder):
         self.folder = folder
         self.symbols = {}
         self.elements = {}  # element names of vector symbols: {name: vector name}
-        self.values = list(values)
 
     def copy(self, folder="same"):
-        other = _Writer(self.folder if folder == "same" else folder, self.values)
+        other = _Writer(self.folder if folder == "same" else folder)
         other.symbols = dict(self.symbols)
         other.elements = dict(self.elements)
         return other
@@ -255,41 +260,24 @@ def _symbol_name(value):
 
 
 def _encode_symbol(value, writer, key):
-    """A symbol node for an SX symbol (or its value, if writer has one
-    for it); one name is one symbol in the document. A vector or matrix
-    symbol with values for some of its elements (model.params holds
-    them one by one: p_0, p_1, ...) is written element by element (a
-    list, of rows for a matrix), values and scalar symbols."""
-    for sym, val in writer.values:
-        if sym.shape == value.shape and cas.is_equal(sym, value):
-            return _encode(val, writer, key)
-    if not value.is_scalar() and writer.values:
-        elements = [value[i, j] for j in range(value.shape[1]) for i in range(value.shape[0])]
-        found = [
-            next(
-                (val for sym, val in writer.values
-                 if sym.is_scalar() and cas.is_equal(sym, e)),
-                None,
-            )
-            for e in elements
-        ]
-        if any(v is not None for v in found):
-            nodes = [
-                _encode(v if v is not None else e, writer, f"{key}_{k}")
-                for k, (e, v) in enumerate(zip(elements, found))
-            ]
-            nrow, ncol = value.shape
-            if ncol == 1:
-                return nodes
-            return [[nodes[j * nrow + i] for j in range(ncol)] for i in range(nrow)]
+    """A symbol node for an SX symbol; one name is one symbol in the
+    document. A matrix of numbers and single symbols that isn't one
+    symbol is written element by element (see _encode_elements())."""
     found = _symbol_name(value)
     if found is None:
-        raise NotImplementedError(
-            f"{key}: can't save a symbolic expression ({value}): only "
-            "single symbols (cas.SX.sym(name[, n[, m]])) and values"
-        )
+        if value.is_scalar():
+            raise NotImplementedError(
+                f"{key}: can't save a symbolic expression ({value}): only "
+                "single symbols (cas.SX.sym(name[, n[, m]])), numbers, and "
+                "matrices of them"
+            )
+        return _encode_elements(value, writer, key)
     name, shape = found
-    node = {"symbol": name} if shape == [1, 1] else {"symbol": name, "shape": shape}
+    node = (
+        {"symbol": name}
+        if shape == [1, 1]
+        else {"symbol": name, "shape": shape}
+    )
     if name in writer.symbols:
         if not (
             writer.symbols[name].shape == value.shape
@@ -318,6 +306,25 @@ def _encode_symbol(value, writer, key):
     return node
 
 
+def _encode_elements(value, writer, key):
+    """A matrix of numbers and single symbols (e.g. [[A_0, A_1], [0,
+    1]]) element by element: a list (a column vector) or a list of rows
+    of numbers and symbol nodes; an element that is an expression can't
+    be written (NotImplementedError)."""
+    nrow, ncol = value.shape
+
+    def element(e, k):
+        if e.is_constant():
+            return float(cas.DM(e))
+        return _encode(e, writer, f"{key}_{k}")
+
+    nodes = [
+        [element(value[i, j], j * nrow + i) for j in range(ncol)]
+        for i in range(nrow)
+    ]
+    return [row[0] for row in nodes] if ncol == 1 else nodes
+
+
 def _encode(value, writer, key):
     """A YAML value for an argument, writing data files to writer.folder
     (if None, everything inline: functions serialized, matrices of any
@@ -337,7 +344,9 @@ def _encode(value, writer, key):
         value.save(str(file))
         return {"file": file.name}
     if isinstance(value, cas.MX) and not value.is_constant():
-        raise NotImplementedError(f"{key}: can't save an MX expression ({value})")
+        raise NotImplementedError(
+            f"{key}: can't save an MX expression ({value})"
+        )
     if isinstance(value, cas.SX) and not value.is_constant():
         return _encode_symbol(value, writer, key)
     if isinstance(value, (cas.SX, cas.MX)):
@@ -364,7 +373,11 @@ def _encode(value, writer, key):
     if isinstance(value, complex):
         return {"complex": [value.real, value.imag]}
     if isinstance(value, tuple):
-        return {"tuple": [_encode(v, writer, f"{key}_{i}") for i, v in enumerate(value)]}
+        return {
+            "tuple": [
+                _encode(v, writer, f"{key}_{i}") for i, v in enumerate(value)
+            ]
+        }
     if isinstance(value, dict):
         return {k: _encode(v, writer, f"{key}_{k}") for k, v in value.items()}
     if isinstance(value, list):
@@ -488,9 +501,7 @@ def _make_symbol(value, symbols):
     parameter; its shape must be the same everywhere."""
     name = value["symbol"]
     if not name.isidentifier():
-        raise ValueError(
-            f"symbol {name!r}: a name must be a valid identifier"
-        )
+        raise ValueError(f"symbol {name!r}: a name must be a valid identifier")
     shape = value.get("shape", [1, 1])
     if (
         not isinstance(shape, list)
@@ -517,7 +528,7 @@ def _make_symbol(value, symbols):
 
 
 def _model_kind(value):
-    """"class" or "function" if a YAML value is a model node ({class:
+    """ "class" or "function" if a YAML value is a model node ({class:
     ..., args: ...} or {function: ..., args: ...}, args optional), else
     None. A mapping with a class or function name and other keys is an
     error (e.g. cas_models_format, which is only at the top)."""
@@ -530,11 +541,11 @@ def _model_kind(value):
         raise ValueError(
             f"a model has a class or a function, not both ({value})"
         )
-    extra = set(value) - {kinds[0], "args", "values"}
+    extra = set(value) - {kinds[0], "args"}
     if extra:
         raise ValueError(
             f"{kinds[0]} {value[kinds[0]]}: a model has only "
-            f"{kinds[0]}, args and values, not {', '.join(sorted(extra))} "
+            f"{kinds[0]} and args, not {', '.join(sorted(extra))} "
             "(cas_models_format only at the top of the document)"
         )
     return kinds[0]
@@ -578,50 +589,17 @@ def _is_model_object(value):
     return isinstance(value, (StateSpaceModelCT, StateSpaceModelDT))
 
 
-def _args_node(kind, name, args, writer, key, values=None):
-    """A model node {kind: name, args: ..., values: ...} (args and
-    values left out if empty). Arguments are named key_<argument> in
-    data files (just <argument> at the top)."""
+def _args_node(kind, name, args, writer, key):
+    """A model node {kind: name, args: ...} (args left out if empty).
+    Arguments are named key_<argument> in data files (just <argument>
+    at the top)."""
     node = {kind: name}
     if args:
         node["args"] = {
             k: _encode(v, writer, f"{key}_{k}" if key else k)
             for k, v in args.items()
         }
-    if values:
-        node["values"] = {
-            k: _encode(v, writer, f"{key}_values_{k}" if key else f"values_{k}")
-            for k, v in values.items()
-        }
     return node
-
-
-def _symbols_in(value):
-    """The SX symbols in an argument (in lists, tuples and dicts; not in
-    models, whose nodes write their own)."""
-    if isinstance(value, cas.SX):
-        return cas.symvar(value)
-    if isinstance(value, (list, tuple)):
-        return [s for v in value for s in _symbols_in(v)]
-    if isinstance(value, dict):
-        return [s for v in value.values() for s in _symbols_in(v)]
-    return []
-
-
-def _node_values(model, writer, args, r):
-    """The values: of a model node: those in the recipe (the model was
-    made by set_param_values()) and the writer's values of the model's
-    parameters that aren't symbols in its arguments (made by its
-    __init__: they can't be written in place)."""
-    values = dict(r.get("values", {})) if r is not None else {}
-    in_args = _symbols_in(args)
-    for name, sym in model.params.items():
-        if any(cas.is_equal(sym, s) for s in in_args):
-            continue
-        for s, val in writer.values:
-            if s.shape == sym.shape and cas.is_equal(s, sym):
-                values[name] = val
-    return values
 
 
 def _model_node(model, writer, key=""):
@@ -631,47 +609,27 @@ def _model_node(model, writer, key=""):
     class and fields (_save_args())."""
     r = recipe(model)
     if r is not None and "function" in r:
-        values = dict(r.get("values", {}))
-        return _args_node("function", r["function"], r["args"], writer, key, values)
+        return _args_node("function", r["function"], r["args"], writer, key)
     if r is not None:
         cls = r["class"]
         args = _without_defaults(cls, r["args"])
-        values = _node_values(model, writer, r["args"], r)
         try:  # a dry run: an argument may not be writable (e.g. SymPy)
             _args_node(
-                "class", cls.__name__, args, writer.copy(folder=None), key, values
+                "class", cls.__name__, args, writer.copy(folder=None), key
             )
         except NotImplementedError:
             pass
         else:
-            return _args_node("class", cls.__name__, args, writer, key, values)
+            return _args_node("class", cls.__name__, args, writer, key)
     cls, args = model._save_args()
     args = _without_defaults(cls, args)
-    values = _node_values(model, writer, {}, None)
-    return _args_node("class", cls.__name__, args, writer, key, values)
+    return _args_node("class", cls.__name__, args, writer, key)
 
 
-def _model_data(model, folder, params=None):
+def _model_data(model, folder):
     """The model's YAML document as a dict, writing its data files to
-    folder (None: everything inline), with params ({name: value} of
-    model.params) written as values in place of their symbols."""
-    values = []
-    for name, value in (params or {}).items():
-        if name not in model.params:
-            raise ValueError(
-                f"params: {name} isn't a parameter of the model "
-                f"({', '.join(model.params) or 'none'})"
-            )
-        sym = model.params[name]
-        value = cas.DM(value)
-        if value.shape != sym.shape:
-            raise ValueError(
-                f"params: {name} is {sym.shape[0]} x {sym.shape[1]}, the "
-                f"value {value.shape[0]} x {value.shape[1]}"
-            )
-        values.append((sym, float(value) if value.is_scalar() else value))
-    writer = _Writer(folder, values)
-    return {"cas_models_format": FORMAT, **_model_node(model, writer)}
+    folder (None: everything inline)."""
+    return {"cas_models_format": FORMAT, **_model_node(model, _Writer(folder))}
 
 
 def _dump(data, stream=None):
@@ -685,11 +643,43 @@ def _dump(data, stream=None):
     )
 
 
-def save_model(model, folder, overwrite=False, params=None):
-    """Save model to folder (created if needed): model.yaml and its data
-    files. If the folder isn't empty, overwrite=True is needed: it then
+def safe_folder_name(name):
+    """name with the characters a file or folder name can't have on
+    Windows (the most restrictive: < > : " / \\ | ? * and control
+    characters, / and \\ also being path separators) replaced by _, and
+    trailing dots and spaces (which Windows drops) removed. A name that
+    passes is valid on Windows, macOS and Linux."""
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    return name.rstrip(". ")
+
+
+def _folder_from_name(name):
+    """The folder to save a model named name in when no folder is given:
+    safe_folder_name(name), with a note if it differs from name."""
+    if not name:
+        raise ValueError(
+            "the model has no name: give the folder to save it in"
+        )
+    folder = safe_folder_name(name)
+    if folder in ("", ".", ".."):
+        raise ValueError(
+            f"the model's name {name!r} can't be a folder name: give the "
+            "folder to save it in"
+        )
+    if folder != name:
+        print(f"Saving model {name!r} in folder {folder!r}")
+    return Path(folder)
+
+
+def save_model(model, folder=None, overwrite=False):
+    """Save model to folder (created if needed; None: a folder named
+    model.name in the current folder): model.yaml and its data files.
+    If the folder isn't empty, overwrite=True is needed: it then
     deletes the files of the model saved there (model.yaml and the files
-    it refers to) and leaves any others. params as in to_yaml()."""
+    it refers to) and leaves any others.
+    Returns the folder (a Path)."""
+    if folder is None:
+        folder = _folder_from_name(model.name)
     folder = Path(folder)
     if folder.exists() and any(folder.iterdir()):
         if not overwrite:
@@ -702,19 +692,17 @@ def save_model(model, folder, overwrite=False, params=None):
                 (folder / name).unlink(missing_ok=True)
             (folder / MODEL_FILE).unlink()
     folder.mkdir(parents=True, exist_ok=True)
-    data = _model_data(model, folder, params)
+    data = _model_data(model, folder)
     with open(folder / MODEL_FILE, "w") as f:
         _dump(data, f)
+    return folder
 
 
-def to_yaml(model, params=None):
+def to_yaml(model):
     """The model as YAML text: what save_model() writes to model.yaml,
     with everything inline (functions as their CasADi serialization,
-    matrices of any size) so that the text alone rebuilds it. params
-    ({name: value} of model.params, e.g. fitted values) are written in
-    place of their symbols, so the text rebuilds the model with those
-    values (and the other parameters still symbolic)."""
-    return _dump(_model_data(model, None, params))
+    matrices of any size) so that the text alone rebuilds it."""
+    return _dump(_model_data(model, None))
 
 
 def _is_default(value, default):
@@ -821,24 +809,11 @@ def _make_model(data, folder, bases, symbols=None):
             f"args must be a mapping of argument names to values, not "
             f"{type(args).__name__} (positional arguments aren't supported)"
         )
-    values = data.get("values")
-    if values is not None and not isinstance(values, dict):
-        raise ValueError(
-            f"values must be a mapping of parameter names to values, not "
-            f"{type(values).__name__}"
-        )
     if "function" in data:
-        model = _call_function(data["function"], args, folder, bases, symbols)
-    else:
-        cls = _find_class(data["class"], bases)
-        args = {k: _decode(v, folder, symbols) for k, v in args.items()}
-        model = cls._from_saved_args(args)
-    if values:
-        from cas_models.transformations import set_param_values
-
-        values = {k: _decode(v, folder, symbols) for k, v in values.items()}
-        model = set_param_values(model, values)
-    return model
+        return _call_function(data["function"], args, folder, bases, symbols)
+    cls = _find_class(data["class"], bases)
+    args = {k: _decode(v, folder, symbols) for k, v in args.items()}
+    return cls._from_saved_args(args)
 
 
 def _call_function(name, args, folder, bases, symbols):

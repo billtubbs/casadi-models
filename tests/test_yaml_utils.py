@@ -46,6 +46,7 @@ from cas_models.transformations import (
     connect_systems_in_series,
     hstack_systems,
     negate_system,
+    set_param_values,
     vstack_systems,
 )
 from cas_models.yaml_utils import (
@@ -56,6 +57,7 @@ from cas_models.yaml_utils import (
     from_yaml,
     load_model,
     read_tsv,
+    safe_folder_name,
     to_yaml,
     write_tsv,
 )
@@ -232,11 +234,21 @@ def test_saved_files(tmp_path):
             "systems": [
                 {
                     "class": "StateSpaceModelDTARXSISO",
-                    "args": {"na": 2, "nb": 2, "input_name": "u", "output_name": "y"},
+                    "args": {
+                        "na": 2,
+                        "nb": 2,
+                        "input_name": "u",
+                        "output_name": "y",
+                    },
                 },
                 {
                     "class": "StateSpaceModelDTARXSISO",
-                    "args": {"na": 1, "nb": 1, "input_name": "u", "output_name": "y"},
+                    "args": {
+                        "na": 1,
+                        "nb": 1,
+                        "input_name": "u",
+                        "output_name": "y",
+                    },
                 },
             ],
             "connections": {
@@ -736,9 +748,15 @@ def test_matrices_in_dict_and_list(tmp_path):
 
 
 def test_symbolic_expression_not_saved(tmp_path):
+    """An expression can't be written (numbers and single symbols, and
+    matrices of them, can)"""
     a = cas.SX.sym("a")
+    assert _encode(cas.vertcat(1, a), tmp_path, "den") == [
+        1.0,
+        {"symbol": "a"},
+    ]
     with pytest.raises(NotImplementedError, match="symbolic expression"):
-        _encode(cas.vertcat(1, a), tmp_path, "den")
+        _encode(cas.vertcat(1, 2 * a), tmp_path, "den")
 
 
 def test_load_imports_model_modules(tmp_path):
@@ -904,13 +922,17 @@ def test_to_yaml_same_as_saved(tmp_path):
     data = yaml.safe_load(model.to_yaml())
     for key in ("F", "H"):
         assert saved["args"][key] == {"file": f"{key}.casadi"}
-        assert data["args"][key] == {"Function": getattr(model, key).serialize()}
+        assert data["args"][key] == {
+            "Function": getattr(model, key).serialize()
+        }
         del saved["args"][key], data["args"][key]
     assert data == saved
     # A recipe has nothing in files: the same
     model = dt_connected_arx()
     model.save(tmp_path / "recipe")
-    assert yaml.safe_load(model.to_yaml()) == read_model_yaml(tmp_path / "recipe")
+    assert yaml.safe_load(model.to_yaml()) == read_model_yaml(
+        tmp_path / "recipe"
+    )
 
 
 def test_to_yaml_text():
@@ -1013,7 +1035,10 @@ FUNCTION_CASES = {
         "  - {class: SSModelCTLinearFOSISO, args: {K: 2.0, name: a}}\n"
         "  - {class: SSModelCTLinearO2SISO, args: {name: b}}\n",
         lambda: vstack_systems(
-            [SSModelCTLinearFOSISO(K=2.0, name="a"), SSModelCTLinearO2SISO(name="b")],
+            [
+                SSModelCTLinearFOSISO(K=2.0, name="a"),
+                SSModelCTLinearO2SISO(name="b"),
+            ],
             StateSpaceModelCT,
         ),
     ),
@@ -1099,7 +1124,10 @@ FUNCTION_CASES = {
         lambda: hstack_systems(
             [
                 vstack_systems(
-                    [SSModelCTLinearFOSISO(name="a"), SSModelCTLinearFOSISO(name="b")],
+                    [
+                        SSModelCTLinearFOSISO(name="a"),
+                        SSModelCTLinearFOSISO(name="b"),
+                    ],
                     StateSpaceModelCT,
                 ),
                 block_diag_systems(
@@ -1134,6 +1162,15 @@ FUNCTION_CASES = {
                 StateSpaceModelDTTFSISO(num=[0.2], den=[1, -0.8], dt=1.0),
             ],
             StateSpaceModelDT,
+        ),
+    ),
+    "set_param_values": (
+        "function: set_param_values\n"
+        "args:\n"
+        "  sys: {class: SSModelCTLinearO2SISO, args: {name: G}}\n"
+        "  values: {K: 2.0, T2: 5.0}\n",
+        lambda: set_param_values(
+            SSModelCTLinearO2SISO(name="G"), {"K": 2.0, "T2": 5.0}
         ),
     ),
 }
@@ -1189,8 +1226,12 @@ def test_from_yaml_function_with_data_file():
         "function: connect_systems_in_parallel\n"
         "args:\n"
         "  systems:\n"
-        "  - " + (folder / "model.yaml").read_text().split("\n", 1)[1]
-        .replace("\n", "\n    ").rstrip()
+        "  - "
+        + (folder / "model.yaml")
+        .read_text()
+        .split("\n", 1)[1]
+        .replace("\n", "\n    ")
+        .rstrip()
         + "\n  - class: StateSpaceModelCTFromABCD\n"
         "    args: {A: {file: A.tsv, shape: [6, 6]}, B: {DM: [1, 0, 0, 0, 0, 0]},"
         " C: {DM: [[0.1667, 0.1667, 0.1667, 0.1667, 0.1667, 0.1667]]}, D: 0.0}\n"
@@ -1212,7 +1253,7 @@ FUNCTION_ERRORS = {
         "  systems:\n"
         "  - cas_models_format: 1\n"
         "    class: SSModelCTLinearFOSISO\n",
-        "a model has only class, args and values, not cas_models_format",
+        "a model has only class and args, not cas_models_format",
     ),
     "class and function": (
         "function: hstack_systems\nclass: SSModelCTLinearFOSISO\n",
@@ -1250,7 +1291,9 @@ def test_from_yaml_function_wrong_base():
         "cas_models_format: 1\nfunction: hstack_systems\n"
         "args:\n  systems:\n" + ARX_NODES
     )
-    with pytest.raises(ValueError, match="makes a StateSpaceModelDT, which isn't"):
+    with pytest.raises(
+        ValueError, match="makes a StateSpaceModelDT, which isn't"
+    ):
         StateSpaceModelCT.from_yaml(text)
     with pytest.raises(ValueError, match="isn't StateSpaceModelDTARXSISO"):
         StateSpaceModelDTARXSISO.from_yaml(text)
@@ -1264,7 +1307,9 @@ def test_from_yaml_function_mixed_ct_dt():
         "  - {class: SSModelCTLinearFOSISO}\n"
         "  - {class: StateSpaceModelDTARXSISO, args: {na: 1, nb: 1}}\n"
     )
-    with pytest.raises(ValueError, match="Cannot combine systems with different types"):
+    with pytest.raises(
+        ValueError, match="Cannot combine systems with different types"
+    ):
         from_yaml(text)
 
 
@@ -1302,7 +1347,9 @@ def test_symbol_shared_parameters(tmp_path):
 
 def test_symbol_shared_verbose_names():
     """With verbose_names, a shared parameter names all its systems"""
-    text = SHARED.replace("args:\n  systems:", "args:\n  verbose_names: true\n  systems:")
+    text = SHARED.replace(
+        "args:\n  systems:", "args:\n  verbose_names: true\n  systems:"
+    )
     model = from_yaml(H + text)
     assert list(model.params) == ["a_b_K", "a_b_T1"]
 
@@ -1325,7 +1372,9 @@ def test_symbol_shared_across_nested_functions():
 
 def test_symbol_separate_models_get_separate_symbols():
     """Without symbols (or across documents), parameters aren't shared"""
-    text = SHARED.replace("{symbol: K}", "null").replace("{symbol: T1}", "null")
+    text = SHARED.replace("{symbol: K}", "null").replace(
+        "{symbol: T1}", "null"
+    )
     model = from_yaml(H + text)
     assert len(model.params) == 4  # renamed apart: a_K, b_K, ...
     m1, m2 = from_yaml(H + SHARED), from_yaml(H + SHARED)
@@ -1395,7 +1444,10 @@ SYMBOL_ERRORS = {
 def test_symbol_errors(name):
     node, match = SYMBOL_ERRORS[name]
     with pytest.raises(ValueError, match=match):
-        from_yaml(H + f"class: StateSpaceModelDTARXSISO\nargs: {{poles: {node}, nb: 1}}\n")
+        from_yaml(
+            H
+            + f"class: StateSpaceModelDTARXSISO\nargs: {{poles: {node}, nb: 1}}\n"
+        )
 
 
 def test_symbol_shape_must_agree():
@@ -1403,7 +1455,9 @@ def test_symbol_shape_must_agree():
         "class: StateSpaceModelDTARXSISO\n"
         "args: {poles: {symbol: p, shape: [2]}, B: [{symbol: p}]}\n"
     )
-    with pytest.raises(ValueError, match=r"symbol p: shape \[1, 1\] here, \[2, 1\]"):
+    with pytest.raises(
+        ValueError, match=r"symbol p: shape \[1, 1\] here, \[2, 1\]"
+    ):
         from_yaml(H + text)
 
 
@@ -1412,3 +1466,63 @@ def test_symbol_vector_for_a_scalar_argument():
     text = "class: SSModelCTLinearFOSISO\nargs: {K: {symbol: K, shape: [2]}}\n"
     with pytest.raises(ValueError, match="K: give a scalar, not 2 values"):
         from_yaml(H + text)
+
+
+def test_save_to_folder_named_after_model(tmp_path, monkeypatch):
+    """Without a folder, save() uses one named after the model"""
+    monkeypatch.chdir(tmp_path)
+    model = StateSpaceModelDTARXSISO(na=1, nb=1, name="R11_intake")
+    folder = model.save()
+    assert folder == Path("R11_intake")
+    assert (tmp_path / "R11_intake" / "model.yaml").is_file()
+    assert_same_functions(load_model(tmp_path / "R11_intake"), model)
+    # As with a folder given: an existing model needs overwrite
+    with pytest.raises(FileExistsError, match="isn't empty"):
+        model.save()
+    assert model.save(overwrite=True) == Path("R11_intake")
+    # A given folder is used as before, and returned
+    assert model.save(tmp_path / "other") == tmp_path / "other"
+
+
+@pytest.mark.parametrize(
+    "name, folder",
+    [
+        ("R11_intake", "R11_intake"),
+        ("a+b", "a+b"),
+        ("-plant", "-plant"),
+        ("a/b", "a_b"),
+        ("a\\b", "a_b"),
+        ('x<1>:"y"|z?*', "x_1___y__z__"),
+        ("tab\there", "tab_here"),
+        ("model. ", "model"),
+    ],
+)
+def test_safe_folder_name(name, folder):
+    assert safe_folder_name(name) == folder
+
+
+def test_save_scrubbed_folder_name(tmp_path, monkeypatch, capsys):
+    """A name that isn't a valid folder name is saved under a safe one;
+    model.yaml keeps the name"""
+    monkeypatch.chdir(tmp_path)
+    model = StateSpaceModelDTARXSISO(na=1, nb=1, name="R11/intake")
+    assert model.save() == Path("R11_intake")
+    assert "in folder 'R11_intake'" in capsys.readouterr().out
+    assert load_model(tmp_path / "R11_intake").name == "R11/intake"
+
+
+@pytest.mark.parametrize(
+    "name, match",
+    [
+        (None, "has no name"),
+        ("", "has no name"),
+        ("..", "can't be a folder name"),
+        (". ", "can't be a folder name"),
+    ],
+)
+def test_save_without_folder_errors(name, match, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    model = StateSpaceModelDTARXSISO(na=1, nb=1, name=name)
+    with pytest.raises(ValueError, match=match):
+        model.save()
+    assert list(tmp_path.iterdir()) == []

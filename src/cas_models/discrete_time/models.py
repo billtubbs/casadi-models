@@ -8,6 +8,8 @@ StateSpaceModelDTFromCTRK4
     Discrete-time model obtained by discretising a CT model with RK4.
 StateSpaceModelDTFromCT
     Discrete-time model obtained by discretising a CT model (CasADi integrator).
+StateSpaceModelDTFromABCD
+    Discrete-time linear model from matrices A, B, C, D.
 StateSpaceModelDTSISO
     Base class for SISO discrete-time models.
 StateSpaceModelDTTFSISO
@@ -52,13 +54,13 @@ from cas_models.transformations import (
     connect_systems_in_series,
     negate_system,
 )
+from cas_models.recipes import record_subclass_init
 from cas_models.validation import (
     as_sx_matrix,
     as_sx_scalar,
     as_sx_vector,
     validate_casadi_function_dims,
 )
-from cas_models.recipes import record_subclass_init
 from cas_models.yaml_utils import (
     base_from_saved_args,
     base_save_args,
@@ -312,15 +314,16 @@ class StateSpaceModelDT:
     def __setstate__(self, state):
         setstate(self, state)
 
-    def save(self, folder, overwrite=False, params=None):
-        """Save the model to folder: model.yaml, the class and the
-        arguments that rebuild the model, and its data files (matrices
-        as tab-separated text, functions as .casadi files). If the
-        folder isn't empty, overwrite=True replaces the model saved
-        there. params ({name: value} of self.params) are saved as
-        values in place of their symbols. See cas_models.yaml_utils.
+    def save(self, folder=None, overwrite=False):
+        """Save the model to folder (None: a folder named self.name in
+        the current folder): model.yaml, the class and the arguments
+        that rebuild the model, and its data files (matrices as
+        tab-separated text, functions as .casadi files). If the folder
+        isn't empty, overwrite=True replaces the model saved there.
+        Returns the folder (a Path). See
+        cas_models.yaml_utils.
         """
-        save_model(self, folder, overwrite=overwrite, params=params)
+        return save_model(self, folder, overwrite=overwrite)
 
     @classmethod
     def load(cls, folder):
@@ -329,14 +332,13 @@ class StateSpaceModelDT:
         """
         return load_model(folder, cls)
 
-    def to_yaml(self, params=None):
+    def to_yaml(self):
         """The model as YAML text, as save() writes model.yaml but with
         everything inline (functions serialized, matrices of any size),
         so that from_yaml() rebuilds the model from the text alone. See
-        cas_models.yaml_utils. params ({name: value} of self.params)
-        are written as values in place of their symbols.
+        cas_models.yaml_utils.
         """
-        return to_yaml(self, params)
+        return to_yaml(self)
 
     @classmethod
     def from_yaml(cls, text, folder=None):
@@ -498,6 +500,102 @@ class StateSpaceModelDTFromCT(StateSpaceModelDT):
             ny=ny,
             dt=dt,
             params=params,
+            name=name,
+            input_names=input_names,
+            state_names=state_names,
+            output_names=output_names,
+        )
+
+
+class StateSpaceModelDTFromABCD(StateSpaceModelDT):
+    def __init__(
+        self,
+        A,
+        B,
+        C,
+        D,
+        dt=None,
+        name=None,
+        input_names=None,
+        state_names=None,
+        output_names=None,
+    ):
+        """Creates a discrete-time linear state-space model of the
+        following form (the discrete-time StateSpaceModelCTFromABCD):
+
+            x(k+1) = Ax(k) + Bu(k)
+              y(k) = Cx(k) + Du(k)
+
+        A, B, C and D are matrices (array-likes, CasADi DM or SX, a
+        number for a 1 x 1 matrix) of numbers or SX symbols; the symbols
+        in them are the model's parameters, sorted by name. dt is the
+        sample time (None: unspecified).
+        """
+
+        # Convert to CasADi sparse SX matrices (numbers and SX symbols,
+        # see as_sx_matrix())
+        A = cas.sparsify(as_sx_matrix(A, "A"))
+        B = cas.sparsify(as_sx_matrix(B, "B"))
+        C = cas.sparsify(as_sx_matrix(C, "C"))
+        D = cas.sparsify(as_sx_matrix(D, "D"))
+
+        n = A.shape[0]
+        if A.shape[1] != n:
+            raise ValueError(
+                f"A must be square, not {A.shape[0]} x {A.shape[1]}"
+            )
+        nu = B.shape[1]
+        ny = C.shape[0]
+        if B.shape[0] != n:
+            raise ValueError(f"B must have {n} rows (A's), not {B.shape[0]}")
+        if C.shape[1] != n:
+            raise ValueError(
+                f"C must have {n} columns (A's), not {C.shape[1]}"
+            )
+        if D.shape != (ny, nu):
+            raise ValueError(
+                f"D must be {ny} x {nu} (C's rows x B's columns), not "
+                f"{D.shape[0]} x {D.shape[1]}"
+            )
+        symbolic_params = {}
+        for m in [A, B, C, D]:
+            for p in cas.symvar(cas.SX(m)):
+                symbolic_params[p.name()] = p
+        symbolic_params = {
+            name_key: symbolic_params[name_key]
+            for name_key in sorted(symbolic_params)
+        }
+
+        t = cas.SX.sym("t")
+        xk = cas.SX.sym("xk", n)
+        uk = cas.SX.sym("uk", nu)
+
+        # State transition function
+        F = cas.Function(
+            "F",
+            [t, xk, uk, *symbolic_params.values()],
+            [A @ xk + B @ uk],
+            ["t", "xk", "uk", *symbolic_params.keys()],
+            ["xkp1"],
+        )
+
+        # Output function
+        H = cas.Function(
+            "H",
+            [t, xk, uk, *symbolic_params.values()],
+            [C @ xk + D @ uk],
+            ["t", "xk", "uk", *symbolic_params.keys()],
+            ["yk"],
+        )
+
+        super().__init__(
+            F,
+            H,
+            n,
+            nu=nu,
+            ny=ny,
+            dt=dt,
+            params=symbolic_params,
             name=name,
             input_names=input_names,
             state_names=state_names,
