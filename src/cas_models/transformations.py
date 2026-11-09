@@ -134,6 +134,16 @@ def _summed_names(name_lists):
     return ["sum_" + "_".join(names) for names in zip(*name_lists)]
 
 
+def _given_names(names, n, arg):
+    """names (a list of n strings, or one string when n = 1) as a list."""
+    if isinstance(names, str):
+        names = [names]
+    names = list(names)
+    if len(names) != n or not all(isinstance(x, str) for x in names):
+        raise ValueError(f"{arg}: give {n} names, not {names!r}")
+    return names
+
+
 def _combine_systems(
     systems,
     model_class,
@@ -144,14 +154,18 @@ def _combine_systems(
     prefix,
     name,
     sep,
+    input_names=None,
+    output_names=None,
 ):
     """The core of block_diag_systems, hstack_systems, vstack_systems
     and connect_systems_in_parallel: the systems' states stacked, their
     inputs shared (one input vector for all) or stacked, and their
-    outputs summed or stacked. Stacked signals keep their systems'
-    names (concatenated); shared inputs have the first system's names;
-    summed outputs have the systems' names if they are all the same,
-    else sum_<name1>_<name2>... (see _summed_names())."""
+    outputs summed or stacked. input_names and output_names, if given,
+    name the combined system's signals; else stacked signals keep their
+    systems' names (concatenated); shared inputs have the systems' names,
+    which must be the same (else a ValueError); summed outputs have the
+    systems' names if they are all the same, else
+    sum_<name1>_<name2>... (see _summed_names())."""
     validate_systems_are_compatible(systems)
     if model_class is None:
         model_class = infer_model_class(systems)
@@ -238,15 +252,31 @@ def _combine_systems(
 
     state_names = names("state_names")
     assert len(state_names) == n
-    input_names = (
-        systems[0].input_names if shared_inputs else names("input_names")
-    )
+    if input_names is None:
+        if shared_inputs:
+            input_names = systems[0].input_names
+            if any(sys.input_names != input_names for sys in systems):
+                raise ValueError(
+                    "the systems share their inputs, but their input "
+                    "names differ "
+                    f"({', '.join(str(sys.input_names) for sys in systems)}): "
+                    "give input_names, or name the systems' inputs the "
+                    "same (e.g. input_name= when making them; needed for "
+                    "+ and -)"
+                )
+        else:
+            input_names = names("input_names")
+    else:
+        input_names = _given_names(input_names, nu, "input_names")
     assert len(input_names) == nu
-    output_names = (
-        _summed_names([sys.output_names for sys in systems])
-        if summed_outputs
-        else names("output_names")
-    )
+    if output_names is None:
+        output_names = (
+            _summed_names([sys.output_names for sys in systems])
+            if summed_outputs
+            else names("output_names")
+        )
+    else:
+        output_names = _given_names(output_names, ny, "output_names")
     assert len(output_names) == ny
 
     # Generate combined system name if not provided
@@ -280,6 +310,8 @@ def block_diag_systems(
     prefix="sys",
     name=None,
     sep="_",
+    input_names=None,
+    output_names=None,
 ):
     """Combine systems side by side, unconnected: their inputs and
     outputs stacked, each system's outputs depending only on its own
@@ -312,6 +344,10 @@ def block_diag_systems(
         sep (str, optional): Separator for joining system names when
             auto-generating the combined system name (and for the
             parameter names merge_param_dicts() makes unique).
+        input_names (list[str], optional): Names of the combined
+            system's inputs, instead of the default (see above).
+        output_names (list[str], optional): Names of its outputs,
+            instead of the default (see above).
 
     Returns:
         StateSpaceModelCT or StateSpaceModelDT: The combined system, with
@@ -330,6 +366,8 @@ def block_diag_systems(
         prefix=prefix,
         name=name,
         sep=sep,
+        input_names=input_names,
+        output_names=output_names,
     )
 
 
@@ -342,6 +380,8 @@ def hstack_systems(
     prefix="sys",
     name=None,
     sep="_",
+    input_names=None,
+    output_names=None,
 ):
     """Combine systems with separate inputs and summed outputs:
     y = y1 + y2 + ..., each yi from its own inputs ui. As transfer
@@ -374,6 +414,10 @@ def hstack_systems(
         sep (str, optional): Separator for joining system names when
             auto-generating the combined system name (and for the
             parameter names merge_param_dicts() makes unique).
+        input_names (list[str], optional): Names of the combined
+            system's inputs, instead of the default (see above).
+        output_names (list[str], optional): Names of its outputs,
+            instead of the default (see above).
 
     Returns:
         StateSpaceModelCT or StateSpaceModelDT: The combined system, with
@@ -397,6 +441,8 @@ def hstack_systems(
         prefix=prefix,
         name=name,
         sep=sep,
+        input_names=input_names,
+        output_names=output_names,
     )
 
 
@@ -409,6 +455,8 @@ def vstack_systems(
     prefix="sys",
     name=None,
     sep="_",
+    input_names=None,
+    output_names=None,
 ):
     """Combine systems with shared inputs and stacked outputs: every
     system gets the same inputs u. As transfer matrices, the vertical
@@ -440,6 +488,10 @@ def vstack_systems(
         sep (str, optional): Separator for joining system names when
             auto-generating the combined system name (and for the
             parameter names merge_param_dicts() makes unique).
+        input_names (list[str], optional): Names of the combined
+            system's inputs, instead of the default (see above).
+        output_names (list[str], optional): Names of its outputs,
+            instead of the default (see above).
 
     Returns:
         StateSpaceModelCT or StateSpaceModelDT: The combined system, with
@@ -463,6 +515,8 @@ def vstack_systems(
         prefix=prefix,
         name=name,
         sep=sep,
+        input_names=input_names,
+        output_names=output_names,
     )
 
 
@@ -475,6 +529,8 @@ def connect_systems_in_parallel(
     prefix="sys",
     name=None,
     sep="+",
+    input_names=None,
+    output_names=None,
 ):
     """Combine systems with shared inputs and summed outputs: the
     classical parallel connection, y = G1 u + G2 u + ... (Matlab
@@ -507,6 +563,10 @@ def connect_systems_in_parallel(
         sep (str, optional): Separator for joining system names when
             auto-generating the combined system name (and for the
             parameter names merge_param_dicts() makes unique).
+        input_names (list[str], optional): Names of the combined
+            system's inputs, instead of the default (see above).
+        output_names (list[str], optional): Names of its outputs,
+            instead of the default (see above).
 
     Returns:
         StateSpaceModelCT or StateSpaceModelDT: The combined system (the
@@ -532,15 +592,21 @@ def connect_systems_in_parallel(
         prefix=prefix,
         name=name,
         sep=sep,
+        input_names=input_names,
+        output_names=output_names,
     )
 
 
 @records
-def negate_system(sys, model_class=None):
+def negate_system(
+    sys, model_class=None, name=None, input_names=None, output_names=None
+):
     """The system with its outputs negated, y = -h(t, x, u) (the -sys
-    operator; sys1 - sys2 is sys1 + (-sys2)). The states, parameters
-    and names are the same; the name, if any, gets a leading "-".
-    model_class is sys's base class unless given."""
+    operator; sys1 - sys2 is sys1 + (-sys2): both get the same input,
+    y = y1 - y2). The states, parameters and signal names are the same
+    unless input_names or output_names are given; the name is name, else
+    sys's with a leading "-" (if it has one). model_class is sys's base
+    class unless given."""
     if model_class is None:
         model_class = infer_model_class([sys])
     attr_names = model_class._attr_names
@@ -570,21 +636,39 @@ def negate_system(sys, model_class=None):
         sys.ny,
         **_dt_kwargs([sys]),
         params=params,
-        name=None if sys.name is None else f"-{sys.name}",
-        input_names=sys.input_names,
+        name=name
+        if name is not None
+        else (None if sys.name is None else f"-{sys.name}"),
+        input_names=(
+            sys.input_names
+            if input_names is None
+            else _given_names(input_names, sys.nu, "input_names")
+        ),
         state_names=sys.state_names,
-        output_names=sys.output_names,
+        output_names=(
+            sys.output_names
+            if output_names is None
+            else _given_names(output_names, sys.ny, "output_names")
+        ),
     )
 
 
 @records
-def set_param_values(sys, values, model_class=None):
+def set_param_values(
+    sys,
+    values,
+    model_class=None,
+    name=None,
+    input_names=None,
+    output_names=None,
+):
     """sys with values ({name: value} of sys.params, e.g. fitted values)
     in place of those parameters: a model of sys's base class (or
     model_class), its functions taking only the other parameters (the
     same symbols, so sharing with other models is kept). The states,
-    inputs, outputs and names are the same. Works on continuous-time
-    and discrete-time models, made in any way.
+    inputs, outputs and names are sys's, unless name, input_names or
+    output_names are given. Works on continuous-time and discrete-time
+    models, made in any way.
 
     Use it after building a model (from code or YAML) with symbolic
     parameters and finding values for some or all of them, e.g. by
@@ -610,15 +694,15 @@ def set_param_values(sys, values, model_class=None):
         model_class = infer_model_class([sys])
     attr_names = model_class._attr_names
     fixed = {}
-    for name, value in values.items():
+    for param, value in values.items():
         value = cas.DM(value)
-        shape = sys.params[name].shape
+        shape = sys.params[param].shape
         if value.shape != shape:
             raise ValueError(
-                f"{name} is {shape[0]} x {shape[1]}, the value "
+                f"{param} is {shape[0]} x {shape[1]}, the value "
                 f"{value.shape[0]} x {value.shape[1]}"
             )
-        fixed[name] = value
+        fixed[param] = value
     params = {k: p for k, p in sys.params.items() if k not in fixed}
     args = [fixed.get(k, p) for k, p in sys.params.items()]
     t = cas.SX.sym("t")
@@ -651,10 +735,18 @@ def set_param_values(sys, values, model_class=None):
         sys.ny,
         **_dt_kwargs([sys]),
         params=params,
-        name=sys.name,
-        input_names=sys.input_names,
+        name=sys.name if name is None else name,
+        input_names=(
+            sys.input_names
+            if input_names is None
+            else _given_names(input_names, sys.nu, "input_names")
+        ),
         state_names=sys.state_names,
-        output_names=sys.output_names,
+        output_names=(
+            sys.output_names
+            if output_names is None
+            else _given_names(output_names, sys.ny, "output_names")
+        ),
     )
     return model
 
@@ -668,9 +760,13 @@ def connect_systems_in_series(
     prefix="sys",
     name=None,
     sep="_",
+    input_names=None,
+    output_names=None,
 ):
     """Combine a series of non-linear systems by connecting their inputs and
-    outputs in series.
+    outputs in series. The combined system's inputs are the first
+    system's and its outputs the last's (with verbose_names, prefixed
+    with their keys), unless input_names and output_names are given.
 
     This function works for both continuous-time and discrete-time systems.
     The attribute names are automatically determined from the model_class.
@@ -693,6 +789,10 @@ def connect_systems_in_series(
             Default: None.
         sep (str, optional): Separator for joining system names when
             auto-generating the combined system name. Default: "_".
+        input_names (list[str], optional): Names of the combined
+            system's inputs, instead of the default (see above).
+        output_names (list[str], optional): Names of its outputs,
+            instead of the default (see above).
 
     Returns:
         StateSpaceModelCT or StateSpaceModelDT: Combined series system.
@@ -703,6 +803,8 @@ def connect_systems_in_series(
         ...     [sys1, sys2], StateSpaceModelCT
         ... )
     """
+    # (input_names and output_names are reused below)
+    given_inputs, given_outputs = input_names, output_names
     validate_systems_are_compatible(systems)
     if model_class is None:
         model_class = infer_model_class(systems)
@@ -824,6 +926,14 @@ def connect_systems_in_series(
         )
         name = sep.join(system_names)
     combined_system.name = name
+    if given_inputs is not None:
+        combined_system.input_names = _given_names(
+            given_inputs, combined_system.nu, "input_names"
+        )
+    if given_outputs is not None:
+        combined_system.output_names = _given_names(
+            given_outputs, combined_system.ny, "output_names"
+        )
 
     return combined_system
 

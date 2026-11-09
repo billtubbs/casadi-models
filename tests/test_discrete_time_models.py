@@ -1499,3 +1499,45 @@ def test_StateSpaceModelDTFromABCD_connect_and_save(tmp_path):
     )
     folder = model.save(tmp_path / "G")
     assert StateSpaceModelDTFromABCD.load(folder).dt == 1.0
+
+
+def test_StateSpaceModelDTARXSISO_real_poles():
+    """real_poles=True with na: symbolic real poles p_0, ... made by the
+    model, the same model as with explicit pole symbols; two such models
+    keep their own symbols when saved and loaded together"""
+    from cas_models.yaml_utils import from_yaml, to_yaml
+
+    model = StateSpaceModelDTARXSISO(na=2, nb=2, real_poles=True, dt=2.0)
+    assert list(model.params) == ["p_0", "p_1", "b_0", "b_1"]
+    explicit = StateSpaceModelDTARXSISO(
+        poles=[cas.SX.sym("p_0"), cas.SX.sym("p_1")], nb=2, dt=2.0
+    )
+    assert model.F.serialize() == explicit.F.serialize()
+    assert model.H.serialize() == explicit.H.serialize()
+    assert list(
+        StateSpaceModelDTARXSISO(na=1, nb=1, real_poles=True).params
+    ) == [
+        "p_0",
+        "b",
+    ]
+    assert model.to_yaml().splitlines()[2:] == [
+        "args: {na: 2, nb: 2, dt: 2.0, real_poles: true}"
+    ]
+    # Two paths in one model: separate poles, after loading too
+    paths = [
+        StateSpaceModelDTARXSISO(na=2, nb=1, real_poles=True, name="a"),
+        StateSpaceModelDTARXSISO(na=1, nb=1, real_poles=True, name="b"),
+    ]
+    from cas_models.transformations import hstack_systems
+
+    both = hstack_systems(paths)
+    assert list(both.params) == ["a_p_0", "b_p_0", "p_1", "a_b", "b_b"]
+    loaded = from_yaml(to_yaml(both))
+    assert list(loaded.params) == list(both.params)
+    assert loaded.H.serialize() == both.H.serialize()
+    for kwargs in (
+        {"A": [0.5], "real_poles": True},
+        {"real_poles": True, "nb": 1},
+    ):
+        with pytest.raises(AssertionError, match="real_poles needs na"):
+            StateSpaceModelDTARXSISO(**({"nb": 1} | kwargs))

@@ -1312,6 +1312,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         zeros=None,
         gain=None,
         dt=None,
+        real_poles=False,
     ):
         """Initialize a discrete-time ARX model:
 
@@ -1368,6 +1369,15 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             dt (float, optional): The time step, if the model has one
                 (default: None). Kept as the model's dt; the state and
                 output functions don't depend on it.
+            real_poles (bool, optional): With na, parametrize A by na
+                real poles, new symbols p_0, ..., p_{na-1} (numbered even
+                when na = 1), as poles=[cas.SX.sym("p_0"), ...] does,
+                but made by the model: two models made this way have
+                their own symbols, also when saved and loaded (a model
+                spec holds na and real_poles, not the symbols). With
+                bounds on them (e.g. [exp(-dt / T_min), 0.999]) the
+                model can't oscillate, is stable and has no time
+                constant below T_min. Default: False.
 
         Note:
             The total number of states is n = na + nk + nb - 1.
@@ -1392,6 +1402,12 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             >>> model = StateSpaceModelDTARXSISO(poles=p, nb=2)
 
         """
+        if real_poles:
+            assert na is not None and A is None and poles is None, (
+                "real_poles needs na (not A or poles)"
+            )
+            poles = [cas.SX.sym(f"p_{j}") for j in range(int(na))]
+            na = None
         if poles is not None:
             assert A is None and na is None, "provide one of A, na or poles"
             A = _roots_to_coefficients(poles, "poles")

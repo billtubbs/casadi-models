@@ -133,10 +133,15 @@ def test_round_trip_functions(name, tmp_path):
 
 
 def test_round_trip_nested():
-    """Recipes nested to any depth, operators included"""
-    plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
+    """Recipes nested to any depth, operators included (the systems
+    added share the input e)"""
+    plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant", input_name="e")
     ctrl = SSModelCTPIInt(Kc=0.5, Ti=30.0, name="ctrl")
-    model = (plant * ctrl) + SSModelCTLinearO2SISO(name="d") - plant
+    model = (
+        (plant * ctrl)
+        + SSModelCTLinearO2SISO(name="d", input_name="e")
+        - plant
+    )
     text = to_yaml(model)
     data = yaml.safe_load(text)
     assert data["function"] == "connect_systems_in_parallel"
@@ -347,7 +352,9 @@ def test_set_param_values_recipe(tmp_path):
     np.testing.assert_allclose(eval_F(loaded), eval_F(fitted), rtol=1e-14)
     assert to_yaml(loaded) == text
     folder = fitted.save(tmp_path / "fitted")
-    np.testing.assert_allclose(eval_F(load_model(folder)), eval_F(fitted), rtol=1e-14)
+    np.testing.assert_allclose(
+        eval_F(load_model(folder)), eval_F(fitted), rtol=1e-14
+    )
 
 
 def test_set_param_values_some_and_nested():
@@ -359,13 +366,17 @@ def test_set_param_values_some_and_nested():
     loaded = from_yaml(to_yaml(partly))
     assert list(loaded.params) == ["CRAC2_a", "CRAC2_b"]
     np.testing.assert_allclose(
-        eval_F(loaded, [-0.8, 0.2]), eval_F(model, ARX_VALUES.values()), rtol=1e-14
+        eval_F(loaded, [-0.8, 0.2]),
+        eval_F(model, ARX_VALUES.values()),
+        rtol=1e-14,
     )
     twice = set_param_values(partly, {"CRAC2_a": -0.8, "CRAC2_b": 0.2})
     data = yaml.safe_load(to_yaml(twice))
     assert data["args"]["sys"]["function"] == "set_param_values"
     assert from_yaml(to_yaml(twice)).params == {}
-    plant = set_param_values(SSModelCTLinearFOSISO(name="plant"), {"K": 2.0, "T1": 5.0})
+    plant = set_param_values(
+        SSModelCTLinearFOSISO(name="plant"), {"K": 2.0, "T1": 5.0}
+    )
     loop = SSModelCTPIInt(name="ctrl") * plant
     data = yaml.safe_load(to_yaml(loop))
     assert data["args"]["systems"][0]["function"] == "set_param_values"
@@ -377,10 +388,14 @@ def test_set_param_values_some_and_nested():
 def test_set_param_values_numpy_values():
     """Values as estimate_params() may give them (numpy numbers, arrays)"""
     arx = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
-    fitted = set_param_values(arx, {"p_0": np.float64(0.9), "b": np.array([0.2])})
+    fitted = set_param_values(
+        arx, {"p_0": np.float64(0.9), "b": np.array([0.2])}
+    )
     loaded = from_yaml(to_yaml(fitted))
     assert list(loaded.params) == ["p_1"]
-    np.testing.assert_allclose(eval_F(loaded, [0.5]), eval_F(fitted, [0.5]), rtol=1e-14)
+    np.testing.assert_allclose(
+        eval_F(loaded, [0.5]), eval_F(fitted, [0.5]), rtol=1e-14
+    )
 
 
 def test_set_param_values_ct_and_vector():

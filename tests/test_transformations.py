@@ -222,7 +222,14 @@ def test_connect_systems_in_parallel(
     system_type, sys1_with_gain, sys2_no_gain, sys3_no_gain, model_class
 ):
     """Test connect_systems_in_parallel (shared input, summed outputs) for CT and DT systems."""
-    sys_combined = connect_systems_in_parallel([sys1_with_gain, sys2_no_gain], model_class)
+    # Inputs u1 and u2 shared: their names must be given
+    with pytest.raises(ValueError, match="input names differ"):
+        connect_systems_in_parallel(
+            [sys1_with_gain, sys2_no_gain], model_class
+        )
+    sys_combined = connect_systems_in_parallel(
+        [sys1_with_gain, sys2_no_gain], model_class, input_names=["u1"]
+    )
 
     # Dimensions: states stacked, but nu and ny are unchanged
     assert sys_combined.n == 2
@@ -238,8 +245,11 @@ def test_connect_systems_in_parallel(
 
     # Three systems
     sys_combined_3 = connect_systems_in_parallel(
-        [sys1_with_gain, sys2_no_gain, sys3_no_gain], model_class
+        [sys1_with_gain, sys2_no_gain, sys3_no_gain],
+        model_class,
+        input_names=["u"],
     )
+    assert sys_combined_3.input_names == ["u"]
     assert sys_combined_3.n == 3
     assert sys_combined_3.nu == 1
     assert sys_combined_3.ny == 1
@@ -278,7 +288,9 @@ def test_connect_systems_in_parallel(
             [sys1_with_gain, sys2_no_gain], model_class
         )
         with pytest.raises(ValueError):
-            connect_systems_in_parallel([sys1_with_gain, sys_mimo], model_class)
+            connect_systems_in_parallel(
+                [sys1_with_gain, sys_mimo], model_class
+            )
 
 
 def test_connect_nonlinear_systems_in_series(
@@ -1322,12 +1334,18 @@ def test_hstack_systems_output_names():
 
     def path(name, output_name):
         return StateSpaceModelDTARXSISO(
-            na=1, nb=1, input_name=f"{name}_flow", output_name=output_name, name=name
+            na=1,
+            nb=1,
+            input_name=f"{name}_flow",
+            output_name=output_name,
+            name=name,
         )
 
     same = hstack_systems([path("CRAC1", "y"), path("CRAC2", "y")])
     assert same.output_names == ["y"]
-    sys = hstack_systems([path("CRAC1", "y1"), path("CRAC2", "y2")], name="R11")
+    sys = hstack_systems(
+        [path("CRAC1", "y1"), path("CRAC2", "y2")], name="R11"
+    )
     assert sys.output_names == ["sum_y1_y2"]
     assert sys.input_names == ["CRAC1_flow", "CRAC2_flow"]
     three = hstack_systems([path("a", "y1"), path("b", "y2"), path("c", "y1")])
@@ -1386,7 +1404,9 @@ def test_negate_and_subtract(kind):
     neg = -m1
     assert isinstance(neg, base_class(kind))
     assert neg.name == "-a" and neg.output_names == m1.output_names
-    assert neg.n == m1.n and getattr(neg, "dt", None) == getattr(m1, "dt", None)
+    assert neg.n == m1.n and getattr(neg, "dt", None) == getattr(
+        m1, "dt", None
+    )
     rng = np.random.default_rng(3)
     x, u = rng.normal(size=m1.n), rng.normal(size=1)
     f1, y1 = eval_model(m1, x, u)
@@ -1422,7 +1442,10 @@ def test_infer_model_class():
     from cas_models.transformations import infer_model_class
 
     ct = [SSModelCTLinearFOSISO(), SSModelCTLinearFONoGainSISO()]
-    dt = [StateSpaceModelDTARXSISO(na=1, nb=1), StateSpaceModelDTTFSISO(num=[1], den=[1, -0.5])]
+    dt = [
+        StateSpaceModelDTARXSISO(na=1, nb=1),
+        StateSpaceModelDTTFSISO(num=[1], den=[1, -0.5]),
+    ]
     assert infer_model_class(ct) is StateSpaceModelCT
     assert infer_model_class(dt) is StateSpaceModelDT
     with pytest.raises(ValueError, match="no systems"):
@@ -1478,3 +1501,115 @@ def test_model_class_optional_connect_systems_and_negate(kind):
         == getattr(given, attr["output_func"]).serialize()
     )
     assert type(negate_system(m1)) is base
+
+
+def _arx(name, u, y):
+    from cas_models.discrete_time.models import StateSpaceModelDTARXSISO
+
+    return StateSpaceModelDTARXSISO(
+        na=1, nb=1, input_name=u, output_name=y, name=name, dt=1.0
+    )
+
+
+def test_stack_given_names():
+    """input_names and output_names name the combined system's signals,
+    in place of the defaults"""
+    a, b = _arx("a", "u", "y"), _arx("b", "u", "y")
+    sys = hstack_systems(
+        [a, b],
+        keys=["CRAC1", "CRAC2"],
+        verbose_names=True,
+        input_names=["CRAC1_flow", "CRAC2_flow"],
+        output_names=["R11"],
+    )
+    assert sys.input_names == ["CRAC1_flow", "CRAC2_flow"]
+    assert sys.output_names == ["R11"]
+    assert list(sys.params) == ["CRAC1_a", "CRAC2_a", "CRAC1_b", "CRAC2_b"]
+    sys = vstack_systems([a, b], input_names="flow", output_names=["T1", "T2"])
+    assert (sys.input_names, sys.output_names) == (["flow"], ["T1", "T2"])
+    sys = block_diag_systems([a, b], input_names=["u1", "u2"])
+    assert sys.input_names == ["u1", "u2"]
+    assert sys.output_names == ["a_y", "b_y"]  # the default
+    sys = connect_systems_in_parallel([a, b], output_names=["total"])
+    assert (sys.input_names, sys.output_names) == (["u"], ["total"])
+
+
+@pytest.mark.parametrize(
+    "func, kwargs, match",
+    [
+        (hstack_systems, {"input_names": ["u"]}, "input_names: give 2 names"),
+        (
+            hstack_systems,
+            {"output_names": ["y1", "y2"]},
+            "output_names: give 1 names",
+        ),
+        (vstack_systems, {"input_names": [1]}, "input_names: give 1 names"),
+    ],
+)
+def test_stack_given_names_errors(func, kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        func([_arx("a", "u", "y"), _arx("b", "u", "y")], **kwargs)
+
+
+def test_shared_input_names_checked():
+    """A shared input of systems whose input names differ is an error,
+    unless input_names names it (+ and - can't: name the inputs the
+    same)"""
+    a, b = _arx("a", "CRAC1_flow", "y1"), _arx("b", "CRAC2_flow", "y2")
+    for combine in (vstack_systems, connect_systems_in_parallel):
+        with pytest.raises(ValueError, match="input names differ"):
+            combine([a, b])
+        assert combine([a, b], input_names=["flow"]).input_names == ["flow"]
+    with pytest.raises(ValueError, match="input names differ"):
+        a + b
+    with pytest.raises(ValueError, match="input names differ"):
+        a - b
+    same = [_arx("a", "u", "y1"), _arx("b", "u", "y2")]
+    assert vstack_systems(same).input_names == ["u"]
+    assert (same[0] - same[1]).input_names == ["u"]
+    assert hstack_systems([a, b]).input_names == ["CRAC1_flow", "CRAC2_flow"]
+
+
+def test_name_overrides():
+    """Every transformation function takes name, input_names and
+    output_names (set_param_values and negate_system too)"""
+    import inspect
+
+    from cas_models import transformations
+    from cas_models.yaml_utils import CONNECTION_FUNCTIONS
+
+    for f in CONNECTION_FUNCTIONS:
+        params = inspect.signature(getattr(transformations, f)).parameters
+        assert {"name", "input_names", "output_names"} <= set(params), f
+    a, b = _arx("a", "u", "y1"), _arx("b", "y1", "y2")
+    sys = connect_systems_in_series(
+        [a, b], name="ab", input_names=["flow"], output_names=["T"]
+    )
+    assert (sys.name, sys.input_names, sys.output_names) == (
+        "ab",
+        ["flow"],
+        ["T"],
+    )
+    assert connect_systems_in_series([a, b]).input_names == [
+        "u"
+    ]  # the default
+    neg = negate_system(a, name="minus_a", output_names=["neg_y"])
+    assert (neg.name, neg.input_names, neg.output_names) == (
+        "minus_a",
+        ["u"],
+        ["neg_y"],
+    )
+    assert negate_system(a).name == "-a"
+    from cas_models.transformations import set_param_values
+
+    fitted = set_param_values(
+        a, {"a": 0.5, "b": 1.0}, name="a_fitted", input_names=["flow"]
+    )
+    assert (fitted.name, fitted.input_names, fitted.output_names) == (
+        "a_fitted",
+        ["flow"],
+        ["y1"],
+    )
+    assert set_param_values(a, {"a": 0.5}).name == "a"
+    with pytest.raises(ValueError, match="output_names: give 1 names"):
+        negate_system(a, output_names=["p", "q"])
