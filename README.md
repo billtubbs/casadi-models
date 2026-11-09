@@ -559,19 +559,13 @@ the CasADi version.
   carry these, e.g. as an optional `info` mapping that loading keeps
   but ignores, or whether the user keeps them alongside, as
   `ffd-fit-models` does now (`models.yaml`, `stats.csv`).
-- **`connect_systems` is slow with many connections:** connecting a
-  164-state plant model (the ffd rack-intake model, with its state as
-  164 extra outputs) and a linear MPC model (164 state inputs, 24
-  setpoint inputs, 2 outputs) in a feedback loop, with 166 connections,
-  took 11 s (2026-11-09, `ffd/analysis/test-mpc.ipynb`). Building the
-  MPC itself took 0.07 s. The same loop built with
-  `connect_feedback_system` (the MPC's setpoints fixed, so its inputs
-  were exactly the plant's outputs) took 0.22 s and simulated
-  identically (to 1e-14), so the time is in `connect_systems`'s general
-  signal routing, not in the size of the loop. Find where it goes
-  (profile it; likely per-signal work that grows with the number of
-  connections, e.g. repeated name lookups or symbolic expressions built
-  signal by signal) and make it scale.
+- **`connect_systems`, vectorize the connections:** each pass of the
+  input resolution (`_build_internal_input_vector`) sets the connected
+  inputs one element at a time (a symbolic multiply, add and set per
+  source). Building them as `G_y y + G_u u_ext` with sparse gain matrices
+  would make each pass one operation. Minor since the number of passes
+  was cut to the connections' depth (2026-11-09: 11 s to 0.29 s for the
+  ffd data centre MPC loop), but it would matter for very large models.
 - **Name counts in models:** the model classes don't check that
   `input_names`, `state_names` and `output_names` have `nu`, `n` and `ny`
   entries, so a wrong count goes unnoticed (it hid a bug in

@@ -1142,6 +1142,7 @@ def _build_internal_input_vector(
     external_inputs,
     parallel_sys,
     attr_names,
+    systems=None,
 ):
     """Build the full internal input vector for the parallel system.
 
@@ -1152,14 +1153,16 @@ def _build_internal_input_vector(
 
     Each iteration evaluates the parallel system outputs with the current
     internal input estimates, then recomputes every connected input whose
-    sources (external inputs or system outputs) are available. A connection
-    chain of depth d converges after d + 1 iterations; running
-    len(input_names) + 1 iterations covers any acyclic chain.
+    sources (external inputs or system outputs) are available. A connected
+    input is final after d + 1 iterations, where d is its depth: the
+    number of connected inputs it depends on in a chain through outputs
+    with direct feedthrough (0 if its sources don't depend on any connected
+    input). The depths come from the sparsity of the outputs' dependence on
+    the inputs, so only max(d) + 1 iterations are run (each one evaluates
+    the parallel system's output function, which can be expensive).
 
-    Note: algebraic loops are not detected. If connections create a cycle
-    where every link has direct feedthrough, the iterative resolution does
-    not converge and the result depends on the number of iterations. See
-    test_connect_systems_algebraic_loop_silent_failure.
+    Raises ValueError for an algebraic loop: a cycle of connections in
+    which every link has direct feedthrough.
 
     Args:
         u_ext: External input vector (symbolic)
@@ -1169,6 +1172,9 @@ def _build_internal_input_vector(
         external_inputs: List of external input names
         parallel_sys: The parallel system
         attr_names: Attribute names dict (CT or DT)
+        systems: The subsystems parallel_sys was made of (block-diagonal),
+            for their feedthrough; None: parallel_sys's own (slower when
+            it calls functions such as a QP solver)
 
     Returns:
         cas.SX: Full internal input vector for parallel system
@@ -1194,9 +1200,12 @@ def _build_internal_input_vector(
     # parallel system outputs with the current u_working, then recomputes
     # every connected input whose sources are now available (either as
     # external inputs or system outputs). A chain of depth d converges after
-    # d + 1 iterations; n_inputs + 1 is a safe upper bound for acyclic graphs.
-    max_iterations = len(parallel_sys.input_names) + 1
-    for _ in range(max_iterations):
+    # d + 1 iterations.
+    n_iterations = _connection_depth(
+        connections_norm, parallel_sys, input_name_to_idx,
+        output_name_to_idx, _feedthrough(systems or [parallel_sys], attr_names),
+    ) + 1
+    for _ in range(n_iterations):
         y_parallel = output_func_attr(
             t, x, u_working, *parallel_sys.params.values()
         )
@@ -1229,6 +1238,76 @@ def _build_internal_input_vector(
             )
 
     return cas.vertcat(*u_internal_parts)
+
+
+def _feedthrough(systems, attr_names):
+    """Which outputs depend directly on which inputs (feedthrough), for
+    systems combined block-diagonally (their inputs and outputs stacked in
+    order): a boolean array (outputs, inputs). From each system's output
+    function's Jacobian sparsity (Function.sparsity_jac), which is cheap
+    even when the function calls others (e.g. a QP solver), unlike the
+    sparsity of an SX expression containing such calls (2.5 s for an MPC
+    with 188 inputs)."""
+    ny = sum(sys.ny for sys in systems)
+    nu = sum(sys.nu for sys in systems)
+    feedthrough = np.zeros((ny, nu), dtype=bool)
+    i = j = 0
+    for sys in systems:
+        output_func = getattr(sys, attr_names["output_func"])
+        sp = output_func.sparsity_jac(2, 0)  # d y / d u (inputs t, x, u, ...)
+        feedthrough[i:i + sys.ny, j:j + sys.nu] = np.array(
+            cas.DM(sp, 1), dtype=bool
+        )
+        i += sys.ny
+        j += sys.nu
+    return feedthrough
+
+
+def _connection_depth(
+    connections_norm,
+    parallel_sys,
+    input_name_to_idx,
+    output_name_to_idx,
+    feedthrough,
+):
+    """The largest depth of the connected inputs (see
+    _build_internal_input_vector): the longest chain of connected inputs
+    linked through outputs with direct feedthrough (feedthrough: see
+    _feedthrough). Raises ValueError for an algebraic loop (a cycle of
+    such links)."""
+    # The connected inputs each connected input depends on: through its
+    # source outputs, the inputs they depend on directly
+    depends_on = {}
+    for name, sources in connections_norm.items():
+        if name not in input_name_to_idx:
+            continue  # a new external output, not an input
+        inputs = set()
+        for src in sources:
+            if src in output_name_to_idx:
+                row = feedthrough[output_name_to_idx[src]]
+                inputs.update(
+                    parallel_sys.input_names[k] for k in np.flatnonzero(row)
+                )
+        depends_on[name] = sorted(inputs & set(connections_norm))
+
+    depth = {}
+
+    def visit(name, path):
+        if name in depth:
+            return depth[name]
+        if name in path:
+            cycle = path[path.index(name):] + [name]
+            raise ValueError(
+                "Algebraic loop: the connections form a cycle with direct "
+                f"feedthrough at every link: {' -> '.join(cycle)}"
+            )
+        path = path + [name]
+        depth[name] = max(
+            (visit(k, path) + 1 for k in depends_on[name]), default=0
+        )
+        return depth[name]
+
+    return max((visit(name, []) for name in depends_on), default=0)
 
 
 @records
@@ -1309,13 +1388,10 @@ def connect_systems(
 
     Raises:
         ValueError: If connections are invalid (non-existent signals, many-to-
-            one without gains, dt mismatch for discrete-time systems, etc.)
-
-    Warning:
-        This function does not detect algebraic loops. User must ensure that
-        connections do not create direct feedthrough loops (where output y
-        depends on input u, and that same u depends on y through
-        connections).
+            one without gains, dt mismatch for discrete-time systems, etc.),
+            or form an algebraic loop: a cycle in which every link has
+            direct feedthrough (an output depends on an input that depends
+            on that output through connections).
 
     Examples:
         >>> # Example 1: Simple feedback connection
@@ -1381,7 +1457,7 @@ def connect_systems(
         - All input/output names must be unique (enforced by
             concatenate_lists_of_names)
         - For discrete-time systems, all must have the same dt value
-        - Connections must not create algebraic loops (no automatic detection)
+        - Connections must not create algebraic loops (detected: ValueError)
 
     See Also:
         block_diag_systems: Combine systems without connections
@@ -1487,6 +1563,7 @@ def connect_systems(
         external_inputs,
         parallel_sys,
         attr_names,
+        systems=systems,
     )
 
     # Call parallel system's state function
@@ -1507,18 +1584,8 @@ def connect_systems(
         [attr_names["state_output"]],
     )
 
-    # Step 5: Build connected output function
-    # Note: This may include output feedthrough
-    u_internal = _build_internal_input_vector(
-        u_ext,
-        x,
-        t,
-        connections_norm,
-        external_inputs,
-        parallel_sys,
-        attr_names,
-    )
-
+    # Step 5: Build connected output function (the same internal inputs;
+    # the outputs may have direct feedthrough)
     # Get full parallel system outputs
     output_func_attr = getattr(parallel_sys, attr_names["output_func"])
     y_parallel = output_func_attr(

@@ -1073,44 +1073,77 @@ def test_connect_new_signal_errors():
         )
 
 
-def test_connect_systems_algebraic_loop_silent_failure():
-    """connect_systems silently returns an incorrect result for an algebraic loop.
+def test_connect_systems_algebraic_loop():
+    """connect_systems detects an algebraic loop and raises ValueError.
 
     Two pure-gain systems connected in negative feedback form an algebraic
     loop: fwd_u depends on fbk_y, which depends on fwd_y, which depends on
-    fwd_u — all instantaneously.
-
-    Correct closed-loop gain: G_fwd / (1 + G_fwd * G_fbk) = 2 / (1 + 1) = 1.0
-
-    The iterative resolution in _build_internal_input_vector does not converge
-    when every signal in the cycle has direct feedthrough. No exception is
-    raised at construction time or when the output function is called with
-    numeric values — the result is silently wrong.
-
-    TODO: connect_systems should detect algebraic loops at construction time
-    and raise a ValueError, as connect_feedback_system already does.
+    fwd_u, all instantaneously. (Before 2026-11-09 this was accepted and
+    gave a wrong result.)
     """
     fwd = SSModelCTDirectTransmission(D=cas.SX([[2.0]]), name="fwd")
     fbk_gain = SSModelCTDirectTransmission(D=cas.SX([[0.5]]), name="fbk")
+    with pytest.raises(ValueError, match="Algebraic loop.*fwd_u -> fbk_u -> fwd_u"):
+        connect_systems(
+            [fwd, fbk_gain],
+            connections={
+                "fwd_u": {"y_sp": 1.0, "fbk_y": -1.0},
+                "fbk_u": "fwd_y",
+            },
+            model_class=StateSpaceModelCT,
+            input_names=["y_sp"],
+            output_names=["fwd_y"],
+        )
 
-    # Construction succeeds without error despite the algebraic loop
-    sys_cl = connect_systems(
-        [fwd, fbk_gain],
-        connections={
-            "fwd_u": {"y_sp": 1.0, "fbk_y": -1.0},
-            "fbk_u": "fwd_y",
-        },
-        model_class=StateSpaceModelCT,
-        input_names=["y_sp"],
-        output_names=["fwd_y"],
+
+def test_connect_systems_feedthrough_chain():
+    """A chain of three static gains (direct feedthrough at every link)
+    and a first-order system at the end: the connected inputs have depths
+    0, 1 and 2, so three iterations; the result is the product of the
+    gains."""
+    from cas_models.transformations import _connection_depth, _feedthrough
+
+    g1 = SSModelCTDirectTransmission(D=cas.SX([[2.0]]), name="g1")
+    g2 = SSModelCTDirectTransmission(D=cas.SX([[3.0]]), name="g2")
+    g3 = SSModelCTDirectTransmission(D=cas.SX([[0.5]]), name="g3")
+    lag = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="lag")
+    systems = [g1, g2, g3, lag]
+    connections = {"g2_u": "g1_y", "g3_u": "g2_y", "lag_u": "g3_y"}
+    sys_c = connect_systems(
+        systems, connections=connections, model_class=StateSpaceModelCT,
+        input_names=["g1_u"], output_names=["g3_y", "lag_y"],
     )
+    y = np.array(sys_c.h(0.0, cas.DM([0.7]), cas.DM([1.0]))).ravel()
+    np.testing.assert_allclose(y, [2.0 * 3.0 * 0.5, 0.7])
+    rhs = float(sys_c.f(0.0, cas.DM([0.7]), cas.DM([1.0])))
+    assert rhs == pytest.approx(-0.7 + 3.0)  # (K u - x) / T1, u = 3
 
-    # Calling the output function with y_sp=1 also succeeds — no exception
-    y = sys_cl.h(0.0, cas.DM.zeros(sys_cl.n), cas.DM([1.0]))
+    # The depths: g2_u 0 (g1_y depends only on the external input g1_u),
+    # g3_u 1, lag_u 2
+    parallel = block_diag_systems(systems, StateSpaceModelCT)
+    out_idx = {n: i for i, n in enumerate(parallel.output_names)}
+    in_idx = {n: i for i, n in enumerate(parallel.input_names)}
+    norm = {k: {v: 1.0} for k, v in connections.items()}
+    attr = StateSpaceModelCT._attr_names
+    for feedthrough in (_feedthrough(systems, attr), _feedthrough([parallel], attr)):
+        assert _connection_depth(norm, parallel, in_idx, out_idx, feedthrough) == 2
 
-    # Result is wrong: correct answer is 1.0, but the loop is unresolved
-    correct = 2.0 / (1.0 + 2.0 * 0.5)  # = 1.0
-    assert float(y) != pytest.approx(correct)
+
+def test_connect_systems_loop_without_feedthrough_depth():
+    """A plant (no feedthrough) and a controller with feedthrough in a
+    loop: depth 1 (the controller's input from the plant, then the plant's
+    input from the controller), however many signals are connected."""
+    from cas_models.transformations import _connection_depth, _feedthrough
+
+    plant = SSModelCTLinearFOSISO(K=1.0, T1=2.0, name="plant")
+    ctrl = SSModelCTDirectTransmission(D=cas.SX([[-1.5]]), name="ctrl")
+    connections = {"plant_u": {"ctrl_y": 1.0}, "ctrl_u": {"plant_y": 1.0}}
+    parallel = block_diag_systems([plant, ctrl], StateSpaceModelCT)
+    out_idx = {n: i for i, n in enumerate(parallel.output_names)}
+    in_idx = {n: i for i, n in enumerate(parallel.input_names)}
+    feedthrough = _feedthrough([plant, ctrl], StateSpaceModelCT._attr_names)
+    np.testing.assert_array_equal(feedthrough, [[False, False], [False, True]])
+    assert _connection_depth(connections, parallel, in_idx, out_idx, feedthrough) == 1
 
 
 # --- Tests for connect_feedback_system ---
