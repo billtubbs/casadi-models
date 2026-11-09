@@ -101,6 +101,23 @@ python-control: `parallel()` there is `connect_systems_in_parallel`,
 `connect_systems_in_parallel` was the block-diagonal combination and
 `sum_systems` the parallel one.
 
+## Linearizing Models
+
+`linearize(sys, x=None, u=None, t=0.0, params=None)` (also in
+`cas_models.transformations`) gives a model's state-space matrices
+`A, B, C, D` as numpy arrays: the Jacobians of its state and output
+functions at the state `x` and input `u` (zeros by default). For a
+continuous-time model they are those of dx/dt = Ax + Bu, for a
+discrete-time one of x(k+1) = Ax(k) + Bu(k); for a linear model they are
+exact at any operating point. A model with parameters needs their values
+(`params`, or `set_param_values` first).
+
+```python
+from cas_models.transformations import linearize
+
+A, B, C, D = linearize(fitted_model)
+```
+
 ## Examples: Simulation
 
 ```python
@@ -542,3 +559,12 @@ the CasADi version.
   carry these, e.g. as an optional `info` mapping that loading keeps
   but ignores, or whether the user keeps them alongside, as
   `ffd-fit-models` does now (`models.yaml`, `stats.csv`).
+- **`connect_systems` is slow with many connections:** connecting a
+  164-state plant model (the ffd rack-intake model, with its state as
+  164 extra outputs) and a linear MPC model (164 state inputs, 24
+  setpoint inputs, 2 outputs) in a feedback loop, with 166 connections,
+  took 11 s (2026-11-09, `ffd/analysis/test-mpc.ipynb`). Building the
+  MPC itself took 0.07 s. Find where the time goes (profile it; likely
+  per-signal work that grows with the number of connections, e.g.
+  repeated name lookups or symbolic expressions built signal by signal)
+  and make it scale.

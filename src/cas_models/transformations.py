@@ -33,6 +33,9 @@ infer_model_class
     models: model_class when it isn't given.
 block_diag
     Construct a block-diagonal CasADi SX matrix from a list of matrices.
+linearize
+    The state-space matrices (A, B, C, D) of a model linearized about an
+    operating point (exact for a linear model).
 
 Before 2026-11, connect_systems_in_parallel was the block-diagonal
 combination (now block_diag_systems) and sum_systems the parallel one
@@ -40,6 +43,7 @@ combination (now block_diag_systems) and sum_systems the parallel one
 """
 
 import casadi as cas
+import numpy as np
 
 from cas_models.param_utils import (
     concatenate_lists_of_names,
@@ -47,7 +51,7 @@ from cas_models.param_utils import (
     merge_param_dicts,
 )
 from cas_models.recipes import records
-from cas_models.validation import validate_equal_dt
+from cas_models.validation import is_ss_ct, is_ss_dt, validate_equal_dt
 
 
 def block_diag(matrices, square=False):
@@ -1814,4 +1818,56 @@ def connect_feedback_system(
         state_names=state_names,
         output_names=output_names,
         name=name,
+    )
+
+
+def linearize(sys, x=None, u=None, t=0.0, params=None):
+    """The state-space matrices (A, B, C, D) of a model linearized about
+    the state x and input u (zeros by default) at time t: the Jacobians
+    of its state and output functions,
+
+        A = d(f or F)/dx, B = d(f or F)/du, C = dh/dx, D = dh/du,
+
+    as numpy arrays. For a continuous-time model (f, h) they are those of
+    dx/dt = A x + B u, y = C x + D u; for a discrete-time model (F, H),
+    of x(k+1) = A x(k) + B u(k), y(k) = C x(k) + D u(k), with the same
+    sample time. They hold for deviations from (x, u) and its f or F and
+    h values (the offsets aren't returned); for a linear model they are
+    exact and the same at any (x, u). A model with parameters needs their
+    values, params ({name: value}; or use set_param_values first)."""
+    if is_ss_ct(sys):
+        state_func, output_func = sys.f, sys.h
+    elif is_ss_dt(sys):
+        state_func, output_func = sys.F, sys.H
+    else:
+        raise TypeError(
+            "sys must be a continuous-time (f, h) or "
+            "discrete-time (F, H) state-space model"
+        )
+    param_values = []
+    if sys.params:
+        missing = [name for name in sys.params if name not in (params or {})]
+        if missing:
+            raise ValueError(f"values needed for the parameters {missing}")
+        param_values = [params[name] for name in sys.params]
+    x0 = np.zeros(sys.n) if x is None else np.asarray(x, dtype=float)
+    u0 = np.zeros(sys.nu) if u is None else np.asarray(u, dtype=float)
+    # MX symbols: they can be passed to SX and MX functions
+    t_sym = cas.MX.sym("t")
+    x_sym = cas.MX.sym("x", sys.n)
+    u_sym = cas.MX.sym("u", sys.nu)
+    xf = state_func(t_sym, x_sym, u_sym, *param_values)
+    y = output_func(t_sym, x_sym, u_sym, *param_values)
+    jacobians = cas.Function(
+        "jacobians",
+        [t_sym, x_sym, u_sym],
+        [
+            cas.jacobian(xf, x_sym),
+            cas.jacobian(xf, u_sym),
+            cas.jacobian(y, x_sym),
+            cas.jacobian(y, u_sym),
+        ],
+    )
+    return tuple(
+        np.array(M, dtype=float).reshape(M.shape) for M in jacobians(t, x0, u0)
     )

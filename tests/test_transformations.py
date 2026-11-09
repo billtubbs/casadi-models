@@ -9,10 +9,13 @@ from cas_models.continuous_time.models import (
     SSModelCTLinearFONoGainSISO,
     SSModelCTLinearFOSISO,
     StateSpaceModelCT,
+    StateSpaceModelCTFromABCD,
 )
 from cas_models.continuous_time.regulators import SSModelCTPIInt
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
+    StateSpaceModelDTARXSISO,
+    StateSpaceModelDTFromABCD,
     StateSpaceModelDTFromCT,
     StateSpaceModelDTTFSISO,
 )
@@ -26,6 +29,7 @@ from cas_models.transformations import (
     connect_systems_in_parallel,
     connect_systems_in_series,
     hstack_systems,
+    linearize,
     negate_system,
     vstack_systems,
 )
@@ -1613,3 +1617,81 @@ def test_name_overrides():
     assert set_param_values(a, {"a": 0.5}).name == "a"
     with pytest.raises(ValueError, match="output_names: give 1 names"):
         negate_system(a, output_names=["p", "q"])
+
+
+# linearize
+
+
+LIN_A = np.array([[0.9, 0.1], [0.0, 0.8]])
+LIN_B = np.array([[1.0, 0.0], [0.5, 2.0]])
+LIN_C = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+LIN_D = np.array([[0.0, 0.0], [0.1, 0.0], [0.0, 0.0]])
+
+
+@pytest.mark.parametrize(
+    "model_class", [StateSpaceModelCTFromABCD, StateSpaceModelDTFromABCD]
+)
+def test_linearize_linear(model_class):
+    """A linear model's matrices, the same at any operating point."""
+    sys = model_class(LIN_A, LIN_B, LIN_C, LIN_D)
+    for x, u in [(None, None), ([1.0, -2.0], [3.0, 0.5])]:
+        A, B, C, D = linearize(sys, x, u)
+        assert A.shape == (2, 2) and B.shape == (2, 2)
+        assert C.shape == (3, 2) and D.shape == (3, 2)
+        np.testing.assert_allclose(A, LIN_A)
+        np.testing.assert_allclose(B, LIN_B)
+        np.testing.assert_allclose(C, LIN_C)
+        np.testing.assert_allclose(D, LIN_D)
+
+
+def test_linearize_nonlinear_ct():
+    """A pendulum, dx1/dt = x2, dx2/dt = -sin(x1) + u x1, y = x1^2,
+    linearized at x = (0.5, 0), u = 2."""
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", 2)
+    u = cas.SX.sym("u")
+    f = cas.Function(
+        "f",
+        [t, x, u],
+        [cas.vertcat(x[1], -cas.sin(x[0]) + u * x[0])],
+        ["t", "x", "u"],
+        ["rhs"],
+    )
+    h = cas.Function("h", [t, x, u], [x[0] ** 2], ["t", "x", "u"], ["y"])
+    sys = StateSpaceModelCT(f, h, n=2)
+    A, B, C, D = linearize(sys, x=[0.5, 0.0], u=[2.0])
+    np.testing.assert_allclose(A, [[0.0, 1.0], [-np.cos(0.5) + 2.0, 0.0]])
+    np.testing.assert_allclose(B, [[0.0], [0.5]])
+    np.testing.assert_allclose(C, [[1.0, 0.0]])
+    np.testing.assert_allclose(D, [[0.0]])
+
+
+def test_linearize_dt_arx():
+    """An ARX model's matrices simulate as the model does."""
+    sys = StateSpaceModelDTARXSISO(A=[-1.5, 0.56], B=[0.3, 0.1], nk=1)
+    A, B, C, D = linearize(sys)
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=sys.n)
+    for u in rng.normal(size=10):
+        y_model = float(sys.H(0, x, u))
+        x_model = np.array(sys.F(0, x, u)).ravel()
+        assert np.isclose(y_model, (C @ x + D @ [u])[0])
+        np.testing.assert_allclose(x_model, A @ x + B @ [u])
+        x = x_model
+
+
+def test_linearize_params():
+    """A model with parameters needs their values."""
+    sys = SSModelCTLinearFOSISO()  # K, T1 symbolic
+    with pytest.raises(ValueError, match="values needed"):
+        linearize(sys)
+    A, B, C, D = linearize(sys, params={"K": 2.0, "T1": 4.0})
+    np.testing.assert_allclose(A, [[-0.25]])
+    np.testing.assert_allclose(B, [[1.0]])
+    np.testing.assert_allclose(C, [[0.5]])
+    np.testing.assert_allclose(D, [[0.0]])
+
+
+def test_linearize_not_a_model():
+    with pytest.raises(TypeError):
+        linearize("not a model")
