@@ -1628,8 +1628,14 @@ def connect_feedback_system(
             infer_model_class()).
         sign: Sign applied to the feedback signal at the summing junction.
             Use -1 (default) for negative feedback, +1 for positive feedback.
-        input_names: Names of the closed-loop reference inputs.  Default:
-            ``[f"{n}_sp" for n in sys1.output_names]``.
+        input_names: Names of the closed-loop inputs (one per sys1 input:
+            the signal added to sys2's output at sys1's input).  Default,
+            for negative feedback (sign=-1), setpoints:
+            ``[f"{name}_sp" for name in sys1.output_names]`` for unity
+            feedback (sys2 None) and
+            ``[f"{name}_sp" for name in sys2.output_names]`` when sys2 is
+            a model; otherwise (a scalar sys2, or another sign), generic
+            names ``u_0``, ..., ``u_{N-1}``.
         output_names: Names of the closed-loop outputs.  Default: derived
             from sys1's output names, disambiguated with system keys when
             names conflict.
@@ -1788,7 +1794,17 @@ def connect_feedback_system(
     )
 
     if input_names is None:
-        input_names = [f"{n}_sp" for n in sys1.output_names]
+        if sign == -1 and sys2 is None:
+            input_names = [f"{name}_sp" for name in sys1.output_names]
+        elif sign == -1 and has_sys2_states:
+            input_names = [f"{name}_sp" for name in sys2.output_names]
+        else:
+            input_names = [f"u_{i}" for i in range(nu1)]
+    if len(input_names) != nu1:
+        raise ValueError(
+            f"{len(input_names)} input names for {nu1} inputs (one per "
+            f"input of sys1): {input_names}"
+        )
     if output_names is None:
         if verbose_names:
             output_names = [

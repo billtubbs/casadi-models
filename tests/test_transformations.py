@@ -1205,7 +1205,7 @@ def test_connect_feedback_system_scalar_gain():
     assert sys_cl.n == 1
     assert sys_cl.nu == 1
     assert sys_cl.ny == 1
-    assert sys_cl.input_names == ["y_sp"]
+    assert sys_cl.input_names == ["u_0"]  # generic: a scalar sys2
     assert sys_cl.name == "fbk_plant_gain"
 
 
@@ -1237,6 +1237,77 @@ def test_connect_feedback_system_errors():
         connect_feedback_system(
             plant, sys2=mimo_feedback, model_class=StateSpaceModelCT
         )
+
+
+# A discrete-time plant with 2 inputs and 3 outputs (no feedthrough)
+NS_A = np.array([[0.9, 0.0], [0.1, 0.8]])
+NS_B = np.array([[0.1, 0.0], [0.0, 0.2]])
+NS_C = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+
+
+def _non_square_loop(sys2_output_names=None):
+    """The plant above and a controller with 3 inputs and 2 outputs
+    (static gains K, with feedthrough)."""
+    plant = StateSpaceModelDTFromABCD(
+        NS_A, NS_B, NS_C, np.zeros((3, 2)),
+        name="plant", input_names=["F1", "F2"],
+        output_names=["T1", "T2", "T3"],
+    )
+    K = np.array([[0.5, 0.0, 0.1], [0.0, 0.4, 0.2]])
+    ctrl = StateSpaceModelDTFromABCD(
+        [[0.0]], np.zeros((1, 3)), np.zeros((2, 1)), K, name="ctrl",
+        input_names=["T1", "T2", "T3"], output_names=sys2_output_names,
+    )
+    return plant, ctrl, K
+
+
+def test_connect_feedback_system_non_square():
+    """A model as sys2 with sys1 not square: one input name per sys1
+    input, from sys2's output names; the loop is e = r - K y."""
+    plant, ctrl, K = _non_square_loop(sys2_output_names=["F1", "F2"])
+    sys_cl = connect_feedback_system(plant, ctrl)
+    assert sys_cl.nu == 2 and sys_cl.ny == 3 and sys_cl.n == 3
+    assert sys_cl.input_names == ["F1_sp", "F2_sp"]
+    assert sys_cl.output_names == ["T1", "T2", "T3"]
+
+    # Simulated against the loop worked out by hand
+    A, B, C = NS_A, NS_B, NS_C
+    x_cl = np.zeros(sys_cl.n)
+    x = np.zeros(2)
+    r = np.array([1.0, -0.5])
+    for _ in range(5):
+        y = C @ x
+        np.testing.assert_allclose(
+            np.array(sys_cl.H(0, x_cl, r)).ravel(), y, atol=1e-12
+        )
+        x_cl = np.array(sys_cl.F(0, x_cl, r)).ravel()
+        x = A @ x + B @ (r - K @ y)
+        np.testing.assert_allclose(x_cl[:2], x, atol=1e-12)
+
+    # sys2 with default output names
+    plant, ctrl, _ = _non_square_loop()
+    assert connect_feedback_system(plant, ctrl).input_names == [
+        "y1_sp", "y2_sp",
+    ]
+
+
+def test_connect_feedback_system_generic_input_names():
+    """Positive feedback (sign=1) or a scalar sys2: generic input names
+    u_0, ..., u_{N-1}."""
+    plant, ctrl, _ = _non_square_loop(sys2_output_names=["F1", "F2"])
+    sys_cl = connect_feedback_system(plant, ctrl, sign=1)
+    assert sys_cl.input_names == ["u_0", "u_1"]
+    siso = SSModelCTLinearFOSISO(K=1.0, T1=1.0, name="plant")
+    assert connect_feedback_system(siso, sign=1).input_names == ["u_0"]
+    assert connect_feedback_system(siso, sys2=2.0).input_names == ["u_0"]
+    assert connect_feedback_system(siso).input_names == ["y_sp"]
+
+
+def test_connect_feedback_system_input_name_count():
+    """input_names must have one name per sys1 input."""
+    plant, ctrl, _ = _non_square_loop()
+    with pytest.raises(ValueError, match="3 input names for 2 inputs"):
+        connect_feedback_system(plant, ctrl, input_names=["a", "b", "c"])
 
 
 def test_connect_feedback_system_detects_algebraic_loop():

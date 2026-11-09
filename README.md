@@ -564,7 +564,17 @@ the CasADi version.
   164 extra outputs) and a linear MPC model (164 state inputs, 24
   setpoint inputs, 2 outputs) in a feedback loop, with 166 connections,
   took 11 s (2026-11-09, `ffd/analysis/test-mpc.ipynb`). Building the
-  MPC itself took 0.07 s. Find where the time goes (profile it; likely
-  per-signal work that grows with the number of connections, e.g.
-  repeated name lookups or symbolic expressions built signal by signal)
-  and make it scale.
+  MPC itself took 0.07 s. The same loop built with
+  `connect_feedback_system` (the MPC's setpoints fixed, so its inputs
+  were exactly the plant's outputs) took 0.22 s and simulated
+  identically (to 1e-14), so the time is in `connect_systems`'s general
+  signal routing, not in the size of the loop. Find where it goes
+  (profile it; likely per-signal work that grows with the number of
+  connections, e.g. repeated name lookups or symbolic expressions built
+  signal by signal) and make it scale.
+- **Name counts in models:** the model classes don't check that
+  `input_names`, `state_names` and `output_names` have `nu`, `n` and `ny`
+  entries, so a wrong count goes unnoticed (it hid a bug in
+  `connect_feedback_system`'s default input names with a model as sys2,
+  fixed 2026-11-09). Check them in the base classes' constructors (and
+  see what existing code relies on a mismatch).
