@@ -60,6 +60,7 @@ from cas_models.transformations import (
 )
 from cas_models.validation import (
     as_sx_matrix,
+    check_system_dimensions,
     validate_casadi_function_dims,
 )
 from cas_models.yaml_utils import (
@@ -485,13 +486,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         C = cas.sparsify(as_sx_matrix(C, "C"))
         D = cas.sparsify(as_sx_matrix(D, "D"))
 
-        n = A.shape[0]
-        assert A.shape[1] == n
-        nu = B.shape[1]
-        assert B.shape[0] == n
-        ny = C.shape[0]
-        assert C.shape[1] == n
-        assert D.shape == (ny, nu)
+        n, nu, ny = check_system_dimensions(A, B, C, D)
         symbolic_params = {}
         for m in [A, B, C, D]:
             params = cas.symvar(cas.SX(m))

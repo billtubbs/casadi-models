@@ -57,6 +57,7 @@ from cas_models.transformations import (
 from cas_models.recipes import record_subclass_init
 from cas_models.validation import (
     as_sx_matrix,
+    check_system_dimensions,
     as_sx_scalar,
     as_sx_vector,
     validate_casadi_function_dims,
@@ -539,24 +540,7 @@ class StateSpaceModelDTFromABCD(StateSpaceModelDT):
         C = cas.sparsify(as_sx_matrix(C, "C"))
         D = cas.sparsify(as_sx_matrix(D, "D"))
 
-        n = A.shape[0]
-        if A.shape[1] != n:
-            raise ValueError(
-                f"A must be square, not {A.shape[0]} x {A.shape[1]}"
-            )
-        nu = B.shape[1]
-        ny = C.shape[0]
-        if B.shape[0] != n:
-            raise ValueError(f"B must have {n} rows (A's), not {B.shape[0]}")
-        if C.shape[1] != n:
-            raise ValueError(
-                f"C must have {n} columns (A's), not {C.shape[1]}"
-            )
-        if D.shape != (ny, nu):
-            raise ValueError(
-                f"D must be {ny} x {nu} (C's rows x B's columns), not "
-                f"{D.shape[0]} x {D.shape[1]}"
-            )
+        n, nu, ny = check_system_dimensions(A, B, C, D)
         symbolic_params = {}
         for m in [A, B, C, D]:
             for p in cas.symvar(cas.SX(m)):

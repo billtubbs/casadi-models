@@ -6,9 +6,11 @@ import pytest
 from casadi import SX
 
 from cas_models.validation import (
+    as_casadi_matrix,
     as_sx_matrix,
     as_sx_scalar,
     as_sx_vector,
+    check_system_dimensions,
     validate_casadi_function_dims,
 )
 
@@ -198,3 +200,64 @@ def test_as_sx_matrix_empty(value, shape):
 def test_as_sx_matrix_errors(value, error, match):
     with pytest.raises(error, match=match):
         as_sx_matrix(value, "M")
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (1.5, [[1.5]]),
+        ([1.0, 2.0], [[1.0], [2.0]]),
+        (np.array([1.0, 2.0]), [[1.0], [2.0]]),
+        ([[1.0, 2.0], [3.0, 4.0]], [[1.0, 2.0], [3.0, 4.0]]),
+        (np.eye(2), np.eye(2)),
+        (cas.DM([[1.0, 2.0]]), [[1.0, 2.0]]),
+    ],
+)
+def test_as_casadi_matrix_numeric(value, expected):
+    result = as_casadi_matrix(value)
+    assert isinstance(result, cas.DM)
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_as_casadi_matrix_empty():
+    assert as_casadi_matrix([]).shape == (0, 1)
+    assert as_casadi_matrix(np.zeros((2, 0))).shape == (2, 0)
+
+
+@pytest.mark.parametrize(
+    "value", [SX.sym("x", 2, 3), cas.MX.sym("m", 2)]
+)
+def test_as_casadi_matrix_symbolic(value):
+    assert as_casadi_matrix(value) is value
+
+
+@pytest.mark.parametrize(
+    "value", ["abc", None, 2j, np.array([1j]), np.zeros((2, 2, 2))]
+)
+def test_as_casadi_matrix_errors(value):
+    with pytest.raises(TypeError, match="^M: give a matrix"):
+        as_casadi_matrix(value, "M")
+
+
+def test_check_system_dimensions():
+    A, B = np.eye(2), np.ones((2, 1))
+    C, D = np.ones((3, 2)), np.zeros((3, 1))
+    assert check_system_dimensions(A, B, C, D) == (2, 1, 3)
+    # CasADi matrices, symbolic and numerical, and no inputs
+    A = SX.sym("A", 2, 2)
+    B, D = cas.DM.zeros(2, 0), cas.DM.zeros(3, 0)
+    assert check_system_dimensions(A, B, C, D) == (2, 0, 3)
+
+
+@pytest.mark.parametrize(
+    "A, B, C, D, match",
+    [
+        ((1, 2), (1, 1), (1, 2), (1, 1), "A must be square, not 1 x 2"),
+        ((2, 2), (1, 1), (1, 2), (1, 1), "B must have 2 rows"),
+        ((2, 2), (2, 1), (1, 3), (1, 1), "C must have 2 columns"),
+        ((2, 2), (2, 1), (1, 2), (1, 2), r"D must be 1 x 1 .*not 1 x 2"),
+    ],
+)
+def test_check_system_dimensions_errors(A, B, C, D, match):
+    with pytest.raises(ValueError, match=match):
+        check_system_dimensions(*(np.zeros(s) for s in (A, B, C, D)))

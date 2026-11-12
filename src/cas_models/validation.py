@@ -57,6 +57,40 @@ def validate_equal_dt(systems):
         )
 
 
+def check_system_dimensions(A, B, C, D):
+    """Check the dimensions of the matrices of a linear state-space
+    model and return them.
+
+        x(k+1) = A x(k) + B u(k)  (or dx/dt = A x + B u)
+          y(k) = C x(k) + D u(k)
+
+    A, B, C and D can be any matrices with a shape attribute (CasADi
+    DM, SX or MX, NumPy arrays).
+
+    Returns:
+        (n, nu, ny): numbers of states, inputs and outputs.
+
+    Raises:
+        ValueError: if A isn't square, or B, C or D don't match A and
+            each other.
+    """
+    n = A.shape[0]  # number of states
+    nu = B.shape[1]  # number of inputs
+    ny = C.shape[0]  # number of outputs
+    if A.shape[1] != n:
+        raise ValueError(f"A must be square, not {A.shape[0]} x {A.shape[1]}")
+    if B.shape[0] != n:
+        raise ValueError(f"B must have {n} rows (A's), not {B.shape[0]}")
+    if C.shape[1] != n:
+        raise ValueError(f"C must have {n} columns (A's), not {C.shape[1]}")
+    if D.shape != (ny, nu):
+        raise ValueError(
+            f"D must be {ny} x {nu} (C's rows x B's columns), not "
+            f"{D.shape[0]} x {D.shape[1]}"
+        )
+    return n, nu, ny
+
+
 def as_sx_vector(value, name="value"):
     """A model argument that is a vector of parameters, as an SX column
     vector.
@@ -197,6 +231,32 @@ def as_sx_matrix(value, name="value"):
             for row in rows
         ]
     )
+
+
+def as_casadi_matrix(value, name="value"):
+    """A numerical or symbolic matrix argument as a CasADi matrix:
+    SX and MX values are returned unchanged, numerical values (numbers,
+    lists, NumPy arrays, DM) are converted to cas.DM (a list or 1-D
+    array becomes a column vector).
+
+    Use this in functions that build expressions from their arguments
+    and accept both numbers and symbols, so that matrix operations work
+    when they are numbers given as lists or NumPy arrays. Unlike
+    as_sx_matrix(), MX symbols are allowed and numbers aren't made SX.
+
+    Raises:
+        TypeError: if value can't be converted to cas.DM (strings, None,
+            complex values, arrays of more than two dimensions, ...).
+    """
+    if isinstance(value, (cas.SX, cas.MX)):
+        return value
+    try:
+        return cas.DM(value)
+    except NotImplementedError:
+        raise TypeError(
+            f"{name}: give a matrix of real numbers or CasADi symbols, "
+            f"not {type(value).__name__} ({value!r})"
+        ) from None
 
 
 def _as_row(row, name):
