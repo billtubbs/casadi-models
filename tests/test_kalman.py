@@ -11,6 +11,7 @@ from cas_models.discrete_time.kalman import (
     kf_update,
     linear_model_output,
     linear_model_state_transition,
+    make_KF_for_filtering_with_fixedABCDQR,
     make_KF_for_prediction_with_fixedABCDQR,
 )
 from cas_models.discrete_time.models import StateSpaceModelDTFromABCD
@@ -29,9 +30,7 @@ R_test = np.diag([0.1, 0.1])
 
 
 def _test_matrices():
-    return tuple(
-        map(cas.DM, (A_test, B_test, C_test, D_test, Q_test, R_test))
-    )
+    return tuple(map(cas.DM, (A_test, B_test, C_test, D_test, Q_test, R_test)))
 
 
 def np_kalman_update(A, B, C, D, xkp1_est, Pkp1, Q, R, yk, uk):
@@ -108,9 +107,7 @@ def test_kalman_update_f():
     Pk_pred = cas.DM([[2.0, 0.5], [0.5, 1.0]])
     yk_pred = C @ xk_pred
     yk = cas.DM([0.5, 0.0])
-    xk_est, Pk, Kf, Sk = kalman_update_f(
-        C, R, xk_pred, Pk_pred, yk_pred, yk
-    )
+    xk_est, Pk, Kf, Sk = kalman_update_f(C, R, xk_pred, Pk_pred, yk_pred, yk)
     P, Cn = np.array(Pk_pred), C_test
     S = Cn @ P @ Cn.T + R_test
     K = P @ Cn.T @ np.linalg.inv(S)
@@ -127,9 +124,7 @@ def test_kalman_update_f():
     for T in (cas.SX, cas.MX):
         x, P = T.sym("x", 2), T.sym("P", 2, 2)
         y = T.sym("y", 2)
-        f = cas.Function(
-            "f", [x, P, y], kalman_update_f(C, R, x, P, C @ x, y)
-        )
+        f = cas.Function("f", [x, P, y], kalman_update_f(C, R, x, P, C @ x, y))
         for a, b in zip(f(xk_pred, Pk_pred, yk), (xk_est, Pk, Kf, Sk)):
             np.testing.assert_allclose(a, b)
 
@@ -144,16 +139,12 @@ def test_kalman_predict_f():
     assert xkp1_est.shape == (2, 1)
     assert Pkp1.shape == (2, 2)
     np.testing.assert_allclose(xkp1_est, [[3.2], [2.0]])
-    np.testing.assert_allclose(
-        Pkp1, A_test @ np.array(Pk) @ A_test.T + Q_test
-    )
+    np.testing.assert_allclose(Pkp1, A_test @ np.array(Pk) @ A_test.T + Q_test)
 
     # Symbolic arguments
     for T in (cas.SX, cas.MX):
         x, P, u = T.sym("x", 2), T.sym("P", 2, 2), T.sym("u", 1)
-        f = cas.Function(
-            "f", [x, P, u], kalman_predict_f(A, B, Q, x, P, u)
-        )
+        f = cas.Function("f", [x, P, u], kalman_predict_f(A, B, Q, x, P, u))
         for a, b in zip(f(xk_est, Pk, uk), (xkp1_est, Pkp1)):
             np.testing.assert_allclose(a, b)
 
@@ -190,12 +181,8 @@ def test_kf_update():
 
     # After many steps the gain should converge to the steady-state
     # Kalman filter gain from the discrete algebraic Riccati equation
-    P_ss = scipy.linalg.solve_discrete_are(
-        A_test.T, C_test.T, Q_test, R_test
-    )
-    Kf_ss = (
-        P_ss @ C_test.T @ np.linalg.inv(C_test @ P_ss @ C_test.T + R_test)
-    )
+    P_ss = scipy.linalg.solve_discrete_are(A_test.T, C_test.T, Q_test, R_test)
+    Kf_ss = P_ss @ C_test.T @ np.linalg.inv(C_test @ P_ss @ C_test.T + R_test)
     np.testing.assert_allclose(Pkp1, P_ss, atol=1e-8)
     np.testing.assert_allclose(results[7], Kf_ss, atol=1e-8)
 
@@ -248,14 +235,23 @@ def test_kf_update():
             np.testing.assert_allclose(a, b)
 
 
-def test_make_KF_for_prediction_with_fixedABCDQR():
+def _kf_test_point():
+    """Filter state x_est(k|k-1), P(k|k-1) and inputs u(k), y(k) for
+    one-step tests, and the expected kf_update results."""
     A, B, C, D, Q, R = _test_matrices()
-    kf = make_KF_for_prediction_with_fixedABCDQR(
-        A, B, C, D, Q, R, dt=0.5, include_output_estimates=True
-    )
+    xkp1_est = cas.DM([0.1, -0.2])
+    Pkp1 = cas.DM([[0.25, 0.05], [0.05, 0.3]])
+    xk = cas.vertcat(xkp1_est, cas.vec(Pkp1))
+    uk, yk = cas.DM([0.7]), cas.DM([0.4, -0.3])
+    expected = kf_update(A, B, C, D, xkp1_est, Pkp1, Q, R, yk, uk)
+    return xk, cas.vertcat(uk, yk), expected
+
+
+def _check_KF_system(kf, est_name):
+    """Checks common to both forms of the filter."""
     assert kf.name == "KF"
     assert kf.dt == 0.5
-    assert (kf.n, kf.nu, kf.ny) == (6, 3, 4)
+    assert (kf.n, kf.nu, kf.ny) == (6, 3, 8)
     assert kf.input_names == ["uk", "yk_1", "yk_2"]
     assert kf.state_names == [
         "xkp1_est_1",
@@ -265,37 +261,61 @@ def test_make_KF_for_prediction_with_fixedABCDQR():
         "Pkp1_3",
         "Pkp1_4",
     ]
+    x, y = f"x{est_name}", f"y{est_name}"
     assert kf.output_names == [
-        "xkp1_est_1",
-        "xkp1_est_2",
-        "yk_est_1",
-        "yk_est_2",
+        f"{x}_1",
+        f"{x}_2",
+        f"{y}_1",
+        f"{y}_2",
+        f"{x}_var_1",
+        f"{x}_var_2",
+        f"{y}_var_1",
+        f"{y}_var_2",
     ]
 
-    # One time step compared to kf_update, with inputs ordered
-    # as named (u(k), y(k))
-    xkp1_est = cas.DM([0.1, -0.2])
-    Pkp1 = cas.DM([[0.25, 0.05], [0.05, 0.3]])
-    xk = cas.vertcat(xkp1_est, cas.vec(Pkp1))
-    uk, yk = cas.DM([0.7]), cas.DM([0.4, -0.3])
-    expected = kf_update(A, B, C, D, xkp1_est, Pkp1, Q, R, yk, uk)
-    xkp1 = kf.F(0.0, xk, cas.vertcat(uk, yk))
+    # State transition: one step of kf_update, with inputs ordered as
+    # named (u(k), y(k))
+    xk, uk, expected = _kf_test_point()
+    xkp1 = kf.F(0.0, xk, uk)
     np.testing.assert_allclose(xkp1[:2], expected[4])
     np.testing.assert_allclose(xkp1[2:], cas.vec(expected[5]))
-    y = kf.H(0.0, xk, cas.vertcat(uk, yk))
-    np.testing.assert_allclose(y[:2], expected[4])
-    np.testing.assert_allclose(y[2:], expected[2])
 
-    # The outputs depend directly on the inputs (feedthrough):
-    # x_est(k+1|k) on u(k) (except x2, since B[1] = 0) and y(k),
-    # y_est(k|k) on y(k) only (since D = 0)
+    # The variances don't depend on the inputs (only on P(k|k-1))
+    sp = kf.H.sparsity_jac("uk", "yk")
+    np.testing.assert_array_equal(np.array(cas.DM(sp, 1))[4:], 0)
+
+
+def test_make_KF_for_prediction_with_fixedABCDQR():
+    A, B, C, D, Q, R = _test_matrices()
+    all_outputs = dict(
+        include_output_estimates=True,
+        include_state_variance=True,
+        include_output_variance=True,
+    )
+    kf = make_KF_for_prediction_with_fixedABCDQR(
+        A, B, C, D, Q, R, dt=0.5, **all_outputs
+    )
+    _check_KF_system(kf, "kp1_est")
+
+    # Outputs: x_est(k+1|k), C x_est(k+1|k), diag(P(k+1|k)),
+    # diag(C P(k+1|k) C')
+    xk, uk, expected = _kf_test_point()
+    xkp1_est, Pkp1 = expected[4], expected[5]
+    y = kf.H(0.0, xk, uk)
+    np.testing.assert_allclose(y[0:2], xkp1_est)
+    np.testing.assert_allclose(y[2:4], C @ xkp1_est)
+    np.testing.assert_allclose(y[4:6], cas.diag(Pkp1))
+    np.testing.assert_allclose(y[6:8], cas.diag(C @ Pkp1 @ C.T))
+
+    # The estimates depend directly on the inputs (feedthrough):
+    # on u(k) (except x2 and y2, since B[1] = 0) and y(k)
     sp = kf.H.sparsity_jac("uk", "yk")
     np.testing.assert_array_equal(
-        np.array(cas.DM(sp, 1)),
-        [[1, 1, 1], [0, 1, 1], [0, 1, 1], [0, 1, 1]],
+        np.array(cas.DM(sp, 1))[:4],
+        [[1, 1, 1], [0, 1, 1], [1, 1, 1], [0, 1, 1]],
     )
 
-    # Output selection
+    # Default and selected outputs
     kf = make_KF_for_prediction_with_fixedABCDQR(A, B, C, D, Q, R)
     assert kf.output_names == ["xkp1_est_1", "xkp1_est_2"]
     kf = make_KF_for_prediction_with_fixedABCDQR(
@@ -306,23 +326,92 @@ def test_make_KF_for_prediction_with_fixedABCDQR():
         Q,
         R,
         include_state_estimates=False,
-        include_output_estimates=True,
+        include_state_variance=True,
     )
-    assert kf.output_names == ["yk_est_1", "yk_est_2"]
+    assert kf.output_names == ["xkp1_est_var_1", "xkp1_est_var_2"]
+
+    # y_est(k+1|k) needs D = 0
+    D1 = cas.DM([[0.0], [1.0]])
+    with pytest.raises(ValueError, match="unless D = 0"):
+        make_KF_for_prediction_with_fixedABCDQR(
+            A, B, C, D1, Q, R, include_output_estimates=True
+        )
+    kf = make_KF_for_prediction_with_fixedABCDQR(
+        A, B, C, D1, Q, R, include_output_variance=True
+    )
+    assert kf.ny == 4
 
     # NumPy arrays are accepted
     kf_np = make_KF_for_prediction_with_fixedABCDQR(
         A_test, B_test, C_test, D_test, Q_test, R_test
     )
-    np.testing.assert_allclose(
-        kf_np.F(0.0, xk, cas.vertcat(uk, yk)), xkp1
-    )
+    np.testing.assert_allclose(kf_np.H(0.0, xk, uk), xkp1_est)
 
 
-def test_make_KF_simulation():
-    """Multi-step simulation compared to the NumPy reference."""
+def test_make_KF_for_filtering_with_fixedABCDQR():
     A, B, C, D, Q, R = _test_matrices()
-    kf = make_KF_for_prediction_with_fixedABCDQR(A, B, C, D, Q, R)
+    all_outputs = dict(
+        include_output_estimates=True,
+        include_state_variance=True,
+        include_output_variance=True,
+    )
+    kf = make_KF_for_filtering_with_fixedABCDQR(
+        A, B, C, D, Q, R, dt=0.5, **all_outputs
+    )
+    _check_KF_system(kf, "k_est")
+
+    # Outputs: x_est(k|k), y_est(k|k), diag(P(k|k)), diag(C P(k|k) C')
+    xk, uk, expected = _kf_test_point()
+    xk_est, Pk, yk_est = expected[0], expected[1], expected[2]
+    y = kf.H(0.0, xk, uk)
+    np.testing.assert_allclose(y[0:2], xk_est)
+    np.testing.assert_allclose(y[2:4], yk_est)
+    np.testing.assert_allclose(y[4:6], cas.diag(Pk))
+    np.testing.assert_allclose(y[6:8], cas.diag(C @ Pk @ C.T))
+
+    # The estimates depend directly on y(k) but not on u(k) (D = 0)
+    sp = kf.H.sparsity_jac("uk", "yk")
+    np.testing.assert_array_equal(np.array(cas.DM(sp, 1))[:4, 0], 0)
+    np.testing.assert_array_equal(np.array(cas.DM(sp, 1))[:4, 1:], 1)
+
+    # With D non-zero, they depend on u(k) too
+    D1 = cas.DM([[0.0], [1.0]])
+    kf = make_KF_for_filtering_with_fixedABCDQR(
+        A, B, C, D1, Q, R, include_output_estimates=True
+    )
+    sp = kf.H.sparsity_jac("uk", "yk")
+    np.testing.assert_array_equal(np.array(cas.DM(sp, 1))[:, 0], 1)
+
+    # Default and selected outputs
+    kf = make_KF_for_filtering_with_fixedABCDQR(A, B, C, D, Q, R)
+    assert kf.output_names == ["xk_est_1", "xk_est_2"]
+    kf = make_KF_for_filtering_with_fixedABCDQR(
+        A,
+        B,
+        C,
+        D,
+        Q,
+        R,
+        include_state_estimates=False,
+        include_output_variance=True,
+    )
+    assert kf.output_names == ["yk_est_var_1", "yk_est_var_2"]
+
+
+KF_FORMS = {
+    # form: (constructor, index of the state estimates in kf_update's
+    # results, and of the plant states they estimate, relative to k)
+    "prediction": (make_KF_for_prediction_with_fixedABCDQR, 4, 1),
+    "filtering": (make_KF_for_filtering_with_fixedABCDQR, 0, 0),
+}
+
+
+@pytest.mark.parametrize("form", KF_FORMS)
+def test_make_KF_simulation(form):
+    """Multi-step simulation compared to the NumPy reference."""
+    make_KF, i_est, _ = KF_FORMS[form]
+    A, B, C, D, Q, R = _test_matrices()
+    kf = make_KF(A, B, C, D, Q, R)
     nT = 20
     sim = make_n_step_simulation_function_from_model(kf, nT)
     rng = np.random.default_rng(1)
@@ -348,22 +437,25 @@ def test_make_KF_simulation():
             U[:, k],
         )
         xkp1_np, Pkp1_np = results_np[4], results_np[5]
-        np.testing.assert_allclose(Y_kf[k], xkp1_np, atol=1e-12)
+        np.testing.assert_allclose(Y_kf[k], results_np[i_est], atol=1e-12)
         np.testing.assert_allclose(X_kf[k + 1, :2], xkp1_np, atol=1e-12)
         np.testing.assert_allclose(
             X_kf[k + 1, 2:], Pkp1_np.flatten(order="F"), atol=1e-12
         )
 
 
-def _simulate_plant_and_KF(Q, R, P0, x0_plant, x0_est, U, noise_sd, seed=0):
+def _simulate_plant_and_KF(
+    form, Q, R, P0, x0_plant, x0_est, U, noise_sd, seed=0
+):
     """Simulate the test system as the plant, add measurement noise to
     its outputs, and run the Kalman filter (same model as the plant)
     on the plant inputs and measurements.
 
-    Returns the plant states X (nT + 1, 2), and the filter's states
-    X_est (nT + 1, 6) and outputs Y_est (nT + 1, 2). X_est[k, :2] is
-    x_est(k|k-1) and Y_est[k] is x_est(k+1|k), the estimate of X[k+1].
+    Returns X_est (nT, 2), the filter's state estimates at times
+    0, ..., nT - 1, and X (nT, 2), the plant states they estimate:
+    x(k+1) for the prediction form, x(k) for the filtering form.
     """
+    make_KF, _, shift = KF_FORMS[form]
     nT = U.shape[0]
     t = np.arange(nT + 1) * 1.0
     plant = StateSpaceModelDTFromABCD(A_test, B_test, C_test, D_test)
@@ -372,17 +464,16 @@ def _simulate_plant_and_KF(Q, R, P0, x0_plant, x0_est, U, noise_sd, seed=0):
     )
     rng = np.random.default_rng(seed)
     Y_meas = np.array(Y)[:nT] + noise_sd * rng.normal(size=(nT, 2))
-    kf = make_KF_for_prediction_with_fixedABCDQR(
-        A_test, B_test, C_test, D_test, Q, R
-    )
+    kf = make_KF(A_test, B_test, C_test, D_test, Q, R)
     x0_kf = np.concatenate([x0_est, np.array(P0).flatten(order="F")])
-    X_est, Y_est = make_n_step_simulation_function_from_model(kf, nT)(
+    _, X_est = make_n_step_simulation_function_from_model(kf, nT)(
         t, np.hstack([U, Y_meas]), x0_kf
     )
-    return np.array(X), np.array(X_est), np.array(Y_est)
+    return np.array(X)[shift : nT + shift], np.array(X_est)[:nT]
 
 
-def test_make_KF_tracks_plant_with_high_R_low_Q():
+@pytest.mark.parametrize("form", KF_FORMS)
+def test_make_KF_tracks_plant_with_high_R_low_Q(form):
     """With very high measurement noise variances (R) and low model
     error variances (Q), the filter ignores the noisy measurements and
     reproduces the plant states (when it starts from the correct
@@ -391,22 +482,18 @@ def test_make_KF_tracks_plant_with_high_R_low_Q():
     U = np.random.default_rng(1).normal(size=(nT, 1))
     x0 = np.array([1.0, -1.0])
     Q, R = 1e-8 * np.eye(2), 1e6 * np.eye(2)
-    X, X_est, Y_est = _simulate_plant_and_KF(
-        Q, R, Q, x0, x0, U, noise_sd=0.5
-    )
-    np.testing.assert_allclose(X_est[:, :2], X, atol=1e-9)
-    np.testing.assert_allclose(Y_est[:nT], X[1:], atol=1e-9)
+    X, X_est = _simulate_plant_and_KF(form, Q, R, Q, x0, x0, U, noise_sd=0.5)
+    np.testing.assert_allclose(X_est, X, atol=1e-9)
 
     # For comparison, a filter that trusts the measurements (low R)
     # and not the model (high Q) follows the measurement noise
     Q, R = np.eye(2), 0.01 * np.eye(2)
-    X, X_est, Y_est = _simulate_plant_and_KF(
-        Q, R, Q, x0, x0, U, noise_sd=0.5
-    )
-    assert np.abs(Y_est[:nT] - X[1:]).max() > 0.1
+    X, X_est = _simulate_plant_and_KF(form, Q, R, Q, x0, x0, U, noise_sd=0.5)
+    assert np.abs(X_est - X).max() > 0.1
 
 
-def test_make_KF_converges_with_low_R_high_Q():
+@pytest.mark.parametrize("form", KF_FORMS)
+def test_make_KF_converges_with_low_R_high_Q(form):
     """With low measurement noise variances (R) and high model error
     variances (Q), the filter converges to the correct state estimates
     from an incorrect initial state when the plant is at steady
@@ -418,28 +505,66 @@ def test_make_KF_converges_with_low_R_high_Q():
     U = np.full((nT, 1), u)
     x0_est = np.zeros(2)
     Q, R = np.eye(2), 0.01 * np.eye(2)
-    X, X_est, Y_est = _simulate_plant_and_KF(
-        Q, R, np.eye(2), x0, x0_est, U, noise_sd=0.0
+    X, X_est = _simulate_plant_and_KF(
+        form, Q, R, np.eye(2), x0, x0_est, U, noise_sd=0.0
     )
-    np.testing.assert_allclose(X, np.tile(x0, (nT + 1, 1)), atol=1e-12)
-    assert np.abs(Y_est[0] - X[1]).max() > 0.1
-    np.testing.assert_allclose(Y_est[10:nT], X[11:], atol=1e-9)
+    np.testing.assert_allclose(X, np.tile(x0, (nT, 1)), atol=1e-12)
+    assert np.abs(X_est[0] - X[0]).max() > 0.1
+    np.testing.assert_allclose(X_est[10:], X[10:], atol=1e-9)
 
     # For comparison, a filter that trusts the model (low Q) and not
     # the measurements (high R) does not correct its initial error
     Q, R = 1e-8 * np.eye(2), 1e6 * np.eye(2)
-    X, X_est, Y_est = _simulate_plant_and_KF(
-        Q, R, np.eye(2), x0, x0_est, U, noise_sd=0.0
+    X, X_est = _simulate_plant_and_KF(
+        form, Q, R, np.eye(2), x0, x0_est, U, noise_sd=0.0
     )
-    assert np.abs(Y_est[nT - 1] - X[nT]).max() > 1.0
+    assert np.abs(X_est[-1] - X[-1]).max() > 1.0
 
 
-def _connect_plant_KF_controller(controller):
+def test_make_KF_steady_state_variances():
+    """After many time steps, the variance outputs converge to those of
+    the steady-state Kalman filter: diag(P) where P(k+1|k) is the
+    solution to the discrete algebraic Riccati equation, and
+    P(k|k) = P - P C' (C P C' + R)^-1 C P."""
+    P_pred = scipy.linalg.solve_discrete_are(
+        A_test.T, C_test.T, Q_test, R_test
+    )
+    S = C_test @ P_pred @ C_test.T + R_test
+    P_filt = P_pred - P_pred @ C_test.T @ np.linalg.solve(S, C_test @ P_pred)
+    nT = 100
+    t = np.arange(nT + 1) * 1.0
+    UY = np.random.default_rng(2).normal(size=(nT, 3))
+    x0 = np.concatenate([np.zeros(2), np.eye(2).flatten(order="F")])
+    for make_KF, P in [
+        (make_KF_for_prediction_with_fixedABCDQR, P_pred),
+        (make_KF_for_filtering_with_fixedABCDQR, P_filt),
+    ]:
+        kf = make_KF(
+            A_test,
+            B_test,
+            C_test,
+            D_test,
+            Q_test,
+            R_test,
+            include_state_estimates=False,
+            include_state_variance=True,
+            include_output_variance=True,
+        )
+        sim = make_n_step_simulation_function_from_model(kf, nT)
+        _, Y = sim(t, UY, x0)
+        Y = np.array(Y)
+        np.testing.assert_allclose(Y[nT - 1, :2], np.diag(P), atol=1e-8)
+        np.testing.assert_allclose(
+            Y[nT - 1, 2:], np.diag(C_test @ P @ C_test.T), atol=1e-8
+        )
+
+
+def _connect_plant_KF_controller(make_KF, est_name, controller):
     """Connect the test system (plant), a Kalman filter, and a
     state-feedback controller in closed loop. The controller's inputs
     are the state estimates (xh1, xh2) and its output is uc."""
     A, B, C, D, Q, R = _test_matrices()
-    kf = make_KF_for_prediction_with_fixedABCDQR(A, B, C, D, Q, R)
+    kf = make_KF(A, B, C, D, Q, R)
     plant = StateSpaceModelDTFromABCD(
         A, B, C, D, input_names=["u"], output_names=["y1", "y2"]
     )
@@ -448,41 +573,62 @@ def _connect_plant_KF_controller(controller):
         "uk": "uc",
         "yk_1": "y1",
         "yk_2": "y2",
-        "xh1": "xkp1_est_1",
-        "xh2": "xkp1_est_2",
+        "xh1": f"{est_name}_1",
+        "xh2": f"{est_name}_2",
     }
     return connect_systems([plant, kf, controller], connections)
 
 
-def test_make_KF_closed_loop_controller_with_direct_transmission():
-    """The filter's outputs x_est(k+1|k) depend directly on u(k), so
-    a controller with direct transmission from its inputs to its
-    output u(k) (no delay, e.g. a PI regulator) forms an algebraic
-    loop."""
-    K = cas.DM([[0.3, 0.5]])
-    controller = StateSpaceModelDTFromABCD(
+def _controller_with_direct_transmission():
+    """u(k) = -K x_est, no delay (e.g. a PI regulator)."""
+    return StateSpaceModelDTFromABCD(
         cas.DM.zeros(0, 0),
         cas.DM.zeros(0, 2),
         cas.DM.zeros(1, 0),
-        -K,
+        cas.DM([[-0.3, -0.5]]),
         input_names=["xh1", "xh2"],
         output_names=["uc"],
     )
-    with pytest.raises(ValueError, match="Algebraic loop"):
-        _connect_plant_KF_controller(controller)
 
 
-def test_make_KF_closed_loop_controller_with_delay():
-    """A controller with a one-step delay between its inputs and its
-    output u(k) (e.g. MPC) does not form an algebraic loop."""
-    K = cas.DM([[0.3, 0.5]])
-    controller = StateSpaceModelDTFromABCD(
+def _controller_with_delay():
+    """u(k+1) = -K x_est(k), a one-step delay (e.g. MPC)."""
+    return StateSpaceModelDTFromABCD(
         cas.DM.zeros(1, 1),
-        -K,
+        cas.DM([[-0.3, -0.5]]),
         cas.DM(1.0),
         cas.DM.zeros(1, 2),
         input_names=["xh1", "xh2"],
         output_names=["uc"],
     )
-    system = _connect_plant_KF_controller(controller)
+
+
+def test_make_KF_for_prediction_closed_loop():
+    """The prediction form's outputs x_est(k+1|k) depend directly on
+    u(k), so a controller with direct transmission from its inputs to
+    its output u(k) forms an algebraic loop, but a controller with a
+    one-step delay does not."""
+    make_KF = make_KF_for_prediction_with_fixedABCDQR
+    with pytest.raises(ValueError, match="Algebraic loop"):
+        _connect_plant_KF_controller(
+            make_KF, "xkp1_est", _controller_with_direct_transmission()
+        )
+    system = _connect_plant_KF_controller(
+        make_KF, "xkp1_est", _controller_with_delay()
+    )
+    assert (system.n, system.nu) == (2 + 6 + 1, 0)
+
+
+def test_make_KF_for_filtering_closed_loop():
+    """The filtering form's outputs x_est(k|k) don't depend directly on
+    u(k) when D = 0, so a controller with direct transmission doesn't
+    form an algebraic loop."""
+    make_KF = make_KF_for_filtering_with_fixedABCDQR
+    system = _connect_plant_KF_controller(
+        make_KF, "xk_est", _controller_with_direct_transmission()
+    )
+    assert (system.n, system.nu) == (2 + 6, 0)
+    system = _connect_plant_KF_controller(
+        make_KF, "xk_est", _controller_with_delay()
+    )
     assert (system.n, system.nu) == (2 + 6 + 1, 0)

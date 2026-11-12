@@ -49,17 +49,17 @@ from cas_models.param_utils import (
     make_list_of_enumerated_names,
 )
 from cas_models.pickle_utils import getstate, setstate
+from cas_models.recipes import record_subclass_init
 from cas_models.transformations import (
     connect_systems_in_parallel,
     connect_systems_in_series,
     negate_system,
 )
-from cas_models.recipes import record_subclass_init
 from cas_models.validation import (
     as_sx_matrix,
-    check_system_dimensions,
     as_sx_scalar,
     as_sx_vector,
+    check_system_dimensions,
     validate_casadi_function_dims,
 )
 from cas_models.yaml_utils import (
