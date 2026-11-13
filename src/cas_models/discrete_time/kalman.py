@@ -20,11 +20,22 @@ make_KF_for_prediction_with_fixedABCDQR
     StateSpaceModelDT Kalman filter (prediction form) outputting x_est(k+1|k).
 make_KF_for_filtering_with_fixedABCDQR
     StateSpaceModelDT Kalman filter (filtering form) outputting x_est(k|k).
+steady_state_kf_gain
+    Steady-state correction gain Kf and error covariances (solves the DARE).
+make_steady_state_KF_for_prediction_with_fixedABCDQR
+    Fixed-gain Kalman filter (prediction form) as a linear ABCD system.
+make_steady_state_KF_for_filtering_with_fixedABCDQR
+    Fixed-gain Kalman filter (filtering form) as a linear ABCD system.
 """
 
 import casadi as cas
+import control
+import numpy as np
 
-from cas_models.discrete_time.models import StateSpaceModelDT
+from cas_models.discrete_time.models import (
+    StateSpaceModelDT,
+    StateSpaceModelDTFromABCD,
+)
 from cas_models.param_utils import make_list_of_enumerated_names
 from cas_models.validation import (
     as_casadi_matrix,
@@ -519,5 +530,285 @@ def make_KF_for_filtering_with_fixedABCDQR(
         if included
     ]
     return _make_KF_with_fixedABCDQR(
+        A, B, C, D, Q, R, outputs, dt=dt, name=name
+    )
+
+
+def _as_numeric_matrix(value, name):
+    """A numerical matrix argument as a 2-D NumPy array."""
+    value = as_casadi_matrix(value, name)
+    if not isinstance(value, cas.DM):
+        raise TypeError(f"{name}: give a numerical matrix, not a symbolic one")
+    return value.full()
+
+
+def steady_state_kf_gain(A, C, Q, R):
+    """Compute the correction gain and error covariances of the
+    steady-state Kalman filter, by solving the discrete algebraic
+    Riccati equation with control.dare.
+
+    S = C P C' + R
+    Kf = P C' S^-1
+    P(k|k) = P - Kf S Kf'
+
+    where P = P(k+1|k) = P(k|k-1) is the solution of
+
+    P = A P A' - A P C' (C P C' + R)^-1 C P A' + Q
+
+    Note: control.dare(A', C', Q, R) returns X = P and G = Kp', where
+    Kp = A Kf is the correction gain of the Kalman filter in prediction
+    form, not Kf, the correction gain in filtering form. Likewise,
+    control.dlqe(A, I, C, Q, R) returns Kp, whereas MATLAB's dlqe
+    returns Kf.
+
+    Arguments:
+    A, C : matrices
+        Discrete-time system model matrices (numerical).
+    Q : (n, n) matrix
+        State error covariance.
+    R : (ny, ny) matrix
+        Measurement error covariance.
+
+    Returns:
+    Kf : (n, ny) array
+        Correction gain of the Kalman filter in filtering form (the
+        correction gain in prediction form is Kp = A Kf).
+    Pkp1 : (n, n) array
+        Covariance of state prediction error, P(k+1|k).
+    Pk : (n, n) array
+        Covariance of state estimation error, P(k|k).
+    Sk : (ny, ny) array
+        Covariance of output prediction error, S(k).
+    """
+    A, C, Q, R = (
+        _as_numeric_matrix(value, name)
+        for value, name in zip((A, C, Q, R), "ACQR")
+    )
+    Pkp1, _, _ = control.dare(A.T, C.T, Q, R)
+    Sk = C @ Pkp1 @ C.T + R
+    Kf = np.linalg.solve(Sk.T, (Pkp1 @ C.T).T).T
+    Pk = Pkp1 - Kf @ Sk @ Kf.T
+    Pk = (Pk + Pk.T) / 2
+    return Kf, Pkp1, Pk, Sk
+
+
+def _make_steady_state_KF_with_fixedABCDQR(
+    A, B, C, D, Q, R, outputs, dt=None, name="KF"
+):
+    """Make a StateSpaceModelDTFromABCD system that simulates a
+    steady-state Kalman filter (fixed gain). Used by
+    make_steady_state_KF_for_prediction_with_fixedABCDQR and
+    make_steady_state_KF_for_filtering_with_fixedABCDQR (see their
+    docstrings), which differ only in their outputs.
+
+    outputs is a list of the names of the output signals, each a vector
+    named <name>_1, <name>_2, ...:
+        "xk_est" : x_est(k|k)
+        "yk_est" : y_est(k|k) = C x_est(k|k) + D u(k)
+        "xkp1_est" : x_est(k+1|k)
+        "ykp1_est" : y_est(k+1|k) = C x_est(k+1|k) (D = 0 only)
+    """
+    A, B, C, D, Q, R = (
+        _as_numeric_matrix(value, name)
+        for value, name in zip((A, B, C, D, Q, R), "ABCDQR")
+    )
+    n, nu, ny = check_system_dimensions(A, B, C, D)
+    if "ykp1_est" in outputs and np.any(D != 0):
+        raise ValueError(
+            "y_est(k+1|k) depends on u(k+1), which isn't known at time k, "
+            "unless D = 0"
+        )
+    Kf, _, _, _ = steady_state_kf_gain(A, C, Q, R)
+    Kp = A @ Kf  # correction gain (prediction form)
+
+    # Filter states x_est(k|k-1), inputs [u(k); y(k)]:
+    # x_est(k|k) = (I - Kf C) x_est(k|k-1) + [-Kf D, Kf] [u(k); y(k)]
+    # x_est(k+1|k) = (A - Kp C) x_est(k|k-1) + [B - Kp D, Kp] [u(k); y(k)]
+    C_xk = np.eye(n) - Kf @ C
+    D_xk = np.hstack([-Kf @ D, Kf])
+    C_xkp1 = A - Kp @ C
+    D_xkp1 = np.hstack([B - Kp @ D, Kp])
+    D_u = np.hstack([D, np.zeros((ny, ny))])  # D u(k)
+    signals = {
+        "xk_est": (C_xk, D_xk),
+        "yk_est": (C @ C_xk, C @ D_xk + D_u),
+        "xkp1_est": (C_xkp1, D_xkp1),
+        "ykp1_est": (C @ C_xkp1, C @ D_xkp1),
+    }
+    C_kf = np.vstack([np.zeros((0, n))] + [signals[s][0] for s in outputs])
+    D_kf = np.vstack(
+        [np.zeros((0, nu + ny))] + [signals[s][1] for s in outputs]
+    )
+    output_names = []
+    for signal in outputs:
+        output_names += make_list_of_enumerated_names(
+            signal, signals[signal][0].shape[0], sep="_"
+        )
+
+    return StateSpaceModelDTFromABCD(
+        C_xkp1,
+        D_xkp1,
+        C_kf,
+        D_kf,
+        dt=dt,
+        name=name,
+        input_names=(
+            make_list_of_enumerated_names("uk", nu, sep="_")
+            + make_list_of_enumerated_names("yk", ny, sep="_")
+        ),
+        state_names=make_list_of_enumerated_names("xkp1_est", n, sep="_"),
+        output_names=output_names,
+    )
+
+
+def make_steady_state_KF_for_prediction_with_fixedABCDQR(
+    A,
+    B,
+    C,
+    D,
+    Q,
+    R,
+    dt=None,
+    name="KF",
+    include_state_estimates=True,
+    include_output_estimates=False,
+):
+    """Make a StateSpaceModelDTFromABCD system that simulates a
+    steady-state Kalman filter (fixed correction gain Kf, see
+    steady_state_kf_gain) in prediction form, which estimates the states
+    at the next time instant, x_est(k+1|k), given the data up to time k.
+
+    The model of the plant is the linear system
+
+        x(k+1) = A x(k) + B u(k) + w(k),  w(k) ~ N(0, Q)
+          y(k) = C x(k) + D u(k) + v(k),  v(k) ~ N(0, R)
+
+    with fixed A, B, C, D, Q, and R (numerical).
+
+    Filter system (a linear system, with Kp = A Kf, the correction
+    gain in prediction form):
+        inputs: [u(k); y(k)], names uk..., yk...
+        states: x_est(k|k-1), names xkp1_est...
+        state transition:
+            x_est(k+1|k) = (A - Kp C) x_est(k|k-1)
+                           + (B - Kp D) u(k) + Kp y(k)
+        outputs (each optional, in this order):
+            x_est(k+1|k), names xkp1_est...
+            y_est(k+1|k) = C x_est(k+1|k), names ykp1_est...
+
+    The outputs depend directly on u(k) and y(k) (direct feedthrough),
+    as in make_KF_for_prediction_with_fixedABCDQR (see its docstring
+    for which controllers it can be connected to). It gives the same
+    estimates as that filter when the latter's initial error
+    covariance P(0|-1) is the steady-state P(k+1|k).
+
+    Arguments:
+    A, B, C, D : matrices
+        Discrete-time system model matrices.
+    Q : (n, n) matrix
+        State error covariance.
+    R : (ny, ny) matrix
+        Measurement error covariance.
+    dt : float, optional
+        Sample time.
+    name : str, default "KF"
+        Name of the system.
+    include_state_estimates : bool, default True
+        Include x_est(k+1|k) in the outputs.
+    include_output_estimates : bool, default False
+        Include y_est(k+1|k) = C x_est(k+1|k) in the outputs. Requires
+        D = 0, since y_est(k+1|k) would otherwise depend on u(k+1).
+
+    Returns:
+    StateSpaceModelDTFromABCD
+
+    Raises:
+    ValueError: if include_output_estimates is True and D isn't zero.
+    """
+    outputs = [
+        signal
+        for signal, included in [
+            ("xkp1_est", include_state_estimates),
+            ("ykp1_est", include_output_estimates),
+        ]
+        if included
+    ]
+    return _make_steady_state_KF_with_fixedABCDQR(
+        A, B, C, D, Q, R, outputs, dt=dt, name=name
+    )
+
+
+def make_steady_state_KF_for_filtering_with_fixedABCDQR(
+    A,
+    B,
+    C,
+    D,
+    Q,
+    R,
+    dt=None,
+    name="KF",
+    include_state_estimates=True,
+    include_output_estimates=False,
+):
+    """Make a StateSpaceModelDTFromABCD system that simulates a
+    steady-state Kalman filter (fixed correction gain Kf, see
+    steady_state_kf_gain) in filtering form, which estimates the states
+    at the current time instant, x_est(k|k), given the data up to time
+    k.
+
+    The model of the plant is the linear system
+
+        x(k+1) = A x(k) + B u(k) + w(k),  w(k) ~ N(0, Q)
+          y(k) = C x(k) + D u(k) + v(k),  v(k) ~ N(0, R)
+
+    with fixed A, B, C, D, Q, and R (numerical).
+
+    Filter system (a linear system, with Kp = A Kf, the correction
+    gain in prediction form):
+        inputs: [u(k); y(k)], names uk..., yk...
+        states: x_est(k|k-1), names xkp1_est...
+        state transition:
+            x_est(k+1|k) = (A - Kp C) x_est(k|k-1)
+                           + (B - Kp D) u(k) + Kp y(k)
+        outputs (each optional, in this order):
+            x_est(k|k) = (I - Kf C) x_est(k|k-1) - Kf D u(k) + Kf y(k),
+                names xk_est...
+            y_est(k|k) = C x_est(k|k) + D u(k), names yk_est...
+
+    The outputs depend directly on y(k), and on u(k) only if D isn't
+    zero (direct feedthrough), as in
+    make_KF_for_filtering_with_fixedABCDQR (see its docstring for which
+    controllers it can be connected to). It gives the same estimates as
+    that filter when the latter's initial error covariance P(0|-1) is
+    the steady-state P(k+1|k).
+
+    Arguments:
+    A, B, C, D : matrices
+        Discrete-time system model matrices.
+    Q : (n, n) matrix
+        State error covariance.
+    R : (ny, ny) matrix
+        Measurement error covariance.
+    dt : float, optional
+        Sample time.
+    name : str, default "KF"
+        Name of the system.
+    include_state_estimates : bool, default True
+        Include x_est(k|k) in the outputs.
+    include_output_estimates : bool, default False
+        Include y_est(k|k) in the outputs.
+
+    Returns:
+    StateSpaceModelDTFromABCD
+    """
+    outputs = [
+        signal
+        for signal, included in [
+            ("xk_est", include_state_estimates),
+            ("yk_est", include_output_estimates),
+        ]
+        if included
+    ]
+    return _make_steady_state_KF_with_fixedABCDQR(
         A, B, C, D, Q, R, outputs, dt=dt, name=name
     )

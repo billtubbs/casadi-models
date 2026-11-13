@@ -1,6 +1,7 @@
 """Unit tests for src/cas_models/discrete_time/kalman.py module"""
 
 import casadi as cas
+import control
 import numpy as np
 import pytest
 import scipy
@@ -13,6 +14,9 @@ from cas_models.discrete_time.kalman import (
     linear_model_state_transition,
     make_KF_for_filtering_with_fixedABCDQR,
     make_KF_for_prediction_with_fixedABCDQR,
+    make_steady_state_KF_for_filtering_with_fixedABCDQR,
+    make_steady_state_KF_for_prediction_with_fixedABCDQR,
+    steady_state_kf_gain,
 )
 from cas_models.discrete_time.models import StateSpaceModelDTFromABCD
 from cas_models.discrete_time.simulate import (
@@ -632,3 +636,220 @@ def test_make_KF_for_filtering_closed_loop():
         make_KF, "xk_est", _controller_with_delay()
     )
     assert (system.n, system.nu) == (2 + 6 + 1, 0)
+
+
+def test_steady_state_kf_gain():
+    """The gain and covariances are those the dynamic filter converges
+    to, and P(k+1|k) solves the discrete algebraic Riccati equation."""
+    Kf, Pkp1, Pk, Sk = steady_state_kf_gain(A_test, C_test, Q_test, R_test)
+    for value, shape in zip((Kf, Pkp1, Pk, Sk), [(2, 2)] * 4):
+        assert isinstance(value, np.ndarray)
+        assert value.shape == shape
+
+    A, B, C, D, Q, R = _test_matrices()
+    xkp1_est, Pkp1_dyn = cas.DM.zeros(2), cas.DM.eye(2)
+    for k in range(500):
+        results = kf_update(
+            A, B, C, D, xkp1_est, Pkp1_dyn, Q, R, [0.0, 0.0], [0.0]
+        )
+        xkp1_est, Pkp1_dyn = results[4], results[5]
+    np.testing.assert_allclose(Kf, results[7], atol=1e-10)
+    np.testing.assert_allclose(Pkp1, Pkp1_dyn, atol=1e-10)
+    np.testing.assert_allclose(Pk, results[1], atol=1e-10)
+    np.testing.assert_allclose(Sk, results[3], atol=1e-10)
+
+    P_ss = scipy.linalg.solve_discrete_are(A_test.T, C_test.T, Q_test, R_test)
+    np.testing.assert_allclose(Pkp1, P_ss)
+
+    # python-control's dlqe returns the correction gain in prediction
+    # form, Kp = A Kf (MATLAB's dlqe returns Kf)
+    Kp, P_dlqe, _ = control.dlqe(A_test, np.eye(2), C_test, Q_test, R_test)
+    np.testing.assert_allclose(Kp, A_test @ Kf)
+    np.testing.assert_allclose(P_dlqe, Pkp1)
+
+    # CasADi DM arguments are accepted, symbolic ones aren't
+    Kf_dm = steady_state_kf_gain(A, C, Q, R)[0]
+    np.testing.assert_allclose(Kf_dm, Kf)
+    with pytest.raises(TypeError, match="A: give a numerical matrix"):
+        steady_state_kf_gain(cas.SX.sym("A", 2, 2), C, Q, R)
+
+
+# Reference values from a MATLAB unit test of the steady-state gain
+# (computed with MATLAB's dlqe, whose gain output is Kf), rounded to
+# 4 decimals: (A, C, Q, R, P(k+1|k), Kf, Kp = A Kf)
+MATLAB_KF_SS_EXAMPLES = {
+    "course notes exercise 12.3": (
+        [[0.8]],
+        [[0.5]],
+        [[0.3]],
+        [[1.1]],
+        [[0.6741]],
+        None,
+        [[0.2126]],
+    ),
+    "adapted from MATLAB dlqe documentation": (
+        [[-0.9, 0.7], [-0.3, 0.1]],
+        [[1.0, 1.0]],
+        [[1.0, 0.0], [0.0, 3.0]],
+        [[0.1]],
+        [[4.7687, 0.9438], [0.9438, 3.2369]],
+        [[0.5716], [0.4184]],
+        [[-0.2216], [-0.1297]],
+    ),
+    "Mathworks answer": (
+        [[0.7, 1.0], [0.0, 1.0]],
+        [[0.3, 0.0]],
+        [[0.0001, 0.0], [0.0, 0.01]],
+        [[0.01]],
+        [[0.0857, 0.0444], [0.0444, 0.0368]],
+        [[1.4515], [0.7514]],
+        None,
+    ),
+}
+
+
+@pytest.mark.parametrize("example", MATLAB_KF_SS_EXAMPLES)
+def test_steady_state_kf_gain_matlab_examples(example):
+    A, C, Q, R, P_ref, Kf_ref, Kp_ref = MATLAB_KF_SS_EXAMPLES[example]
+    A = np.array(A)
+    Kf, Pkp1, _, _ = steady_state_kf_gain(A, C, Q, R)
+    np.testing.assert_allclose(Pkp1, P_ref, atol=5e-5)
+    if Kf_ref is not None:
+        np.testing.assert_allclose(Kf, Kf_ref, atol=5e-5)
+    if Kp_ref is not None:
+        np.testing.assert_allclose(A @ Kf, Kp_ref, atol=5e-5)
+
+
+STEADY_STATE_KF_FORMS = {
+    # form: (steady-state KF constructor, dynamic KF constructor,
+    # output names prefix)
+    "prediction": (
+        make_steady_state_KF_for_prediction_with_fixedABCDQR,
+        make_KF_for_prediction_with_fixedABCDQR,
+        "kp1_est",
+    ),
+    "filtering": (
+        make_steady_state_KF_for_filtering_with_fixedABCDQR,
+        make_KF_for_filtering_with_fixedABCDQR,
+        "k_est",
+    ),
+}
+
+
+@pytest.mark.parametrize("form", STEADY_STATE_KF_FORMS)
+def test_make_steady_state_KF(form):
+    make_KF_ss, _, est = STEADY_STATE_KF_FORMS[form]
+    A, B, C, D, Q, R = _test_matrices()
+    kf = make_KF_ss(A, B, C, D, Q, R, dt=0.5, include_output_estimates=True)
+    assert isinstance(kf, StateSpaceModelDTFromABCD)
+    assert kf.name == "KF"
+    assert kf.dt == 0.5
+    assert (kf.n, kf.nu, kf.ny) == (2, 3, 4)
+    assert kf.input_names == ["uk", "yk_1", "yk_2"]
+    assert kf.state_names == ["xkp1_est_1", "xkp1_est_2"]
+    assert kf.output_names == [
+        f"x{est}_1",
+        f"x{est}_2",
+        f"y{est}_1",
+        f"y{est}_2",
+    ]
+
+    # One time step compared to kf_update with the steady-state P
+    Kf, Pkp1, _, _ = steady_state_kf_gain(A, C, Q, R)
+    xkp1_est = cas.DM([0.1, -0.2])
+    uk, yk = cas.DM([0.7]), cas.DM([0.4, -0.3])
+    expected = kf_update(A, B, C, D, xkp1_est, cas.DM(Pkp1), Q, R, yk, uk)
+    np.testing.assert_allclose(
+        kf.F(0.0, xkp1_est, cas.vertcat(uk, yk)), expected[4]
+    )
+    y = kf.H(0.0, xkp1_est, cas.vertcat(uk, yk))
+    if form == "prediction":
+        np.testing.assert_allclose(y[:2], expected[4])
+        np.testing.assert_allclose(y[2:], C @ expected[4])
+    else:
+        np.testing.assert_allclose(y[:2], expected[0])
+        np.testing.assert_allclose(y[2:], expected[2])
+
+    # Default outputs
+    kf = make_KF_ss(A, B, C, D, Q, R)
+    assert kf.output_names == [f"x{est}_1", f"x{est}_2"]
+
+    # NumPy arrays are accepted
+    kf_np = make_KF_ss(A_test, B_test, C_test, D_test, Q_test, R_test)
+    np.testing.assert_allclose(
+        kf_np.H(0.0, xkp1_est, cas.vertcat(uk, yk)), y[:2]
+    )
+
+
+@pytest.mark.parametrize("form", STEADY_STATE_KF_FORMS)
+def test_make_steady_state_KF_with_D(form):
+    """With D non-zero, the filtering form's outputs depend on u(k) and
+    agree with kf_update, and the prediction form can't output
+    y_est(k+1|k)."""
+    make_KF_ss, _, _ = STEADY_STATE_KF_FORMS[form]
+    A, B, C, _, Q, R = _test_matrices()
+    D = cas.DM([[0.0], [1.0]])
+    if form == "prediction":
+        with pytest.raises(ValueError, match="unless D = 0"):
+            make_KF_ss(A, B, C, D, Q, R, include_output_estimates=True)
+        kf = make_KF_ss(A, B, C, D, Q, R)
+        i_est = 4
+    else:
+        kf = make_KF_ss(A, B, C, D, Q, R, include_output_estimates=True)
+        i_est = 0
+    _, Pkp1, _, _ = steady_state_kf_gain(A, C, Q, R)
+    xkp1_est = cas.DM([0.1, -0.2])
+    uk, yk = cas.DM([0.7]), cas.DM([0.4, -0.3])
+    expected = kf_update(A, B, C, D, xkp1_est, cas.DM(Pkp1), Q, R, yk, uk)
+    np.testing.assert_allclose(
+        kf.F(0.0, xkp1_est, cas.vertcat(uk, yk)), expected[4]
+    )
+    y = kf.H(0.0, xkp1_est, cas.vertcat(uk, yk))
+    np.testing.assert_allclose(y[:2], expected[i_est])
+    if form == "filtering":
+        np.testing.assert_allclose(y[2:], expected[2])
+
+
+@pytest.mark.parametrize("form", STEADY_STATE_KF_FORMS)
+def test_make_steady_state_KF_matches_dynamic_KF(form):
+    """Over many time steps, the steady-state filter gives the same
+    estimates as the dynamic filter with the initial error covariance
+    P(0|-1) set to the steady-state P(k+1|k)."""
+    make_KF_ss, make_KF, _ = STEADY_STATE_KF_FORMS[form]
+    A, B, C, D, Q, R = _test_matrices()
+    _, Pkp1, _, _ = steady_state_kf_gain(A, C, Q, R)
+    nT = 50
+    t = np.arange(nT + 1) * 1.0
+    UY = np.random.default_rng(3).normal(size=(nT, 3))
+    x0_est = np.array([0.5, -0.5])
+
+    kf_ss = make_KF_ss(A, B, C, D, Q, R, include_output_estimates=True)
+    X_ss, Y_ss = make_n_step_simulation_function_from_model(kf_ss, nT)(
+        t, UY, x0_est
+    )
+    kf = make_KF(A, B, C, D, Q, R, include_output_estimates=True)
+    x0 = np.concatenate([x0_est, Pkp1.flatten(order="F")])
+    X, Y = make_n_step_simulation_function_from_model(kf, nT)(t, UY, x0)
+    np.testing.assert_allclose(X_ss, np.array(X)[:, :2], atol=1e-10)
+    np.testing.assert_allclose(Y_ss, Y, atol=1e-10)
+
+
+def test_make_steady_state_KF_closed_loop():
+    """Feedthrough as in the dynamic filters: the prediction form forms
+    an algebraic loop with a controller with direct transmission, the
+    filtering form doesn't."""
+    make_KF = make_steady_state_KF_for_prediction_with_fixedABCDQR
+    with pytest.raises(ValueError, match="Algebraic loop"):
+        _connect_plant_KF_controller(
+            make_KF, "xkp1_est", _controller_with_direct_transmission()
+        )
+    system = _connect_plant_KF_controller(
+        make_KF, "xkp1_est", _controller_with_delay()
+    )
+    assert (system.n, system.nu) == (2 + 2 + 1, 0)
+
+    make_KF = make_steady_state_KF_for_filtering_with_fixedABCDQR
+    system = _connect_plant_KF_controller(
+        make_KF, "xk_est", _controller_with_direct_transmission()
+    )
+    assert (system.n, system.nu) == (2 + 2, 0)
