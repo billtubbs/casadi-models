@@ -31,6 +31,7 @@ from cas_models.continuous_time.regulators import (
     SSModelCTPIInt,
 )
 from cas_models.discrete_time.models import (
+    SSModelDTDirectTransmission,
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
     StateSpaceModelDTDelay,
@@ -838,6 +839,9 @@ MODEL_FILES = {
         D=[[1.0, 0.0], [0.5, 2.0]]
     ),
     "ct_pi_feedback": ct_pi_feedback,
+    "dt_direct": lambda: SSModelDTDirectTransmission(
+        D=[[1.0, 1.0, 0.0], [0.0, 0.5, 2.0]], dt=2.0
+    ),
     "dt_arx_symbolic": lambda: StateSpaceModelDTARXSISO(na=2, nb=2),
     "dt_arx_fixed": lambda: StateSpaceModelDTARXSISO(
         A=cas.DM([-1.62, 0.65]), B=cas.DM([0.012, 0.009])

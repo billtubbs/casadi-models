@@ -9,6 +9,7 @@ import pytest
 
 from cas_models.continuous_time.models import StateSpaceModelCT
 from cas_models.discrete_time.models import (
+    SSModelDTDirectTransmission,
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
     StateSpaceModelDTDelay,
@@ -20,6 +21,7 @@ from cas_models.discrete_time.models import (
 from cas_models.transformations import (
     connect_systems,
     connect_systems_in_parallel,
+    connect_systems_in_series,
     set_param_values,
 )
 from cas_models.validation import is_ss_ct, is_ss_dt
@@ -1541,3 +1543,64 @@ def test_StateSpaceModelDTARXSISO_real_poles():
     ):
         with pytest.raises(AssertionError, match="real_poles needs na"):
             StateSpaceModelDTARXSISO(**({"nb": 1} | kwargs))
+
+
+def test_SSModelDTDirectTransmission():
+    # Example 1: SISO static gain = 1
+    model = SSModelDTDirectTransmission(nu=1)
+
+    assert str(model) == (
+        "SSModelDTDirectTransmission("
+        "F=Function(F:(t,xk[0],uk)->(xkp1[0]) SXFunction), "
+        "H=Function(H:(t,xk[0],uk)->(yk) SXFunction), "
+        "n=0, nu=1, ny=1, dt=None, params={}, name=None, "
+        "input_names=['u'], state_names=[], output_names=['y']"
+        ")"
+    )
+    assert np.array_equal(
+        model.F(0.0, cas.DM.zeros(0), 1.1).full(), np.empty((0, 1))
+    )
+    assert np.array_equal(
+        model.H(0.0, cas.DM.zeros(0), 1.1).full(), np.array([[1.1]])
+    )
+
+    # Example 2: 2x2 static gains, with a sample time
+    D = np.array([[1.0, -0.5], [-0.25, 2.0]])
+    model = SSModelDTDirectTransmission(D=D, dt=2.0)
+    assert (model.n, model.nu, model.ny, model.dt) == (0, 2, 2, 2.0)
+    assert model.input_names == ["u1", "u2"]
+    assert model.output_names == ["y1", "y2"]
+    u = np.array([-1.0, 2.0]).reshape((-1, 1))
+    x = np.empty((0, 1))
+    assert np.array_equal(model.F(0.0, x, u).full(), np.empty((0, 1)))
+    assert np.array_equal(
+        model.H(0.0, x, u).full(), np.array([[-2.0], [4.25]])
+    )
+
+    # Example 3: a symbolic gain is a parameter
+    K = cas.SX.sym("K")
+    model = SSModelDTDirectTransmission(D=K)
+    assert list(model.params) == ["K"]
+    assert np.array_equal(
+        model.H(0.0, cas.DM.zeros(0), 3.0, 0.5).full(), np.array([[1.5]])
+    )
+
+    # Neither D nor nu
+    with pytest.raises(ValueError):
+        SSModelDTDirectTransmission()
+
+    # In series before a model: sums its inputs (as fit_models' base
+    # model in ffd-ds-sim does)
+    gain = SSModelDTDirectTransmission(
+        D=[[1.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dt=1.0, input_names=["a", "b", "c"],
+        output_names=["ab", "c"]
+    )
+    plant = StateSpaceModelDTFromABCD(
+        0.5 * np.eye(2), np.eye(2), np.eye(2), np.zeros((2, 2)), dt=1.0,
+        input_names=["ab", "c"], output_names=["y1", "y2"]
+    )
+    combined = connect_systems_in_series(
+        [gain, plant], input_names=["a", "b", "c"], output_names=["y1", "y2"]
+    )
+    x, u = cas.DM([1.0, 2.0]), cas.DM([1.0, 2.0, 3.0])
+    assert np.array_equal(combined.F(0.0, x, u).full().ravel(), [3.5, 4.0])
