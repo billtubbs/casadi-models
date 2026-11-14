@@ -10,6 +10,8 @@ StateSpaceModelDTFromCT
     Discrete-time model obtained by discretising a CT model (CasADi integrator).
 StateSpaceModelDTFromABCD
     Discrete-time linear model from matrices A, B, C, D.
+SSModelDTDirectTransmission
+    Static gain (no dynamics): y(k) = D * u(k).
 StateSpaceModelDTSISO
     Base class for SISO discrete-time models.
 StateSpaceModelDTTFSISO
@@ -583,6 +585,48 @@ class StateSpaceModelDTFromABCD(StateSpaceModelDT):
             name=name,
             input_names=input_names,
             state_names=state_names,
+            output_names=output_names,
+        )
+
+
+class SSModelDTDirectTransmission(StateSpaceModelDTFromABCD):
+    def __init__(
+        self,
+        nu=None,
+        D=None,
+        dt=None,
+        name=None,
+        input_names=None,
+        output_names=None,
+    ):
+        """A discrete-time linear state-space model with no dynamics
+        (no states): y(k) = D u(k), the discrete-time
+        SSModelCTDirectTransmission. Either D or nu must be specified.
+        If the D matrix is not provided, it is set to an identity matrix
+        of shape (nu, nu). D may contain SX symbols (the model's
+        parameters). dt is the sample time (None: unspecified).
+
+        Example (a gain matrix summing inputs, in series with another
+        model, e.g. connect_systems_in_series([gain, model])):
+            >>> gain = SSModelDTDirectTransmission(D=[[1.0, 1.0, 0.0]])
+        """
+        if D is None:
+            if nu is None:
+                raise ValueError("give D or nu")
+            D = cas.SX.eye(nu)
+        else:
+            D = as_sx_matrix(D, "D")
+        ny, nu = D.shape
+        n = 0  # no dynamics
+        super().__init__(
+            cas.SX.zeros(n, n),
+            cas.SX.zeros(n, nu),
+            cas.SX.zeros(ny, n),
+            D,
+            dt=dt,
+            name=name,
+            input_names=input_names,
+            state_names=None,
             output_names=output_names,
         )
 

@@ -36,6 +36,7 @@ from cas_models.continuous_time.regulators import (
     SSModelCTPIInt,
 )
 from cas_models.discrete_time.models import (
+    SSModelDTDirectTransmission,
     StateSpaceModelDT,
     StateSpaceModelDTARXSISO,
     StateSpaceModelDTDelay,
@@ -242,6 +243,9 @@ MODELS = {
     "CT sum": lambda: SSModelCTLinearFOSISO() + SSModelCTLinearFOSISO(K=2),
     # Discrete time
     "DT custom": dt_custom,
+    "DT direct transmission": lambda: SSModelDTDirectTransmission(
+        D=cas.DM([[1.0, 0.0], [0.5, 2.0]]), dt=1.0
+    ),
     "DT from CT RK4": lambda: StateSpaceModelDTFromCTRK4(
         SSModelCTLinearO2SISO(), 1.0
     ),
