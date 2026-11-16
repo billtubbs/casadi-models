@@ -687,7 +687,9 @@ def tf_to_ss_obs_np(num, den):
             [...            ...        ]
             [0   0   ...  1   -a_1    ]
 
-    B = [b_n, b_{n-1}, ..., b_1]^T, C = [0, 0, ..., 0, 1], D = b_0
+    B = [b_n - a_n b_0, ..., b_1 - a_1 b_0]^T, C = [0, 0, ..., 0, 1],
+    D = b_0 (with b_0 = 0, i.e. a strictly proper transfer function,
+    B = [b_n, ..., b_1]^T and D = 0)
 
     Args:
         num: Numerator polynomial coefficients in descending degree order
@@ -716,7 +718,9 @@ def tf_to_ss_obs_np(num, den):
 
     # Extract coefficients (skip leading coefficient which should be 1/b_0)
     a_coeffs = den[1:]  # [a_1, a_2, ..., a_n]
-    b_coeffs = num[1:]  # [b_1, b_2, ..., b_n] (skip b_0 for proper systems)
+    # [b_1 - a_1 b_0, ..., b_n - a_n b_0]: what remains of the numerator
+    # once the direct transmission b_0 is taken out
+    b_coeffs = num[1:] - num[0] * a_coeffs
 
     # Construct A matrix - observable canonical form
     A = np.zeros((n, n))
@@ -726,15 +730,15 @@ def tf_to_ss_obs_np(num, den):
     # Last column contains NEGATIVE denominator coefficients in reverse order
     A[:, n - 1] = -a_coeffs[::-1]
 
-    # Construct B matrix - numerator coefficients in reverse order
+    # Construct B matrix - those coefficients in reverse order
     B = b_coeffs[::-1].reshape(n, 1)
 
     # Construct C matrix - output from last state
     C = np.zeros((1, n))
     C[0, n - 1] = 1.0
 
-    # D matrix - direct feedthrough (zero for proper systems)
-    D = np.array([[num[0] if len(num) == len(den) else 0.0]])
+    # D matrix - direct feedthrough (zero for strictly proper systems)
+    D = np.array([[num[0]]])
 
     return A, B, C, D
 
@@ -833,7 +837,9 @@ def tf_to_ss_obs_cas(num, den):
             [...            ...        ]
             [0   0   ...  1   -a_1    ]
 
-    B = [b_n, b_{n-1}, ..., b_1]^T, C = [0, 0, ..., 0, 1], D = b_0
+    B = [b_n - a_n b_0, ..., b_1 - a_1 b_0]^T, C = [0, 0, ..., 0, 1],
+    D = b_0 (with b_0 = 0, i.e. a strictly proper transfer function,
+    B = [b_n, ..., b_1]^T and D = 0)
 
     Args:
         num: Numerator polynomial coefficients in descending degree order
@@ -863,7 +869,9 @@ def tf_to_ss_obs_cas(num, den):
 
     # Extract coefficients (skip leading coefficient which should be 1)
     a_coeffs = den_normalized[1:]  # [a_1, a_2, ..., a_n]
-    b_coeffs = num_padded[1:]  # [b_1, b_2, ..., b_n]
+    # [b_1 - a_1 b_0, ..., b_n - a_n b_0]: what remains of the numerator
+    # once the direct transmission b_0 is taken out
+    b_coeffs = num_padded[1:] - num_padded[0] * a_coeffs
 
     # Construct A matrix - observable canonical form
     A = cas.SX.zeros(n, n)
@@ -874,7 +882,7 @@ def tf_to_ss_obs_cas(num, den):
     for i in range(n):
         A[i, n - 1] = -a_coeffs[n - 1 - i]
 
-    # Construct B matrix - numerator coefficients in reverse order
+    # Construct B matrix - those coefficients in reverse order
     B = cas.SX.zeros(n, 1)
     for i in range(n):
         B[i] = b_coeffs[n - 1 - i]
@@ -883,7 +891,7 @@ def tf_to_ss_obs_cas(num, den):
     C = cas.SX.zeros(1, n)
     C[0, n - 1] = 1.0
 
-    # D matrix - direct feedthrough (zero for proper systems)
+    # D matrix - direct feedthrough (zero for strictly proper systems)
     D = cas.reshape(num_padded[0], 1, 1)
 
     return A, B, C, D

@@ -16,7 +16,7 @@ from cas_models.continuous_time.simulate import (
 )
 from cas_models.discrete_time.simulate import make_n_step_simulation_function
 
-PLOT_DIR = Path("plots")
+PLOT_DIR = Path(__file__).parent / "plots"
 Path.mkdir(PLOT_DIR, exist_ok=True)
 
 models = {

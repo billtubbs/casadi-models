@@ -17,11 +17,13 @@ from cas_models.discrete_time.models import (
     StateSpaceModelDTFromCT,
     StateSpaceModelDTFromCTRK4,
     StateSpaceModelDTTFSISO,
+    tf_to_ss_obs_np,
 )
 from cas_models.transformations import (
     connect_systems,
     connect_systems_in_parallel,
     connect_systems_in_series,
+    linearize,
     set_param_values,
 )
 from cas_models.validation import is_ss_ct, is_ss_dt
@@ -1607,3 +1609,28 @@ def test_SSModelDTDirectTransmission():
     )
     x, u = cas.DM([1.0, 2.0]), cas.DM([1.0, 2.0, 3.0])
     assert np.array_equal(combined.F(0.0, x, u).full().ravel(), [3.5, 4.0])
+
+
+@pytest.mark.parametrize(
+    "num, den",
+    [
+        ([2.0, 0.5, 0.3], [1.0, -0.9, 0.2]),  # b_0 != 0: D = b_0
+        ([4.0, 1.0, 0.6], [2.0, -1.8, 0.4]),  # the same, not monic
+        ([0.5, 0.3], [1.0, -0.9, 0.2]),  # strictly proper: D = 0
+        ([1.0], [1.0, -0.5]),
+    ],
+)
+def test_tf_to_ss_obs_transfer_function(num, den):
+    """The observable canonical form realizes the transfer function,
+    also with direct transmission (b_0 != 0, where B is b_i - a_i b_0;
+    it was b_i before 2026-11-16), checked with python-control."""
+    control = pytest.importorskip("control")
+    num_n, den_n = np.array(num) / den[0], np.array(den) / den[0]
+    realizations = [
+        tf_to_ss_obs_np(np.array(num), np.array(den)),
+        linearize(StateSpaceModelDTTFSISO(num, den)),
+    ]
+    for A, B, C, D in realizations:
+        g_ss = control.ss2tf(A, B, C, D, True)
+        np.testing.assert_allclose(g_ss.num[0][0], num_n, atol=1e-12)
+        np.testing.assert_allclose(g_ss.den[0][0], den_n, atol=1e-12)

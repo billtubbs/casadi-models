@@ -173,7 +173,7 @@ def kalman_predict_f(A, B, Q, xk_est, Pk, uk):
     Returns:
     xkp1_est : (n, 1) vector
         Predicted states at next time instant, x_est(k+1|k).
-    Pk : (n, n) matrix
+    Pkp1 : (n, n) matrix
         Predicted state error covariance at next time instant,
         P(k+1|k).
     """

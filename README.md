@@ -3,6 +3,9 @@
 Python tools to define and combine dynamic system models in [CasADi](https://web.casadi.org)
 for use in nonlinear modelling, dynamic optimization and control.
 
+The models' equations and the notation used in the code and these
+docs are in [equations.ipynb](equations.ipynb).
+
 ## Key features
 
  - Construct large complex system models by connecting sub-models
@@ -30,6 +33,10 @@ Note this is still a work-in-progress and only a small subset of possible model 
 implemented.
 
 ## Examples: Building Models
+
+The general forms of the continuous- and discrete-time models, and
+their names in the code (`f`, `h`, `F`, `H`, ...), are in section 1 of
+[equations.ipynb](equations.ipynb).
 
 ```python
 from cas_models.continuous_time.models import (
@@ -110,7 +117,8 @@ python-control: `parallel()` there is `connect_systems_in_parallel`,
 functions at the state `x` and input `u` (zeros by default). For a continuous-time model,
 `dx/dt = Ax + Bu`, for a discrete-time model, `x(k+1) = Ax(k) + Bu(k)`. For a linear 
 model they are exact at any operating point. All parameter values must be provided
-(using either `params`, or by calling `set_param_values` first).
+(using either `params`, or by calling `set_param_values` first). See
+section 1 of [equations.ipynb](equations.ipynb).
 
 <!-- skip-test -->
 ```python
@@ -409,18 +417,23 @@ Other options:
 
 `prediction_errors` and `prediction_errors_ms` return the output errors as
 CasADi expressions, for building your own estimation problem.
-[system_identification_example.ipynb](system_identification_example.ipynb)
+[system_identification_example.ipynb](examples/system_identification_example.ipynb)
 is a complete example.
 
 `SSModelDTARXSISO` is an ARX model with the same polynomials as
 MATLAB's `arx` and `filter([zeros(1, nk) B], [1 A], u)`. Octave's `arx`
-counts the delay `nk` one less (see the class docstring).
+counts the delay `nk` one less (see the class docstring). Its equations
+and state-space realization are in section 3 of [equations.ipynb](equations.ipynb), and those
+of the transfer function models (`StateSpaceModelDTTFSISO`) in
+section 2.
 
 ## Kalman Filters
 
 `cas_models.discrete_time.kalman` has Kalman filters and extended
 Kalman filters as models (inputs `[u(k); y(k)]`), so they can be
-simulated, connected to controllers and plants, saved, or fitted:
+simulated, connected to controllers and plants, saved, or fitted. Their
+equations, and the notation x_est(k|j) with its names in the code, are
+in section 4 of [equations.ipynb](equations.ipynb).
 
 | Class | Filter | Built from |
 |---|---|---|
@@ -431,8 +444,8 @@ simulated, connected to controllers and plants, saved, or fitted:
 | `EKFP` | extended, prediction form | a discrete-time model, Q, R |
 | `EKFF` | extended, filtering form | a discrete-time model, Q, R |
 
-The extended filters linearize the model's functions F and H about
-the latest estimates at each time step (Jacobians by automatic
+The extended Kalman filters (EKF) linearize the model's functions F and H
+about the latest estimates at each time step (Jacobians by automatic
 differentiation, inside the filter's graph); with a linear model they
 are `KFP` and `KFF`, which are built the same way. The model's
 parameters become the filter's. A continuous-time model must be
@@ -446,12 +459,34 @@ its symbols become the filter's parameters. `KFP` and `KFF` are
 nonlinear in their states (the error covariance recursion);
 `KFPSS` and `KFFSS` are linear systems.
 
-With `include_output_predictions=True` a filter also outputs
-y_est(k|k-1), the prediction of y(k) before it is measured. Fitting a
-`KFPSS` with a symbolic gain to data by `estimate_params`, comparing
-these predictions with y, is prediction-error identification with the
-innovations form (Ljung, *System Identification*, 1999): the model and
-the gain K are estimated together, and output-error is the case K = 0.
+### State estimators in system identification
+
+`estimate_params` fits a model by comparing its output at each time k
+with the measurement y(k). Which output the model gives decides the
+kind of fit, and where a state estimator comes in.
+
+**Output error (no estimator).** The model is simulated from the
+inputs alone, and its outputs are compared with the measurements. This
+is the simplest and most common fit, and the right one when the
+measurements are the process's response to the inputs plus
+measurement noise. If an unmeasured disturbance (a drift, a load
+change) also drives the process, it appears in the errors as slow,
+correlated deviations, which the fit then tries to explain with the
+model's parameters.
+
+**Prediction error, with a steady-state filter.** When unmeasured
+disturbances act on the process, a model that also uses past
+measurements predicts better, and its parameters are less distorted by
+the disturbances. The predictor is a `KFPSS` with a symbolic gain K,
+and its output is y_est(k|k-1) (`include_output_predictions=True`),
+the prediction of y(k) from the data up to k - 1. It must be this
+output: the filter's other outputs, such as y_est(k+1|k) or
+y_est(k|k), use y(k), the measurement they would be compared with. The
+fit estimates the model and K together by minimizing the innovations
+y(k) - y_est(k|k-1) (the innovations form: Ljung, *System
+Identification*, 1999). Output error is the special case K = 0. The
+fitted filter is then the state estimator for that model, e.g. for a
+controller.
 
 ```python
 import casadi as cas
@@ -471,6 +506,33 @@ predictor = KFPSS(
 print(predictor.output_names, list(predictor.params))
 # ['yk_pred'] ['k_1', 'k_2']
 ```
+
+**Closed-loop data.** Data recorded while a feedback controller was
+running are a further reason to fit through a filter. The inputs u(k)
+then depend on past outputs, and so on past disturbances and noise, and
+an output-error fit is biased: the errors it leaves are correlated with
+the inputs. A prediction-error fit with the `KFPSS` predictor above
+(the direct method) remains consistent if its noise model, the filter
+gain K, can describe the disturbances, and needs only the measured u
+and y: the controller doesn't have to be known or modelled. The data must still be exciting
+enough, e.g. with setpoint changes or a dither signal added to u, since
+feedback alone can tie u to y.
+
+### State estimators in closed-loop simulation
+
+A filter is connected to a plant and a controller like any other
+model, with `connect_systems`. At each time k the connected system
+computes its outputs in the order of their dependencies, e.g. the
+plant's y(k) (from its states), a `KFF`'s correction x_est(k|k) (from
+y(k)), then the controller's u(k); only then are the states updated,
+and the filter's prediction x_est(k+1|k) uses the u(k) just computed.
+So a `KFF` can be connected to a controller with direct transmission
+(e.g. state feedback or a PI regulator) without an algebraic loop, as
+long as D = 0. A `KFP`'s outputs, x_est(k+1|k), depend on u(k), so
+connected to such a controller they form an algebraic loop: use a
+`KFP` with controllers that have a one-step delay (e.g. MPC).
+
+Example: [kalman_filter_closed_loop_example.ipynb](examples/kalman_filter_closed_loop_example.ipynb).
 
 ## Saving and Reconstructing Models
 
