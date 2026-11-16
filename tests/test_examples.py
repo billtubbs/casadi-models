@@ -1,15 +1,11 @@
-"""Generate examples used in README.md"""
+"""Check the examples in README.md run (the plots: readme_plots.py)"""
 
-from pathlib import Path
 from cas_models.continuous_time.models import (
     StateSpaceModelCT,
     SSModelCTLinearFOSISO,
     SSModelCTLinearO2NoGainSISO,
 )
 from cas_models.transformations import connect_systems_in_series
-
-PLOT_DIR = Path("plots")
-Path.mkdir(PLOT_DIR, exist_ok=True)
 
 
 def test_example_build_models():
@@ -86,7 +82,6 @@ def test_example_discrete_time_simulation():
     )
 
     import numpy as np
-    import matplotlib.pyplot as plt
 
     # Simualtion time
     # Note: Simulation outputs include values for nT+1 time instants
@@ -103,14 +98,3 @@ def test_example_discrete_time_simulation():
 
     assert X.shape == (nT + 1, sys_dt.nu)  # states
     assert Y.shape == (nT + 1, sys_dt.ny)  # outputs
-
-    # Make time-series plot
-    fig, ax = plt.subplots(figsize=(4, 2.5))
-    ax.plot(t, Y[:, 0])
-    ax.set_xlabel("t")
-    ax.set_ylabel("y")
-    ax.grid(False)
-    plt.tight_layout()
-    plt.savefig(PLOT_DIR / f"example_sr.png", dpi=150)
-    plt.savefig(PLOT_DIR / f"example_sr.svg")
-    plt.close()

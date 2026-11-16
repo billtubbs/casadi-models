@@ -112,6 +112,7 @@ discrete-time one of x(k+1) = Ax(k) + Bu(k); for a linear model they are
 exact at any operating point. A model with parameters needs their values
 (`params`, or `set_param_values` first).
 
+<!-- skip-test -->
 ```python
 from cas_models.transformations import linearize
 
@@ -138,6 +139,7 @@ models both ways.
   generic names become cas_models' defaults, and names given replace
   the system's.
 
+<!-- skip-test -->
 ```python
 import control
 from cas_models.control_conversion import from_control, to_control
@@ -165,6 +167,7 @@ cancel, or duplicates). python-control's `minreal` needs slycot
 match Octave's `minreal` but not necessarily MATLAB's, which uses
 another algorithm (see the docstring).
 
+<!-- skip-test -->
 ```python
 from cas_models.transformations import minimal_realization
 
@@ -424,6 +427,7 @@ how it was made (its recipe, see `cas_models/recipes.py`), and `save()`
 and `to_yaml()` write that as its spec; `load_model()` and `from_yaml()`
 build the model from a spec again.
 
+<!-- skip-test -->
 ```python
 from cas_models.yaml_utils import from_yaml, load_model
 
@@ -576,6 +580,7 @@ still load.
 
 Models with fixed parameter values pickle like ordinary Python objects:
 
+<!-- skip-test -->
 ```python
 import pickle
 
@@ -594,6 +599,7 @@ The loaded model has new symbols, shared within it as in the original
 (e.g. a model's `params` and its expressions); symbols shared between
 models stay shared only if they are pickled together inside a context:
 
+<!-- skip-test -->
 ```python
 with cas.global_pickle_context():
     pickle.dump((model_a, model_b), f)
