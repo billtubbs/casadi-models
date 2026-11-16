@@ -17,15 +17,18 @@ SSModelCTFromABCDSISO
 SSModelCTLinearFONoGainSISO
     First-order SISO: G(s) = 1 / (T1*s + 1).
 SSModelCTLinearIntegratorSISO
-    Integrator: G(s) = 1 / s.
+    Integrator with gain: G(s) = K / s.
 SSModelCTLinearFOSISO
     First-order SISO with gain: G(s) = K / (T1*s + 1).
 SSModelCTLinearO2SISO
-    Second-order SISO with gain: G(s) = K / ((T1*s+1)*(T2*s+1)).
+    Second-order lag (real poles) with gain:
+    G(s) = K / ((T1*s+1)*(T2*s+1)).
 SSModelCTLinearO2NoGainSISO
-    Second-order SISO (gain=1): G(s) = 1 / ((T1*s+1)*(T2*s+1)).
+    Second-order lag (real poles), gain 1:
+    G(s) = 1 / ((T1*s+1)*(T2*s+1)).
 SSModelCTLinearO2UnderdampedSISO
-    Second-order underdamped SISO: G(s) = wn^2 / (s^2 + 2*z*wn*s + wn^2).
+    Second-order SISO with static gain, damping and natural frequency:
+    G(s) = K / (s^2/wn^2 + 2*zeta*s/wn + 1).
 SSModelCTFromSympySS
     Continuous-time model built from a SymPy state-space representation.
 
@@ -404,7 +407,7 @@ class StateSpaceModelCTSISO(StateSpaceModelCT):
 
 
 class StateSpaceModelCTStaticNonlinearity(StateSpaceModelCT):
-    """A continous-time state-space model of a static non-linearity,
+    """A continuous-time state-space model of a static non-linearity,
     i.e. with no dynamics:
 
         y(t) = h(t, x(t), u(t))
@@ -471,7 +474,7 @@ class StateSpaceModelCTFromABCD(StateSpaceModelCT):
         state_names=None,
         output_names=None,
     ):
-        """Creates a continous-time linear state-space model of the following
+        """Creates a continuous-time linear state-space model of the following
         form.
 
         dx/dt(t) = Ax(t) + Bu(t)
@@ -720,7 +723,9 @@ class SSModelCTLinearO2SISO(SSModelCTFromABCDSISO):
         output_name=None,
     ):
         """Parameters for a continuous time state-space model
-        of a first order system with gain K and time constant T1.
+        of a second-order lag (two first-order lags in series: real
+        poles -1/T1 and -1/T2, no zeros) with gain K and time
+        constants T1 and T2.
 
             G(s) = K / ((T1 * s + 1) * (T2 * s + 1))
 
@@ -758,7 +763,9 @@ class SSModelCTLinearO2NoGainSISO(SSModelCTFromABCDSISO):
         output_name=None,
     ):
         """Parameters for a continuous time state-space model
-        of a first order system with gain K and time constant T1.
+        of a second-order lag (two first-order lags in series: real
+        poles -1/T1 and -1/T2, no zeros) with a static gain of 1 and
+        time constants T1 and T2.
 
             G(s) = 1 / ((T1 * s + 1) * (T2 * s + 1))
 
@@ -796,14 +803,25 @@ class SSModelCTLinearO2UnderdampedSISO(SSModelCTFromABCDSISO):
         output_name=None,
     ):
         """Parameters for a continuous time state-space model
-        of a first order system with gain K and time constant T1.
+        of a second-order system with no zeros, with static gain K,
+        damping coefficient zeta and natural frequency omega_n:
 
-            G(s) = K / (s**2 + 2 * zeta * omega_n * s + omega_n**2)
+            1 / omega_n**2 y''(t) + 2 zeta / omega_n y'(t) + y(t) = K u(t)
+
+            G(s) = K / (s**2 / omega_n**2 + 2 * zeta / omega_n * s + 1)
+                 = K omega_n**2 / (s**2 + 2 zeta omega_n s + omega_n**2)
 
         where
             s : Laplace variable
+            K : static gain, G(0)
             zeta : damping coefficient
             omega_n : natural frequency
+
+        The poles are complex for zeta < 1 (underdamped, the case the
+        class is meant for), real otherwise: nothing restricts zeta.
+
+        Before 2026-11-16 the numerator was K, not K omega_n**2 (a
+        static gain of K / omega_n**2).
 
         """
         params = make_symbolic_vars_from_kwargs(
@@ -816,7 +834,7 @@ class SSModelCTLinearO2UnderdampedSISO(SSModelCTFromABCDSISO):
             cas.blockcat([[0, 1], [-(omega_n**2), -2 * omega_n * zeta]])
         )
         B = cas.sparsify(cas.blockcat([[0], [1]]))
-        C = cas.sparsify(cas.blockcat([[K, 0]]))
+        C = cas.sparsify(cas.blockcat([[K * omega_n**2, 0]]))
         D = cas.sparsify(cas.DM(0))
         super().__init__(
             A,

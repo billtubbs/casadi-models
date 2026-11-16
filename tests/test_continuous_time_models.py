@@ -21,7 +21,11 @@ from cas_models.continuous_time.regulators import (
     SSModelCTPIDInt,
     SSModelCTPIInt,
 )
-from cas_models.transformations import block_diag, connect_systems_in_parallel
+from cas_models.transformations import (
+    block_diag,
+    connect_systems_in_parallel,
+    linearize,
+)
 from cas_models.validation import is_ss_ct, is_ss_dt
 
 
@@ -596,6 +600,23 @@ def test_SSModelCTLinearO2UnderdampedSISO():
     x = np.array([2.0, -1.0]).reshape((-1, 1))
     assert np.allclose(model.f(0.0, x, u, 2.0).full(), [[-1], [-2]])
     assert np.allclose(model.h(0.0, x, u, 2.0).full(), [[4.0]])
+
+
+def test_SSModelCTLinearO2UnderdampedSISO_tf():
+    """G(s) = K / (s^2 / wn^2 + 2 zeta s / wn + 1): static gain K, poles
+    -zeta wn +- j wn sqrt(1 - zeta^2), at a natural frequency wn != 1."""
+    K, zeta, omega_n = 2.5, 0.3, 4.0
+    model = SSModelCTLinearO2UnderdampedSISO(K=K, zeta=zeta, omega_n=omega_n)
+    A, B, C, D = linearize(model)
+    for s in [0.0, 0.5j, 3.0 + 1.0j]:
+        G = (C @ np.linalg.solve(s * np.eye(2) - A, B) + D)[0, 0]
+        expected = K / (s**2 / omega_n**2 + 2 * zeta * s / omega_n + 1)
+        assert np.isclose(G, expected)
+    poles = np.sort_complex(np.linalg.eigvals(A))
+    wd = omega_n * np.sqrt(1 - zeta**2)
+    np.testing.assert_allclose(
+        poles, [-zeta * omega_n - 1j * wd, -zeta * omega_n + 1j * wd]
+    )
 
 
 def test_block_diag():

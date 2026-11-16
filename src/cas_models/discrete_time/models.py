@@ -178,7 +178,7 @@ class StateSpaceModelDT:
             nu (int, optional): Number of inputs (dimension of u). Default: 1.
             ny (int, optional): Number of outputs (dimension of y). Default: 1.
             params (dict, optional): Dictionary of symbolic parameters used by
-                f and h functions. If None, defaults to empty dict.
+                F and H functions. If None, defaults to empty dict.
             name (str, optional): Optional name for the model. Default: None.
             input_names (list[str], optional): Names for input variables.
                 If None, defaults to ["u"] or ["u1", "u2", ...] for nu > 1.

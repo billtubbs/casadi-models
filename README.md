@@ -37,8 +37,8 @@ from cas_models.continuous_time.models import (
 )
 from cas_models.transformations import connect_systems_in_series
 
-# First order, single-input, single-output, continuous-time
-# state-space model with symbolic parameters
+# First order, single-input single-output (SISO), continuous-time (CT)
+# state-space (SS) model with symbolic parameters
 sys_model = SSModelCTLinearFOSISO()
 print(sys_model.f)
 # f:(t,x,u,K,T1)->(rhs) SXFunction
@@ -56,6 +56,8 @@ print(sys_model.h)
 ```
 
 ```python
+# Second order, SISO continuous-time SS model with unit gain and 
+# symbolic time constants
 sys_model_2 = SSModelCTLinearO2NoGainSISO()
 print(sys_model_2.f)
 # f:(t,x[2],u,T1,T2)->(rhs[2]) SXFunction
