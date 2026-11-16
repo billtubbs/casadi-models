@@ -89,7 +89,7 @@ the model's structure (from scratch) and the values,
       sys:
         function: hstack_systems
         args: {...}
-      values: {sys2_a_0: 99.0, ...}
+      values: {sys2_a_1: 99.0, ...}
 
 so it loads as the model built again with those values set (by name:
 the structure gives the same names).
@@ -97,7 +97,7 @@ the structure gives the same names).
 A symbolic argument is a symbol node, {symbol: name}, a scalar SX
 symbol, or {symbol: name, shape: [n]} (a column vector) or [n, m] (a
 matrix). It can be used wherever a value can, e.g. in a list:
-poles: [{symbol: p_0}, 0.5]. The same name in a document is the same
+poles: [{symbol: p_1}, 0.5]. The same name in a document is the same
 symbol, so models that use it share the parameter:
 
     cas_models_format: 1

@@ -274,13 +274,14 @@ def eval_F(model, values=()):
     return np.asarray(model.F(0.0, x, u, *values)).ravel()
 
 
+# In the model's parameter order (grouped by the paths' own names)
 ARX_VALUES = {
-    "CRAC1_a_0": -1.5,
-    "CRAC1_a_1": 0.56,
-    "CRAC1_b_0": 0.1,
-    "CRAC1_b_1": 0.05,
-    "CRAC2_a": -0.8,
-    "CRAC2_b": 0.2,
+    "CRAC1_a_1": -1.5,
+    "CRAC2_a_1": -0.8,
+    "CRAC1_a_2": 0.56,
+    "CRAC1_b_1": 0.1,
+    "CRAC2_b_1": 0.2,
+    "CRAC1_b_2": 0.05,
 }
 
 
@@ -297,16 +298,16 @@ def test_set_param_values():
     """Values in place of some parameters, after building the model"""
     model = dt_connected_arx()
     assert list(model.params) == list(ARX_VALUES)
-    fixed = set_param_values(model, {"CRAC2_a": -0.8, "CRAC2_b": 0.2})
+    fixed = set_param_values(model, {"CRAC2_a_1": -0.8, "CRAC2_b_1": 0.2})
     assert type(fixed) is StateSpaceModelDT
     assert list(fixed.params) == [
-        "CRAC1_a_0",
         "CRAC1_a_1",
-        "CRAC1_b_0",
+        "CRAC1_a_2",
         "CRAC1_b_1",
+        "CRAC1_b_2",
     ]
     assert (
-        fixed.params["CRAC1_a_0"] is model.params["CRAC1_a_0"]
+        fixed.params["CRAC1_a_1"] is model.params["CRAC1_a_1"]
     )  # same symbols
     assert fixed.state_names == model.state_names
     np.testing.assert_allclose(
@@ -364,13 +365,13 @@ def test_set_param_values_some_and_nested():
     some = {k: v for k, v in ARX_VALUES.items() if k.startswith("CRAC1")}
     partly = set_param_values(model, some)
     loaded = from_yaml(to_yaml(partly))
-    assert list(loaded.params) == ["CRAC2_a", "CRAC2_b"]
+    assert list(loaded.params) == ["CRAC2_a_1", "CRAC2_b_1"]
     np.testing.assert_allclose(
         eval_F(loaded, [-0.8, 0.2]),
         eval_F(model, ARX_VALUES.values()),
         rtol=1e-14,
     )
-    twice = set_param_values(partly, {"CRAC2_a": -0.8, "CRAC2_b": 0.2})
+    twice = set_param_values(partly, {"CRAC2_a_1": -0.8, "CRAC2_b_1": 0.2})
     data = yaml.safe_load(to_yaml(twice))
     assert data["args"]["sys"]["function"] == "set_param_values"
     assert from_yaml(to_yaml(twice)).params == {}
@@ -389,7 +390,7 @@ def test_set_param_values_numpy_values():
     """Values as estimate_params() may give them (numpy numbers, arrays)"""
     arx = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
     fitted = set_param_values(
-        arx, {"p_0": np.float64(0.9), "b": np.array([0.2])}
+        arx, {"p_0": np.float64(0.9), "b_1": np.array([0.2])}
     )
     loaded = from_yaml(to_yaml(fitted))
     assert list(loaded.params) == ["p_1"]
@@ -411,7 +412,7 @@ def test_set_param_values_ct_and_vector():
     )
     arx = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
     fixed = set_param_values(arx, {"p_0": 0.9})
-    assert list(fixed.params) == ["p_1", "b"]
+    assert list(fixed.params) == ["p_1", "b_1"]
     np.testing.assert_allclose(
         eval_F(fixed, [0.5, 0.2]), eval_F(arx, [0.9, 0.5, 0.2])
     )
@@ -421,8 +422,10 @@ def test_set_param_values_errors():
     model = dt_connected_arx()
     with pytest.raises(ValueError, match="K: not parameters"):
         set_param_values(model, {"K": 1.0})
-    with pytest.raises(ValueError, match="CRAC2_a is 1 x 1, the value 2 x 1"):
-        set_param_values(model, {"CRAC2_a": [1.0, 2.0]})
+    with pytest.raises(
+        ValueError, match="CRAC2_a_1 is 1 x 1, the value 2 x 1"
+    ):
+        set_param_values(model, {"CRAC2_a_1": [1.0, 2.0]})
     with pytest.raises(ValueError, match="only class and args, not values"):
         from_yaml(
             "cas_models_format: 1\nclass: SSModelCTLinearFOSISO\nvalues: {K: 1}\n"

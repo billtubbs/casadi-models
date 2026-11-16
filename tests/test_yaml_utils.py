@@ -184,8 +184,8 @@ MODELS = {
     "DT ARX symbolic poles and zeros": (
         StateSpaceModelDT,
         lambda: StateSpaceModelDTARXSISO(
-            poles=[cas.SX.sym("p_0"), cas.SX.sym("p_1")],
-            zeros=[cas.SX.sym("z_0")],
+            poles=[cas.SX.sym("p_1"), cas.SX.sym("p_2")],
+            zeros=[cas.SX.sym("z_1")],
         ),
         True,
     ),
@@ -197,7 +197,7 @@ MODELS = {
     "DT ARX numeric poles and zeros": (
         StateSpaceModelDT,
         lambda: StateSpaceModelDTARXSISO(
-            poles=[0.8 + 0.3j, 0.8 - 0.3j], zeros=[-0.4], gain=0.2, nk=2
+            poles=[0.8 + 0.3j, 0.8 - 0.3j], zeros=[-0.4], b1=0.2, nk=2
         ),
         True,
     ),
@@ -427,9 +427,9 @@ LOAD_CASES = {
     ),
     "ARX poles and zeros": (
         "class: StateSpaceModelDTARXSISO\n"
-        "args: {poles: [0.9, 0.5], zeros: [-0.4], gain: 0.2, nk: 2}\n",
+        "args: {poles: [0.9, 0.5], zeros: [-0.4], b1: 0.2, nk: 2}\n",
         lambda: StateSpaceModelDTARXSISO(
-            poles=[0.9, 0.5], zeros=[-0.4], gain=0.2, nk=2
+            poles=[0.9, 0.5], zeros=[-0.4], b1=0.2, nk=2
         ),
     ),
     "ARX poles and zeros, DM": (
@@ -437,9 +437,9 @@ LOAD_CASES = {
         "args:\n"
         "  poles: {DM: [0.9, 0.5]}\n"
         "  zeros: {DM: [-0.4]}\n"
-        "  gain: 0.2\n",
+        "  b1: 0.2\n",
         lambda: StateSpaceModelDTARXSISO(
-            poles=[0.9, 0.5], zeros=[-0.4], gain=0.2
+            poles=[0.9, 0.5], zeros=[-0.4], b1=0.2
         ),
     ),
     "ARX with dt": (
@@ -1389,14 +1389,14 @@ def test_symbol_separate_models_get_separate_symbols():
     "args, params",
     [
         # A scalar (the default shape)
-        ("{poles: [{symbol: p}], nb: 1}", ["p", "b"]),
+        ("{poles: [{symbol: p}], nb: 1}", ["p", "b_1"]),
         # A vector: [n] is a column
-        ("{poles: {symbol: p, shape: [2]}, nb: 1}", ["p_0", "p_1", "b"]),
-        ("{poles: {symbol: p, shape: [2, 1]}, nb: 1}", ["p_0", "p_1", "b"]),
+        ("{poles: {symbol: p, shape: [2]}, nb: 1}", ["p_0", "p_1", "b_1"]),
+        ("{poles: {symbol: p, shape: [2, 1]}, nb: 1}", ["p_0", "p_1", "b_1"]),
         # In a list, with numbers
         ("{poles: [{symbol: p_0}, 0.5], B: [{symbol: g}, 0.1]}", ["p_0", "g"]),
         # The same symbol twice in one model
-        ("{poles: [{symbol: p}, {symbol: p}], nb: 1}", ["p", "b"]),
+        ("{poles: [{symbol: p}, {symbol: p}], nb: 1}", ["p", "b_1"]),
     ],
 )
 def test_symbol_arx(args, params):
@@ -1407,10 +1407,10 @@ def test_symbol_arx(args, params):
 def test_symbol_vector_matches_code():
     model = from_yaml(
         H + "class: StateSpaceModelDTARXSISO\n"
-        "args: {poles: {symbol: p, shape: [2]}, zeros: [{symbol: z}], gain: 0.5}\n"
+        "args: {poles: {symbol: p, shape: [2]}, zeros: [{symbol: z}], b1: 0.5}\n"
     )
     expected = StateSpaceModelDTARXSISO(
-        poles=cas.SX.sym("p", 2), zeros=[cas.SX.sym("z")], gain=0.5
+        poles=cas.SX.sym("p", 2), zeros=[cas.SX.sym("z")], b1=0.5
     )
     assert_same_functions(model, expected)
 

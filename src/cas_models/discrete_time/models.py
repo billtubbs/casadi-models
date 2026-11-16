@@ -1273,6 +1273,15 @@ def _roots_to_coefficients(roots, name):
     return cas.DM(c.real.reshape(-1, 1))
 
 
+def _numbered_symbols(prefix, n):
+    """A column of n SX symbols named prefix_1, ..., prefix_n, numbered
+    from 1 as polynomial coefficients are (not CasADi's prefix_0, ...,
+    or prefix alone when n = 1)."""
+    if n == 0:
+        return cas.SX(0, 1)
+    return cas.vertcat(*[cas.SX.sym(f"{prefix}_{i}") for i in range(1, n + 1)])
+
+
 class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
     """A discrete-time ARX model of a dynamical system:
 
@@ -1319,6 +1328,34 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
     In both cases, A here is the estimated denominator without its
     leading 1, and B the numerator without its leading zeros.
 
+    ARX is the simplest of the model structures of prediction error
+    methods (PEM):
+
+        y(k) = G(q^-1) u(k) + H(q^-1) e(k)
+
+        G(q^-1) = B(q^-1) q^{-nk} / (A(q^-1) F(q^-1))
+        H(q^-1) = C(q^-1) / (A(q^-1) D(q^-1))
+
+    with e(k) Gaussian white noise and C, D and F monic polynomials
+    like A (C(q^-1) = 1 + c_1 q^-1 + ... + c_nc q^{-nc}, etc.). ARX
+    has C = D = F = 1:
+
+                 B(q^-1) q^{-nk}          1
+        y(k) = ------------------ u(k) + -------- e(k)
+                     A(q^-1)            A(q^-1)
+
+    which is the equation above. (Some texts leave the delay in B, as
+    nk leading zero coefficients.)
+
+    Parameters: the symbols the model makes are numbered as the
+    coefficients are, from 1 and always numbered (also when there is
+    only one): a_1, ..., a_na and b_1, ..., b_nb, or with real_poles
+    p_1, ..., p_na, and with zeros (and no b1) b_1. Not CasADi's
+    numbering from 0 (cas.SX.sym("a", 2) is [a_0, a_1]) and not
+    Python's indexing: the parameter a_1 is A[0]. (Before 2026-11-16
+    they were CasADi's: a_0, ..., or a when there was one, p_0, ...,
+    and gain.)
+
     """
 
     na: int
@@ -1338,7 +1375,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         output_name=None,
         poles=None,
         zeros=None,
-        gain=None,
+        b1=None,
         dt=None,
         real_poles=False,
     ):
@@ -1357,12 +1394,14 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb+1)]
 
         Args:
-            A (cas.SX, optional): Symbolic vector of A polynomial coefficients
-                [a_1, ..., a_na]. If None, symbolic parameters will be created
-                using na. Either A or na must be provided, but not both.
-            B (cas.SX, optional): Symbolic vector of B polynomial coefficients
-                [b_1, ..., b_nb]. If None, symbolic parameters will be created
-                using nb. Either B or nb must be provided, but not both.
+            A (cas.SX, optional): Vector of the A polynomial's coefficients
+                [a_1, ..., a_na], numbers or symbols. If None, symbols
+                a_1, ..., a_na are made, using na. Either A or na must be
+                provided, but not both.
+            B (cas.SX, optional): Vector of the B polynomial's coefficients
+                [b_1, ..., b_nb], numbers or symbols. If None, symbols
+                b_1, ..., b_nb are made, using nb. Either B or nb must be
+                provided, but not both.
             na (int, optional): Order of the A polynomial (number of past
                 outputs). Required if A is None, must be None if A is provided.
             nb (int, optional): Order of the B polynomial (number of input
@@ -1381,25 +1420,26 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
                     A(q^-1) = (1 - p_1 q^-1) ... (1 - p_na q^-1)
 
                 Numbers (complex ones in conjugate pairs) or real SX
-                symbols (e.g. [cas.SX.sym("p_0"), cas.SX.sym("p_1")]),
+                symbols (e.g. [cas.SX.sym("p_1"), cas.SX.sym("p_2")]),
                 which become the model's parameters. A list, NumPy array
                 or CasADi vector; [] for na = 0.
             zeros (list, optional): The roots z_1, ..., z_{nb-1} of B,
-                instead of B or nb, with gain:
+                instead of B or nb, with b1:
 
-                    B(q^-1) = gain (1 - z_1 q^-1) ... (1 - z_{nb-1} q^-1)
+                    B(q^-1) = b_1 (1 - z_1 q^-1) ... (1 - z_{nb-1} q^-1)
 
                 Numbers or real SX symbols, as for poles; [] for nb = 1.
-            gain (optional): The leading coefficient b_1 of B, used
-                with zeros (as in scipy.signal.zpk2tf; not the static
+            b1 (optional): The leading coefficient b_1 of B, used with
+                zeros (the gain in scipy.signal.zpk2tf; not the static
                 gain B(1) / A(1)). A number or an SX symbol; if None, a
-                symbol named "gain". Must be None without zeros.
+                symbol named "b_1". Must be None without zeros. (It was
+                gain before 2026-11-16.)
             dt (float, optional): The time step, if the model has one
                 (default: None). Kept as the model's dt; the state and
                 output functions don't depend on it.
             real_poles (bool, optional): With na, parametrize A by na
-                real poles, new symbols p_0, ..., p_{na-1} (numbered even
-                when na = 1), as poles=[cas.SX.sym("p_0"), ...] does,
+                real poles, new symbols p_1, ..., p_na (numbered even
+                when na = 1), as poles=[cas.SX.sym("p_1"), ...] does,
                 but made by the model: two models made this way have
                 their own symbols, also when saved and loaded (a model
                 spec holds na and real_poles, not the symbols). With
@@ -1412,7 +1452,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             A model made from poles and zeros is the same model as the
             one made from the coefficients they give: only the
             parameters differ when they are symbolic. The arguments
-            given are kept as attributes poles, zeros and gain (None if
+            given are kept as attributes poles, zeros and b1 (None if
             not given).
 
         Example:
@@ -1424,9 +1464,9 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             >>> model = StateSpaceModelDTARXSISO(A=A, B=B, nk=1)
             >>> # Or from poles and zeros (numeric or symbolic)
             >>> model = StateSpaceModelDTARXSISO(
-            ...     poles=[0.9, 0.5], zeros=[-0.4], gain=0.1
+            ...     poles=[0.9, 0.5], zeros=[-0.4], b1=0.1
             ... )
-            >>> p = [cas.SX.sym("p_0"), cas.SX.sym("p_1")]
+            >>> p = [cas.SX.sym("p_1"), cas.SX.sym("p_2")]
             >>> model = StateSpaceModelDTARXSISO(poles=p, nb=2)
 
         """
@@ -1434,29 +1474,29 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
             assert na is not None and A is None and poles is None, (
                 "real_poles needs na (not A or poles)"
             )
-            poles = [cas.SX.sym(f"p_{j}") for j in range(int(na))]
+            poles = list(_numbered_symbols("p", int(na)).elements())
             na = None
         if poles is not None:
             assert A is None and na is None, "provide one of A, na or poles"
             A = _roots_to_coefficients(poles, "poles")
         if zeros is not None:
             assert B is None and nb is None, "provide one of B, nb or zeros"
-            if gain is None:
-                gain = cas.SX.sym("gain")
-            gain = as_sx_scalar(gain, "gain")
-            if gain.is_constant():
-                gain = float(cas.DM(gain))
-            B = gain * cas.vertcat(1, _roots_to_coefficients(zeros, "zeros"))
+            if b1 is None:
+                b1 = cas.SX.sym("b_1")
+            b1 = as_sx_scalar(b1, "b1")
+            if b1.is_constant():
+                b1 = float(cas.DM(b1))
+            B = b1 * cas.vertcat(1, _roots_to_coefficients(zeros, "zeros"))
         else:
-            assert gain is None, "gain is only used with zeros"
+            assert b1 is None, "b1 is only used with zeros"
         if A is None:
-            A = cas.SX.sym("a", na)
+            A = _numbered_symbols("a", int(na))
         else:
             assert na is None, "provide A or na, not both"
             A = as_sx_vector(A, "A")
             na = A.shape[0]
         if B is None:
-            B = cas.SX.sym("b", nb)
+            B = _numbered_symbols("b", int(nb))
         else:
             assert nb is None, "provide B or nb, not both"
             B = as_sx_vector(B, "B")
@@ -1508,7 +1548,7 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
         self.nk = nk
         self.poles = poles
         self.zeros = zeros
-        self.gain = gain if zeros is not None else None
+        self.b1 = b1 if zeros is not None else None
 
         super().__init__(
             F,

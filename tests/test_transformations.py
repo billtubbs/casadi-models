@@ -1637,7 +1637,12 @@ def test_stack_given_names():
     )
     assert sys.input_names == ["CRAC1_flow", "CRAC2_flow"]
     assert sys.output_names == ["R11"]
-    assert list(sys.params) == ["CRAC1_a", "CRAC2_a", "CRAC1_b", "CRAC2_b"]
+    assert list(sys.params) == [
+        "CRAC1_a_1",
+        "CRAC2_a_1",
+        "CRAC1_b_1",
+        "CRAC2_b_1",
+    ]
     sys = vstack_systems([a, b], input_names="flow", output_names=["T1", "T2"])
     assert (sys.input_names, sys.output_names) == (["flow"], ["T1", "T2"])
     sys = block_diag_systems([a, b], input_names=["u1", "u2"])
@@ -1716,14 +1721,14 @@ def test_name_overrides():
     from cas_models.transformations import set_param_values
 
     fitted = set_param_values(
-        a, {"a": 0.5, "b": 1.0}, name="a_fitted", input_names=["flow"]
+        a, {"a_1": 0.5, "b_1": 1.0}, name="a_fitted", input_names=["flow"]
     )
     assert (fitted.name, fitted.input_names, fitted.output_names) == (
         "a_fitted",
         ["flow"],
         ["y1"],
     )
-    assert set_param_values(a, {"a": 0.5}).name == "a"
+    assert set_param_values(a, {"a_1": 0.5}).name == "a"
     with pytest.raises(ValueError, match="output_names: give 1 names"):
         negate_system(a, output_names=["p", "q"])
 

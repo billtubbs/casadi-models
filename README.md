@@ -535,7 +535,7 @@ Specs can also be written by hand.
 
 A symbolic argument is `{symbol: name}` (a scalar), or `{symbol: name,
 shape: [n]}` (a column vector) or `shape: [n, m]` (a matrix), wherever a
-value can go, e.g. `poles: [{symbol: p_0}, 0.5]`; a matrix of numbers and
+value can go, e.g. `poles: [{symbol: p_1}, 0.5]`; a matrix of numbers and
 single symbols is written element by element,
 `A: [[{symbol: A_0}, {symbol: A_1}], [0.0, 1.0]]`. The same name in one
 spec is the same symbol, so the models that use it share the parameter
