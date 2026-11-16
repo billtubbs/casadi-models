@@ -19,8 +19,8 @@ KFPSS
 KFFSS
     Steady-state Kalman filter in filtering form.
 
-The classes have concise names; the functions that make them are named
-descriptively.
+The classes have concise names; the functions that make them in other
+ways (e.g. the optimal gain from Q and R) are named descriptively.
 
 Functions
 ---------
@@ -34,10 +34,6 @@ kalman_predict_f
     Prediction step: x_est(k+1|k) and P(k+1|k) given the input u(k).
 kf_update
     One complete time step (correction and prediction) of a Kalman filter.
-make_KFP_with_fixedABCDQR
-    A KFP for fixed A, B, C, D, Q and R.
-make_KFF_with_fixedABCDQR
-    A KFF for fixed A, B, C, D, Q and R.
 steady_state_kf_gain
     Steady-state correction gain Kf and error covariances (solves the DARE).
 make_steady_state_KFP_with_fixedABCDQR
@@ -79,12 +75,12 @@ def kalman_update_f(C, R, xk_pred, Pk_pred, yk_pred, yk):
     current time instant of a Kalman filter (filtering form) given
     a new measurement.
 
-    y_est(k|k-1) = C(k) * x_est(k|k-1) + D(k) * u(k)
-    S(k) = C(k) * P(k|k-1) * C'(k) + R(k)
-    Kf(k) = P(k|k-1) * C'(k) * S(k)^-1
+    S(k|k-1) = C(k) * P(k|k-1) * C'(k) + R(k)
+    Kf(k) = P(k|k-1) * C'(k) * S(k|k-1)^-1
     x_est(k|k) = x_est(k|k-1) + Kf * (y(k) - y_est(k|k-1))
-    P(k|k) = P(k|k-1) - Kf(k) * S(k) * Kf'(k)
-    y_est(k|k) = C(k) * x_est(k|k) + D(k) * u(k)
+    P(k|k) = P(k|k-1) - Kf(k) * S(k|k-1) * Kf'(k)
+
+    where y_est(k|k-1) = C(k) * x_est(k|k-1) + D(k) * u(k) is given.
 
     Arguments:
     C : (ny, n) matrix
@@ -107,18 +103,19 @@ def kalman_update_f(C, R, xk_pred, Pk_pred, yk_pred, yk):
         Covariance of state estimation error, P(k|k).
     Kf : (n, ny) matrix
         Correction gain matrix.
-    Sk : (ny, ny) matrix
-        Covariance of output prediction error, S(k).
+    Sk_pred : (ny, ny) matrix
+        Covariance of the output prediction error (the innovations)
+        y(k) - y_est(k|k-1), S(k|k-1).
     """
 
     # Error covariance of output prediction error
-    Sk = C @ Pk_pred @ C.T + R
+    Sk_pred = C @ Pk_pred @ C.T + R
 
     # Correction gain
-    # Kf = Pk_pred * C.T / Sk  # in MATLAB
+    # Kf = Pk_pred * C.T / Sk_pred  # in MATLAB
     # Numpy equivalent
-    # Kf = np.linalg.lstsq(Sk.T, (Pk_pred @ C.T).T, rcond=-1)[0].T
-    Kf = cas.mrdivide(Pk_pred @ C.T, Sk)
+    # Kf = np.linalg.lstsq(Sk_pred.T, (Pk_pred @ C.T).T, rcond=-1)[0].T
+    Kf = cas.mrdivide(Pk_pred @ C.T, Sk_pred)
 
     # Update state predictions (prior estimates) using
     # measurements from current time to produce 'a posteriori'
@@ -126,7 +123,7 @@ def kalman_update_f(C, R, xk_pred, Pk_pred, yk_pred, yk):
     xk_est = xk_pred + Kf @ (yk - yk_pred)
 
     # Update error covariance of state estimates
-    # Pk = Pk_pred - Kf * Sk * Kf';  # inaccurate
+    # Pk = Pk_pred - Kf * Sk_pred * Kf';  # inaccurate
     # Pk = Pk_pred - Kf * C * Pk_pred
 
     # The following is the 'Joseph Stabilized' version of
@@ -140,7 +137,7 @@ def kalman_update_f(C, R, xk_pred, Pk_pred, yk_pred, yk):
     # rounding errors
     Pk = (Pk + Pk.T) / 2
 
-    return xk_est, Pk, Kf, Sk
+    return xk_est, Pk, Kf, Sk_pred
 
 
 def kalman_predict_f(A, B, Q, xk_est, Pk, uk):
@@ -184,20 +181,23 @@ def kalman_predict_f(A, B, Q, xk_est, Pk, uk):
     return xkp1_est, Pkp1
 
 
-def kf_update(A, B, C, D, xkp1_est, Pkp1, Q, R, yk, uk=None):
-    """Carry out one complete time step of a Kalman filter
-    (filtering form):
-    1. Calculate the correction gain, Kf(k) and
-        output estimation error covariance, S(k).
-    2. Correct the estimates of the states and outputs at
-        the current time using the current measurement, y(k):
+def kf_update(A, B, C, D, xk_pred, Pk_pred, Q, R, yk, uk=None):
+    """Carry out one complete time step of a Kalman filter:
+    1. Calculate the correction gain, Kf(k), from the prior
+        state error covariance, P(k|k-1).
+    2. Correct the state estimates at the current time using
+        the current measurement, y(k):
             x_est(k|k-1) -> x_est(k|k)
-            y_est(k|k-1) -> y_est(k|k)
+            P(k|k-1) -> P(k|k)
     3. Calculate the predicted states and state error
         covariance at the next time instant:
             x_est(k+1|k)
             P(k+1|k)
         given the current input, u(k), and the system model.
+
+    The posterior output estimates and the error covariances of the
+    output estimates are not calculated here: compute those needed
+    from the results, e.g. y_est(k|k) = C x_est(k|k) + D u(k).
 
     To do steps 1 and 2 only use: kalman_update_f.
     To do step 3 only use: kalman_predict_f.
@@ -209,9 +209,10 @@ def kf_update(A, B, C, D, xkp1_est, Pkp1, Q, R, yk, uk=None):
     Arguments:
     A, B, C, D : matrices
         Discrete-time system model matrices.
-    xkp1_est : (n, 1) vector
-        Prior estimate of the states, x_est(k|k-1).
-    Pkp1 : (n, n) matrix
+    xk_pred : (n, 1) vector
+        Prior estimate of the states, x_est(k|k-1) (the previous
+        time step's x_est(k+1|k)).
+    Pk_pred : (n, n) matrix
         Prior estimate of the state error covariance, P(k|k-1).
     Q : (n, n) matrix
         State error covariance.
@@ -228,17 +229,14 @@ def kf_update(A, B, C, D, xkp1_est, Pkp1, Q, R, yk, uk=None):
         Posterior estimate of the states, x_est(k|k).
     Pk : (n, n) matrix
         Covariance of state estimation error, P(k|k).
-    yk_est : (ny, 1) vector
-        Posterior estimate of the system output, y_est(k|k).
-    Sk : (ny, ny) matrix
-        Covariance of output prediction error, S(k).
     xkp1_est : (n, 1) vector
         Predicted states at next time instant, x_est(k+1|k).
     Pkp1 : (n, n) matrix
         Predicted state error covariance at next time instant,
         P(k+1|k).
     yk_pred : (ny, 1) vector
-        Prior estimate of the system output, y_est(k|k-1).
+        Prior estimate of the system output, y_est(k|k-1) (needed for
+        the correction, returned since it's already calculated).
     Kf : (n, ny) matrix
         Correction gain matrix.
     """
@@ -254,20 +252,16 @@ def kf_update(A, B, C, D, xkp1_est, Pkp1, Q, R, yk, uk=None):
     assert uk.shape == (nu, 1), "uk.shape"
     assert yk.shape == (ny, 1), "yk.shape"
 
-    # Update estimates based on current measurement
-    # Predicted output at the current time
-    yk_pred = linear_model_output(C, D, xkp1_est, uk)
+    # Prior estimate of the output at the current time, y_est(k|k-1)
+    yk_pred = linear_model_output(C, D, xk_pred, uk)
 
-    # Update states
-    xk_est, Pk, Kf, Sk = kalman_update_f(C, R, xkp1_est, Pkp1, yk_pred, yk)
-
-    # Calculate system output estimate
-    yk_est = linear_model_output(C, D, xk_est, uk)
+    # Update states based on current measurement
+    xk_est, Pk, Kf, _ = kalman_update_f(C, R, xk_pred, Pk_pred, yk_pred, yk)
 
     # Predictions based on current inputs
     xkp1_est, Pkp1 = kalman_predict_f(A, B, Q, xk_est, Pk, uk)
 
-    return xk_est, Pk, yk_est, Sk, xkp1_est, Pkp1, yk_pred, Kf
+    return xk_est, Pk, xkp1_est, Pkp1, yk_pred, Kf
 
 
 def _symbolic_params(*matrices):
@@ -308,6 +302,8 @@ class _KF(StateSpaceModelDT):
         "ykp1_est", "ykp1_est_var" : y_est(k+1|k) = C x_est(k+1|k)
             (D = 0 only), diag(C P(k+1|k) C')
         "yk_pred" : y_est(k|k-1) = C x_est(k|k-1) + D u(k)
+    The output variances are those of the errors of the estimates of
+    the noise-free outputs (without R).
     """
 
     def __init__(self, A, B, C, D, Q, R, outputs, dt=None, name=None):
@@ -324,29 +320,32 @@ class _KF(StateSpaceModelDT):
         params = _symbolic_params(A, B, C, D, Q, R)
         uk = cas.SX.sym("uk", nu)
         yk = cas.SX.sym("yk", ny)
-        xkp1_est_in = cas.SX.sym("xkp1_est", n)
-        Pkp1_in = cas.SX.sym("Pkp1", n, n)
-        xk_est, Pk, yk_est, Sk, xkp1_est, Pkp1, yk_pred, Kf = kf_update(
-            A, B, C, D, xkp1_est_in, Pkp1_in, Q, R, yk, uk=uk
+        # The filter's states at time k: x_est(k|k-1) and P(k|k-1)
+        xk_pred = cas.SX.sym("xk_pred", n)
+        Pk_pred = cas.SX.sym("Pk_pred", n, n)
+        xk_est, Pk, xkp1_est, Pkp1, yk_pred, _ = kf_update(
+            A, B, C, D, xk_pred, Pk_pred, Q, R, yk, uk=uk
         )
 
         inputs = cas.vertcat(uk, yk)
         input_names = make_list_of_enumerated_names(
             "uk", nu, sep="_"
         ) + make_list_of_enumerated_names("yk", ny, sep="_")
-        states = cas.vertcat(xkp1_est_in, cas.vec(Pkp1_in))
+        states = cas.vertcat(xk_pred, cas.vec(Pk_pred))
         state_names = make_list_of_enumerated_names(
             "xkp1_est", n, sep="_"
         ) + make_list_of_enumerated_names("Pkp1", n * n, sep="_")
         states_next = cas.vertcat(xkp1_est, cas.vec(Pkp1))
 
+        # The possible output signals, as functions so that only those
+        # included in outputs are computed (and added to the graph).
         # Each output's estimate and its error variance use the same
         # covariance: P(k|k) for y_est(k|k), P(k+1|k) for y_est(k+1|k).
         # (The SX graph keeps only the operations the diagonals need.)
         signals = {
             "xk_est": lambda: xk_est,
             "xk_est_var": lambda: cas.diag(Pk),
-            "yk_est": lambda: yk_est,
+            "yk_est": lambda: linear_model_output(C, D, xk_est, uk),
             "yk_est_var": lambda: cas.diag(C @ Pk @ C.T),
             "xkp1_est": lambda: xkp1_est,
             "xkp1_est_var": lambda: cas.diag(Pkp1),
@@ -576,22 +575,6 @@ class KFF(_KF):
         super().__init__(A, B, C, D, Q, R, outputs, dt=dt, name=name)
 
 
-def make_KFP_with_fixedABCDQR(A, B, C, D, Q, R, dt=None, name=None, **kwargs):
-    """A dynamic Kalman filter in prediction form for the linear system
-    with fixed matrices A, B, C, D and covariances Q and R: a KFP (see
-    its docstring for the arguments, kwargs being its output options).
-    """
-    return KFP(A, B, C, D, Q, R, dt=dt, name=name, **kwargs)
-
-
-def make_KFF_with_fixedABCDQR(A, B, C, D, Q, R, dt=None, name=None, **kwargs):
-    """A dynamic Kalman filter in filtering form for the linear system
-    with fixed matrices A, B, C, D and covariances Q and R: a KFF (see
-    its docstring for the arguments, kwargs being its output options).
-    """
-    return KFF(A, B, C, D, Q, R, dt=dt, name=name, **kwargs)
-
-
 def _as_numeric_matrix(value, name):
     """A numerical matrix argument as a 2-D NumPy array."""
     value = as_casadi_matrix(value, name)
@@ -605,9 +588,9 @@ def steady_state_kf_gain(A, C, Q, R):
     steady-state Kalman filter, by solving the discrete algebraic
     Riccati equation with control.dare.
 
-    S = C P C' + R
-    Kf = P C' S^-1
-    P(k|k) = P - Kf S Kf'
+    S(k|k-1) = C P C' + R
+    Kf = P C' S(k|k-1)^-1
+    P(k|k) = P - Kf S(k|k-1) Kf'
 
     where P = P(k+1|k) = P(k|k-1) is the solution of
 
@@ -635,19 +618,20 @@ def steady_state_kf_gain(A, C, Q, R):
         Covariance of state prediction error, P(k+1|k).
     Pk : (n, n) array
         Covariance of state estimation error, P(k|k).
-    Sk : (ny, ny) array
-        Covariance of output prediction error, S(k).
+    Sk_pred : (ny, ny) array
+        Covariance of the output prediction error (the innovations)
+        y(k) - y_est(k|k-1), S(k|k-1).
     """
     A, C, Q, R = (
         _as_numeric_matrix(value, name)
         for value, name in zip((A, C, Q, R), "ACQR")
     )
     Pkp1, _, _ = control.dare(A.T, C.T, Q, R)
-    Sk = C @ Pkp1 @ C.T + R
-    Kf = np.linalg.solve(Sk.T, (Pkp1 @ C.T).T).T
-    Pk = Pkp1 - Kf @ Sk @ Kf.T
+    Sk_pred = C @ Pkp1 @ C.T + R
+    Kf = np.linalg.solve(Sk_pred.T, (Pkp1 @ C.T).T).T
+    Pk = Pkp1 - Kf @ Sk_pred @ Kf.T
     Pk = (Pk + Pk.T) / 2
-    return Kf, Pkp1, Pk, Sk
+    return Kf, Pkp1, Pk, Sk_pred
 
 
 class _KFSS(StateSpaceModelDTFromABCD):
@@ -686,6 +670,8 @@ class _KFSS(StateSpaceModelDTFromABCD):
         A_kf = A - Kp @ C
         B_kf = cas.horzcat(B - Kp @ D, Kp)
         D_u = cas.horzcat(D, cas.SX(ny, ny))  # D u(k)
+        # Each possible output signal's rows of C and D, as functions so
+        # that only those included in outputs are computed
         signals = {
             "xkp1_est": lambda: (A_kf, B_kf),
             "ykp1_est": lambda: (C @ A_kf, C @ B_kf),

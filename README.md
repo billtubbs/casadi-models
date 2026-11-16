@@ -429,9 +429,10 @@ controllers and plants, saved, or fitted:
 | `KFPSS` | steady-state (fixed gain), prediction form: the innovations form | A, B, C, D, K |
 | `KFFSS` | steady-state, filtering form | A, B, C, D, Kf |
 
-The class names are concise; the functions that make them say more: `make_KFP_with_fixedABCDQR`,
-`make_steady_state_KFP_with_fixedABCDQR` (the optimal gain, from the
-discrete algebraic Riccati equation), etc. Any matrix may be symbolic:
+The steady-state filters with the optimal gain (from the discrete
+algebraic Riccati equation, given Q and R) are made by
+`make_steady_state_KFP_with_fixedABCDQR` and
+`make_steady_state_KFF_with_fixedABCDQR`. Any matrix may be symbolic:
 its symbols become the filter's parameters. `KFP` and `KFF` are
 nonlinear in their states (the error covariance recursion);
 `KFPSS` and `KFFSS` are linear systems.
