@@ -418,9 +418,9 @@ counts the delay `nk` one less (see the class docstring).
 
 ## Kalman Filters
 
-`cas_models.discrete_time.kalman` has linear Kalman filters as models
-(inputs `[u(k); y(k)]`), so they can be simulated, connected to
-controllers and plants, saved, or fitted:
+`cas_models.discrete_time.kalman` has Kalman filters and extended
+Kalman filters as models (inputs `[u(k); y(k)]`), so they can be
+simulated, connected to controllers and plants, saved, or fitted:
 
 | Class | Filter | Built from |
 |---|---|---|
@@ -428,6 +428,15 @@ controllers and plants, saved, or fitted:
 | `KFF` | dynamic, filtering form: x_est(k\|k) | A, B, C, D, Q, R |
 | `KFPSS` | steady-state (fixed gain), prediction form: the innovations form | A, B, C, D, K |
 | `KFFSS` | steady-state, filtering form | A, B, C, D, Kf |
+| `EKFP` | extended, prediction form | a discrete-time model, Q, R |
+| `EKFF` | extended, filtering form | a discrete-time model, Q, R |
+
+The extended filters linearize the model's functions F and H about
+the latest estimates at each time step (Jacobians by automatic
+differentiation, inside the filter's graph); with a linear model they
+are `KFP` and `KFF`, which are built the same way. The model's
+parameters become the filter's. A continuous-time model must be
+discretized first (e.g. `StateSpaceModelDTFromCTRK4`).
 
 The steady-state filters with the optimal gain (from the discrete
 algebraic Riccati equation, given Q and R) are made by
@@ -682,7 +691,7 @@ the CasADi version.
     control over minutes).
   - Grey-box maximum likelihood of nonlinear stochastic models with an
     extended Kalman filter inside the likelihood (Kristensen, Madsen
-    and Jorgensen, 2004, Automatica; CTSM); needs EKFP and EKFF.
+    and Jorgensen, 2004, Automatica; CTSM), with EKFP or EKFF.
   - Estimating Q and R of an identified model from its innovations'
     autocovariances (autocovariance least squares: Odelson, Rajamani
     and Rawlings, 2006, Automatica; Rajamani and Rawlings for offset-free
@@ -690,8 +699,8 @@ the CasADi version.
   - Later, maybe: subspace identification (N4SID, Van Overschee and De
     Moor, 1996), estimating A, B, C, D and K without iteration (e.g. as
     starts for a prediction-error fit).
-  - Maybe a common StateEstimator base (or mixin) once EKFs exist and
-    something needs the type.
+  - Maybe a common StateEstimator base (or mixin) once something needs
+    the type.
 - **Estimation statistics in fitted models:** a model saved after
   `set_param_values(model, params_est)` holds its structure and the
   values, but nothing about how they were found (standard errors,

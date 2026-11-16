@@ -1,16 +1,22 @@
 """Unit tests for src/cas_models/discrete_time/kalman.py module"""
 
+from pathlib import Path
+
 import casadi as cas
 import control
 import numpy as np
+import pandas as pd
 import pytest
 import scipy
 
 from cas_models.discrete_time.kalman import (
+    EKFF,
+    EKFP,
     KFF,
     KFFSS,
     KFP,
     KFPSS,
+    ekf_update,
     kalman_predict_f,
     kalman_update_f,
     kf_update,
@@ -20,7 +26,12 @@ from cas_models.discrete_time.kalman import (
     make_steady_state_KFP_with_fixedABCDQR,
     steady_state_kf_gain,
 )
-from cas_models.discrete_time.models import StateSpaceModelDTFromABCD
+from cas_models.continuous_time.models import SSModelCTLinearFOSISO
+from cas_models.discrete_time.models import (
+    StateSpaceModelDT,
+    StateSpaceModelDTFromABCD,
+    StateSpaceModelDTFromCTRK4,
+)
 from cas_models.discrete_time.simulate import (
     make_n_step_simulation_function_from_model,
 )
@@ -1026,6 +1037,14 @@ def test_KFP_symbolic_QR():
         lambda: KFPSS(A_test, B_test, C_test, D_test, np.ones((2, 2)) * 0.1),
         lambda: KFFSS(A_test, B_test, C_test, D_test, np.ones((2, 2)) * 0.1),
         lambda: KFP(A_test, B_test, C_test, D_test, Q_test, R_test),
+        lambda: EKFF(
+            StateSpaceModelDTFromCTRK4(
+                SSModelCTLinearFOSISO(K=2.0, T1=3.0), 0.5
+            ),
+            [[0.01]],
+            [[0.1]],
+            include_output_estimates=True,
+        ),
         lambda: make_steady_state_KFP_with_fixedABCDQR(
             A_test,
             B_test,
@@ -1065,3 +1084,427 @@ def test_KFSS_gain_shape():
         KFPSS(A_test, B_test, C_test, D_test, np.ones((2, 1)))
     with pytest.raises(ValueError, match="K is"):
         KFFSS(A_test, B_test, C_test, D_test, np.ones((3, 2)))
+
+
+# Extended Kalman filters: EKFP, EKFF
+
+DT_NL = 0.1
+
+
+def _nonlinear_model(T=cas.SX, h_depends_on_t=False, h_depends_on_u=False):
+    """A damped pendulum (damping b, a parameter), discretized by Euler,
+    with a nonlinear output function with an offset:
+
+        x1(k+1) = x1 + dt x2
+        x2(k+1) = x2 + dt (-sin(x1) - b x2 + u)
+          y1(k) = sin(x1) + 1 (+ 0.1 t x1, + 0.5 u)
+          y2(k) = x2
+
+    T: the functions' symbol type (cas.SX or cas.MX)."""
+    t, xk, uk, b = T.sym("t"), T.sym("xk", 2), T.sym("uk"), T.sym("b")
+    xkp1 = cas.vertcat(
+        xk[0] + DT_NL * xk[1],
+        xk[1] + DT_NL * (-cas.sin(xk[0]) - b * xk[1] + uk),
+    )
+    y1 = cas.sin(xk[0]) + 1.0
+    if h_depends_on_t:
+        y1 += 0.1 * t * xk[0]
+    if h_depends_on_u:
+        y1 += 0.5 * uk
+    yk = cas.vertcat(y1, xk[1])
+    args, names = [t, xk, uk, b], ["t", "xk", "uk", "b"]
+    F = cas.Function("F", args, [xkp1], names, ["xkp1"])
+    H = cas.Function("H", args, [yk], names, ["yk"])
+    b_param = b if T is cas.SX else cas.MX.sym("b")
+    return StateSpaceModelDT(
+        F, H, 2, nu=1, ny=2, dt=DT_NL, params={"b": b_param}
+    )
+
+
+B_NL = 0.5
+Q_NL = np.diag([1e-4, 1e-3])
+R_NL = np.diag([0.01, 0.02])
+
+
+def _np_nonlinear_model(x, u, t=0.0, h_depends_on_t=False):
+    """f, h and their Jacobians A, C of _nonlinear_model (NumPy)."""
+    f = np.array(
+        [
+            x[0] + DT_NL * x[1],
+            x[1] + DT_NL * (-np.sin(x[0]) - B_NL * x[1] + u[0]),
+        ]
+    )
+    A = np.array([[1.0, DT_NL], [-DT_NL * np.cos(x[0]), 1.0 - DT_NL * B_NL]])
+    h = np.array([np.sin(x[0]) + 1.0, x[1]])
+    C = np.array([[np.cos(x[0]), 0.0], [0.0, 1.0]])
+    if h_depends_on_t:
+        h[0] += 0.1 * t * x[0]
+        C[0, 0] += 0.1 * t
+    return f, A, h, C
+
+
+def np_ekf_update(xk_pred, Pk_pred, yk, uk, t=0.0, h_depends_on_t=False):
+    """NumPy reference of one EKF step of _nonlinear_model."""
+    _, _, h, C = _np_nonlinear_model(xk_pred, uk, t, h_depends_on_t)
+    S = C @ Pk_pred @ C.T + R_NL
+    Kf = Pk_pred @ C.T @ np.linalg.inv(S)
+    xk_est = xk_pred + Kf @ (yk - h)
+    z = np.eye(2) - Kf @ C
+    Pk = z @ Pk_pred @ z.T + Kf @ R_NL @ Kf.T
+    Pk = (Pk + Pk.T) / 2
+    f, A, _, _ = _np_nonlinear_model(xk_est, uk, t, h_depends_on_t)
+    Pkp1 = A @ Pk @ A.T + Q_NL
+    return xk_est, Pk, f, Pkp1, h, Kf
+
+
+def test_ekf_update_linear_model():
+    """With a linear model, ekf_update is kf_update, numerically and
+    with symbolic arguments."""
+    A, B, C, D, Q, R = _test_matrices()
+    model = StateSpaceModelDTFromABCD(A, B, C, D)
+    rng = np.random.default_rng(6)
+    xk_pred, Pk_pred = cas.DM([0.1, -0.2]), cas.DM.eye(2)
+    for k in range(20):
+        yk, uk = rng.normal(size=2), rng.normal(size=1)
+        results = ekf_update(
+            model.F, model.H, xk_pred, Pk_pred, Q, R, yk, uk, t=k
+        )
+        expected = kf_update(A, B, C, D, xk_pred, Pk_pred, Q, R, yk, uk)
+        for a, b in zip(results, expected):
+            assert isinstance(a, cas.DM)
+            np.testing.assert_allclose(a, b, atol=1e-12)
+        xk_pred, Pk_pred = results[2], results[3]
+
+    expected = kf_update(A, B, C, D, xk_pred, Pk_pred, Q, R, yk, uk)
+    for T in (cas.SX, cas.MX):
+        x, P = T.sym("x", 2), T.sym("P", 2, 2)
+        y, u = T.sym("y", 2), T.sym("u", 1)
+        f = cas.Function(
+            "ekf_update",
+            [x, P, y, u],
+            list(ekf_update(model.F, model.H, x, P, Q, R, y, u)),
+        )
+        for a, b in zip(f(xk_pred, Pk_pred, yk, uk), expected):
+            np.testing.assert_allclose(a, b, atol=1e-12)
+
+
+def test_ekf_update_nonlinear_model():
+    """One step at a time, compared to the NumPy reference with the
+    Jacobians written by hand, including the output offset (the
+    correction uses H(x_est(k|k-1)), not C x_est(k|k-1))."""
+    model = _nonlinear_model()
+    rng = np.random.default_rng(7)
+    xk_pred, Pk_pred = np.array([0.3, -0.1]), np.eye(2) * 0.1
+    xk_dm, Pk_dm = cas.DM(xk_pred), cas.DM(Pk_pred)
+    for k in range(20):
+        yk = np.array([1.2, 0.0]) + rng.normal(size=2) * 0.1
+        uk = rng.normal(size=1)
+        results = ekf_update(
+            model.F,
+            model.H,
+            xk_dm,
+            Pk_dm,
+            Q_NL,
+            R_NL,
+            yk,
+            uk,
+            params=[B_NL],
+        )
+        expected = np_ekf_update(xk_pred, Pk_pred, yk, uk)
+        for a, b in zip(results, expected):
+            np.testing.assert_allclose(
+                np.array(a).reshape(b.shape), b, atol=1e-12
+            )
+        xk_dm, Pk_dm = results[2], results[3]
+        xk_pred, Pk_pred = expected[2], expected[3]
+
+
+EKF_FORMS = {
+    # form: (class, outputs from np_ekf_update's results)
+    "prediction": (EKFP, "kp1_est"),
+    "filtering": (EKFF, "k_est"),
+}
+ALL_OUTPUTS = dict(
+    include_output_estimates=True,
+    include_state_variance=True,
+    include_output_variance=True,
+    include_output_predictions=True,
+)
+
+
+def _np_ekf_outputs(form, results, uk, t=0.0, h_depends_on_t=False):
+    """The filter's outputs (all included) from np_ekf_update's
+    results."""
+    xk_est, Pk, xkp1_est, Pkp1, yk_pred, _ = results
+    if form == "prediction":
+        x, P, t_y = xkp1_est, Pkp1, t + DT_NL
+    else:
+        x, P, t_y = xk_est, Pk, t
+    _, _, h, C = _np_nonlinear_model(x, uk, t_y, h_depends_on_t)
+    return np.concatenate([x, h, np.diag(P), np.diag(C @ P @ C.T), yk_pred])
+
+
+@pytest.mark.parametrize("T", [cas.SX, cas.MX])
+@pytest.mark.parametrize("form", EKF_FORMS)
+def test_EKF_nonlinear_model(form, T):
+    """Simulation over 30 steps compared to the NumPy reference: all
+    outputs, and the states; the model's parameter b becomes the
+    filter's. A model with MX functions gives the same filter."""
+    cls, est = EKF_FORMS[form]
+    ekf = cls(_nonlinear_model(T), Q_NL, R_NL, **ALL_OUTPUTS)
+    assert ekf.dt == DT_NL
+    assert list(ekf.params) == ["b"]
+    assert ekf.input_names == ["uk", "yk_1", "yk_2"]
+    assert ekf.output_names == [
+        f"x{est}_1",
+        f"x{est}_2",
+        f"y{est}_1",
+        f"y{est}_2",
+        f"x{est}_var_1",
+        f"x{est}_var_2",
+        f"y{est}_var_1",
+        f"y{est}_var_2",
+        "yk_pred_1",
+        "yk_pred_2",
+    ]
+    assert ekf.F.is_a("SXFunction") and ekf.H.is_a("SXFunction")
+
+    rng = np.random.default_rng(8)
+    xk_pred, Pk_pred = np.array([0.3, -0.1]), np.eye(2) * 0.1
+    x = np.r_[xk_pred, Pk_pred.ravel(order="F")]
+    for k in range(30):
+        uk = rng.normal(size=1)
+        yk = np.array([1.2, 0.0]) + rng.normal(size=2) * 0.1
+        u = np.r_[uk, yk]
+        y = np.asarray(ekf.H(k * DT_NL, x, u, B_NL)).ravel()
+        x = np.asarray(ekf.F(k * DT_NL, x, u, B_NL)).ravel()
+        results = np_ekf_update(xk_pred, Pk_pred, yk, uk)
+        np.testing.assert_allclose(
+            y, _np_ekf_outputs(form, results, uk), atol=1e-12
+        )
+        xk_pred, Pk_pred = results[2], results[3]
+        np.testing.assert_allclose(
+            x, np.r_[xk_pred, Pk_pred.ravel(order="F")], atol=1e-12
+        )
+
+
+@pytest.mark.parametrize("form", EKF_FORMS)
+def test_EKF_linear_model_is_KF(form):
+    """With a linear model, EKFP and EKFF are KFP and KFF."""
+    cls, _ = EKF_FORMS[form]
+    kf_cls = {"prediction": KFP, "filtering": KFF}[form]
+    A, B, C, D, Q, R = _test_matrices()
+    ekf = cls(
+        StateSpaceModelDTFromABCD(A, B, C, D, dt=0.5), Q, R, **ALL_OUTPUTS
+    )
+    kf = kf_cls(A, B, C, D, Q, R, dt=0.5, **ALL_OUTPUTS)
+    assert ekf.dt == 0.5
+    assert ekf.output_names == kf.output_names
+    assert ekf.state_names == kf.state_names
+    xk, uk, _ = _kf_test_point()
+    np.testing.assert_allclose(ekf.F(0.0, xk, uk), kf.F(0.0, xk, uk))
+    np.testing.assert_allclose(ekf.H(0.0, xk, uk), kf.H(0.0, xk, uk))
+
+
+def test_EKF_time_varying_output():
+    """The model's functions get the time t; y_est(k+1|k) uses H at
+    t + dt, so it needs the sample time."""
+    model = _nonlinear_model(h_depends_on_t=True)
+    rng = np.random.default_rng(9)
+    for form, (cls, _) in EKF_FORMS.items():
+        ekf = cls(model, Q_NL, R_NL, **ALL_OUTPUTS)
+        xk_pred, Pk_pred = np.array([0.3, -0.1]), np.eye(2) * 0.1
+        x = np.r_[xk_pred, Pk_pred.ravel(order="F")]
+        t = 2.0
+        uk = rng.normal(size=1)
+        yk = np.array([1.2, 0.0]) + rng.normal(size=2) * 0.1
+        y = np.asarray(ekf.H(t, x, np.r_[uk, yk], B_NL)).ravel()
+        results = np_ekf_update(
+            xk_pred, Pk_pred, yk, uk, t=t, h_depends_on_t=True
+        )
+        expected = _np_ekf_outputs(form, results, uk, t, h_depends_on_t=True)
+        np.testing.assert_allclose(y, expected, atol=1e-12)
+
+    model.dt = None
+    with pytest.raises(ValueError, match="sample time dt is needed"):
+        EKFP(model, Q_NL, R_NL, include_output_estimates=True)
+    ekf = EKFP(model, Q_NL, R_NL, dt=DT_NL, include_output_estimates=True)
+    assert ekf.dt == DT_NL
+
+
+def test_EKF_output_depends_on_u():
+    """y_est(k+1|k) needs an output function independent of u; the
+    filtering form's outputs then depend on u(k)."""
+    model = _nonlinear_model(h_depends_on_u=True)
+    with pytest.raises(ValueError, match="unless D = 0"):
+        EKFP(model, Q_NL, R_NL, include_output_estimates=True)
+    EKFP(model, Q_NL, R_NL, include_output_variance=True)
+    ekf = EKFF(model, Q_NL, R_NL)
+    sp = np.array(cas.DM(ekf.H.sparsity_jac("uk", "yk"), 1))
+    assert sp[:, 0].any()  # u(k)
+
+
+def test_EKF_errors():
+    with pytest.raises(TypeError, match="discrete-time"):
+        EKFP(SSModelCTLinearFOSISO(K=1.0, T1=2.0), [[0.1]], [[0.1]])
+    model = _nonlinear_model()
+    with pytest.raises(ValueError, match="Q is"):
+        EKFP(model, np.eye(3), R_NL)
+    with pytest.raises(ValueError, match="R is"):
+        EKFF(model, Q_NL, np.eye(1))
+    # A symbol in Q named as one of the model's parameters
+    with pytest.raises(ValueError, match="'b'"):
+        EKFP(model, cas.SX.sym("b") * np.eye(2), R_NL)
+
+
+def test_EKF_continuous_time_model_params():
+    """A continuous-time model discretized by RK4, with its parameters
+    and symbols in Q and R as the filter's parameters (sorted by name),
+    is the filter of the discretized model with those values."""
+    model = StateSpaceModelDTFromCTRK4(SSModelCTLinearFOSISO(), 0.5)
+    q, r = cas.SX.sym("q"), cas.SX.sym("r")
+    ekf = EKFF(model, q, r)
+    assert list(ekf.params) == ["K", "T1", "q", "r"]
+    model_num = StateSpaceModelDTFromCTRK4(
+        SSModelCTLinearFOSISO(K=2.0, T1=3.0), 0.5
+    )
+    ekf_num = EKFF(model_num, [[0.01]], [[0.1]])
+    U = np.random.default_rng(10).normal(size=(10, 2))
+    x0 = [0.0, 1.0]
+    np.testing.assert_allclose(
+        _simulate(ekf, U, x0, params=[2.0, 3.0, 0.01, 0.1]),
+        _simulate(ekf_num, U, x0),
+        atol=1e-12,
+    )
+
+
+def test_EKF_tracks_nonlinear_plant():
+    """The filtering form's estimates of a noisy pendulum, from noisy
+    measurements: much closer to the true states than the measurements
+    are (x2 is measured directly)."""
+    model = _nonlinear_model()
+    ekf = EKFF(model, Q_NL, R_NL)
+    rng = np.random.default_rng(11)
+    nT = 300
+    x_true = np.array([1.0, 0.0])
+    x = np.r_[0.0, 0.0, np.eye(2).ravel()]  # poor initial estimate
+    errors, meas_errors = [], []
+    for k in range(nT):
+        uk = np.array([0.5 * np.sin(0.05 * k)])
+        _, _, h, _ = _np_nonlinear_model(x_true, uk)
+        yk = h + rng.normal(size=2) * np.sqrt(np.diag(R_NL))
+        u = np.r_[uk, yk]
+        xk_est = np.asarray(ekf.H(0.0, x, u, B_NL)).ravel()
+        x = np.asarray(ekf.F(0.0, x, u, B_NL)).ravel()
+        if k >= 50:
+            errors.append(xk_est - x_true)
+            meas_errors.append(yk[1] - x_true[1])
+        f, _, _, _ = _np_nonlinear_model(x_true, uk)
+        x_true = f + rng.normal(size=2) * np.sqrt(np.diag(Q_NL))
+    rmse = np.sqrt(np.mean(np.array(errors) ** 2, axis=0))
+    assert rmse[1] < 0.5 * np.sqrt(np.mean(np.array(meas_errors) ** 2))
+    assert rmse[0] < 0.1
+
+
+@pytest.mark.parametrize("form", EKF_FORMS)
+def test_EKF_closed_loop(form):
+    """Feedthrough as in KFP and KFF: the prediction form forms an
+    algebraic loop with a controller with direct transmission, the
+    filtering form doesn't."""
+    cls, est = EKF_FORMS[form]
+
+    def make_KF(A, B, C, D, Q, R):
+        return cls(StateSpaceModelDTFromABCD(A, B, C, D), Q, R)
+
+    controller = _controller_with_direct_transmission()
+    if form == "prediction":
+        with pytest.raises(ValueError, match="Algebraic loop"):
+            _connect_plant_KF_controller(make_KF, f"x{est}", controller)
+    else:
+        system = _connect_plant_KF_controller(make_KF, f"x{est}", controller)
+        assert (system.n, system.nu) == (2 + 6, 0)
+
+
+def test_EKFP_pendulum_benchmark():
+    """The EKF of a pendulum with an input disturbance state, compared
+    to the results of a homework solution (course GEL-7029, as in
+    process-observers' test_EKFObserver.m): the estimates x_est(k+1|k)
+    agree to rounding, except from t = 5.2 to 9.2 s, where the
+    homework's calculation differs slightly (as in MATLAB: estimates
+    within 1e-3, trace of P(k+1|k) within 1)."""
+    data = pd.read_csv(
+        Path(__file__).parent / "data" / "pend_sim_benchmark.csv"
+    )
+    K, m, L, g, dt = 1.2, 0.3, 0.4, 9.8, 0.1
+
+    # States: angle, angular velocity, input disturbance; the pendulum
+    # as process-models' pend/pend_xkp1.m (one Euler step) and
+    # pend_StateFcn.m (the disturbance added to the input torque)
+    t, xk, uk = cas.SX.sym("t"), cas.SX.sym("xk", 3), cas.SX.sym("uk")
+    torque = uk + xk[2]
+    xkp1 = cas.vertcat(
+        xk[0] + dt * xk[1],
+        xk[1]
+        + dt * (-g / L * cas.sin(xk[0]) - K / m * xk[1] + torque / (m * L**2)),
+        xk[2],
+    )
+    F = cas.Function("F", [t, xk, uk], [xkp1], ["t", "xk", "uk"], ["xkp1"])
+    H = cas.Function("H", [t, xk, uk], [xk[0]], ["t", "xk", "uk"], ["yk"])
+    model = StateSpaceModelDT(F, H, 3, nu=1, ny=1, dt=dt)
+    ekf = EKFP(model, 10 * np.eye(3), [[1.0]], include_state_variance=True)
+
+    x = np.r_[np.zeros(3), np.eye(3).ravel()]  # x_est(0|-1), P(0|-1)
+    X_est, trP = [], []
+    for _, row in data.iterrows():
+        u = [row["u(k)"], row["y(k)"]]
+        y = np.asarray(ekf.H(row["t"], x, u)).ravel()
+        x = np.asarray(ekf.F(row["t"], x, u)).ravel()
+        X_est.append(y[:3])
+        trP.append(y[3:].sum())
+    errors = np.abs(
+        np.array(X_est) - data[["xef1(k+1)", "xef2(k+1)", "xef3(k+1)"]]
+    ).max(axis=1)
+    trP_errors = np.abs(np.array(trP) - data["trP(k)"])
+    assert errors.max() < 1e-3
+    assert trP_errors.max() < 1
+    outside = (data["t"] < 5.15) | (data["t"] > 9.25)
+    assert errors[outside].max() < 1e-10
+    assert trP_errors[outside].max() < 1e-8
+
+
+def test_EKFF_van_der_pol_matlab():
+    """Compared to MATLAB's extendedKalmanFilter (System Identification
+    Toolbox example, the van der Pol oscillator, with its measurements
+    vdp_data.mat, saved as vdp_data.npz; as in process-observers'
+    test_EKFObserver.m): the first correction and prediction, and the
+    estimates after 101 measurements, to the 6 decimals of the MATLAB
+    results."""
+    y = np.load(Path(__file__).parent / "data" / "vdp_data.npz")["y"].ravel()
+    dt = 0.05  # MATLAB's vdpStateFcn: one Euler step, mu = 1
+    t, xk, uk = cas.SX.sym("t"), cas.SX.sym("xk", 2), cas.SX.sym("uk", 0)
+    xkp1 = xk + dt * cas.vertcat(xk[1], (1 - xk[0] ** 2) * xk[1] - xk[0])
+    F = cas.Function("F", [t, xk, uk], [xkp1], ["t", "xk", "uk"], ["xkp1"])
+    H = cas.Function("H", [t, xk, uk], [xk[0]], ["t", "xk", "uk"], ["yk"])
+    model = StateSpaceModelDT(F, H, 2, nu=0, ny=1)
+    ekf = EKFF(
+        model, np.diag([0.01, 0.01]), [[0.16]], include_state_variance=True
+    )
+
+    x = np.r_[1.0, 0.0, np.eye(2).ravel()]  # x_est(0|-1), P(0|-1)
+    for k, yk in enumerate(y):
+        out = np.asarray(ekf.H(0.0, x, [yk])).ravel()
+        x = np.asarray(ekf.F(0.0, x, [yk])).ravel()
+        if k == 0:
+            # Correction: x_est(0|0), diag(P(0|0))
+            np.testing.assert_array_equal(
+                out.round(6), [1.831447, 0, 0.137931, 1]
+            )
+            # Prediction: x_est(1|0), P(1|0)
+            np.testing.assert_array_equal(
+                x[:2].round(6), [1.831447, -0.091572]
+            )
+            np.testing.assert_array_equal(
+                x[2:].round(6), [0.150431, 0.037218, 0.037218, 0.788781]
+            )
+    np.testing.assert_array_equal(out[:2].round(6), [-0.837418, 1.304110])
+    np.testing.assert_array_equal(x[:2].round(6), [-0.772213, 1.365460])

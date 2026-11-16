@@ -18,6 +18,11 @@ KFPSS
     prediction-error identification).
 KFFSS
     Steady-state Kalman filter in filtering form.
+EKFP
+    Extended Kalman filter in prediction form, of a nonlinear
+    discrete-time model (KFP is the case of a linear model).
+EKFF
+    Extended Kalman filter in filtering form.
 
 The classes have concise names; the functions that make them in other
 ways (e.g. the optimal gain from Q and R) are named descriptively.
@@ -34,6 +39,9 @@ kalman_predict_f
     Prediction step: x_est(k+1|k) and P(k+1|k) given the input u(k).
 kf_update
     One complete time step (correction and prediction) of a Kalman filter.
+ekf_update
+    One complete time step of an extended Kalman filter, given the
+    model's functions F and H.
 steady_state_kf_gain
     Steady-state correction gain Kf and error covariances (solves the DARE).
 make_steady_state_KFP_with_fixedABCDQR
@@ -54,6 +62,7 @@ from cas_models.param_utils import make_list_of_enumerated_names
 from cas_models.validation import (
     as_casadi_matrix,
     check_system_dimensions,
+    is_ss_dt,
 )
 
 
@@ -290,42 +299,182 @@ def _signal_names(outputs, sizes):
     return names
 
 
+def _sx_function(func):
+    """A model's function as an SX function (expanded if it's an MX
+    function), so the filter's graph can be built in SX."""
+    return func if func.is_a("SXFunction") else func.expand()
+
+
+def _model_params(model, F):
+    """{name: SX symbol} of the model's parameters: its own symbols if
+    they are SX, else new SX symbols of the same names and shapes."""
+    params = {}
+    for i, (name, p) in enumerate(model.params.items()):
+        if isinstance(p, cas.SX):
+            params[name] = p
+        else:
+            params[name] = cas.SX.sym(name, *F.size_in(3 + i))
+    return params
+
+
+def _merge_params(model_params, other_params):
+    """The model's parameters and the symbols in Q and R, sorted by
+    name (a symbol in both counts once; different symbols with the same
+    name raise ValueError)."""
+    params = dict(model_params)
+    for name, p in other_params.items():
+        if name in params and not cas.is_equal(params[name], p):
+            raise ValueError(
+                f"two different parameters are named {name!r} (in the model "
+                "and in Q or R)"
+            )
+        params[name] = p
+    return {name: params[name] for name in sorted(params)}
+
+
+def ekf_update(F, H, xk_pred, Pk_pred, Q, R, yk, uk=None, t=0.0, params=()):
+    """Carry out one complete time step of an extended Kalman filter,
+    with the model's state transition and output functions F and H
+    (cas.Function, (t, xk, uk, *params) -> xkp1 and yk, as those of a
+    StateSpaceModelDT):
+    1. Linearize the output function about the prior estimate,
+        C(k) = dH/dx at (x_est(k|k-1), u(k)), predict the output
+        y_est(k|k-1) = H(x_est(k|k-1), u(k)) and correct the state
+        estimates with the measurement y(k) (kalman_update_f):
+            x_est(k|k-1) -> x_est(k|k)
+            P(k|k-1) -> P(k|k)
+    2. Linearize the state transition function about the posterior
+        estimate, A(k) = dF/dx at (x_est(k|k), u(k)), and predict:
+            x_est(k+1|k) = F(x_est(k|k), u(k))
+            P(k+1|k) = A(k) P(k|k) A'(k) + Q
+    The Jacobians are computed by automatic differentiation. With a
+    linear model, this is kf_update.
+
+    Numerical arguments yk and uk are converted to cas.DM. Symbolic
+    arguments (cas.SX, or cas.MX if F and H are MX functions or
+    numerical) are passed through, so this function can be used to
+    build a cas.Function.
+
+    Arguments:
+    F, H : cas.Function
+        State transition and output functions of the model, with inputs
+        named t, xk, uk, ... and outputs xkp1 and yk.
+    xk_pred : (n, 1) vector
+        Prior estimate of the states, x_est(k|k-1).
+    Pk_pred : (n, n) matrix
+        Prior estimate of the state error covariance, P(k|k-1).
+    Q : (n, n) matrix
+        State error covariance.
+    R : (ny, ny) matrix
+        Measurement error covariance.
+    yk : (ny, 1) vector
+        System output measurements at current time k.
+    uk : (nu, 1) vector, optional
+        System inputs at current time k. Only optional if nu = 0.
+    t : float or symbol, default 0.0
+        Time at k.
+    params : sequence, optional
+        Values of the model's parameters, in the order of F and H's
+        arguments after uk.
+
+    Returns:
+    xk_est, Pk, xkp1_est, Pkp1, yk_pred, Kf : as kf_update.
+    """
+    if uk is None:
+        uk = cas.DM.zeros(0)
+    else:
+        uk = as_casadi_matrix(uk, "uk")
+    yk = as_casadi_matrix(yk, "yk")
+    assert uk.shape == (F.size1_in(2), 1), "uk.shape"
+    assert yk.shape == (H.size1_out(0), 1), "yk.shape"
+    params = list(params)
+    F_x = F.factory("F_x", F.name_in(), ["jac:xkp1:xk"])
+    H_x = H.factory("H_x", H.name_in(), ["jac:yk:xk"])
+
+    # Update states based on current measurement
+    Ck = H_x(t, xk_pred, uk, *params)
+    yk_pred = H(t, xk_pred, uk, *params)
+    xk_est, Pk, Kf, _ = kalman_update_f(Ck, R, xk_pred, Pk_pred, yk_pred, yk)
+
+    # Predictions based on current inputs
+    Ak = F_x(t, xk_est, uk, *params)
+    xkp1_est = F(t, xk_est, uk, *params)
+    Pkp1 = Ak @ Pk @ Ak.T + Q
+
+    return xk_est, Pk, xkp1_est, Pkp1, yk_pred, Kf
+
+
 class _KF(StateSpaceModelDT):
-    """Base class of the dynamic Kalman filters KFP and KFF (see their
-    docstrings), which differ only in their outputs.
+    """Base class of the dynamic Kalman filters KFP and KFF and the
+    extended Kalman filters EKFP and EKFF (see their docstrings): a
+    filter of a discrete-time model, linear or not (one step is
+    ekf_update; for a linear model, the Jacobians are its A and C and
+    this is the Kalman filter). The prediction and filtering forms
+    differ only in their outputs.
 
     outputs is a list of the names of the output signals, each a vector
     named <name>_1, <name>_2, ...:
         "xk_est", "xk_est_var" : x_est(k|k), diag(P(k|k))
-        "yk_est", "yk_est_var" : y_est(k|k), diag(C P(k|k) C')
+        "yk_est", "yk_est_var" : y_est(k|k) = H(x_est(k|k), u(k)),
+            diag(C P(k|k) C')
         "xkp1_est", "xkp1_est_var" : x_est(k+1|k), diag(P(k+1|k))
-        "ykp1_est", "ykp1_est_var" : y_est(k+1|k) = C x_est(k+1|k)
-            (D = 0 only), diag(C P(k+1|k) C')
-        "yk_pred" : y_est(k|k-1) = C x_est(k|k-1) + D u(k)
-    The output variances are those of the errors of the estimates of
-    the noise-free outputs (without R).
+        "ykp1_est", "ykp1_est_var" : y_est(k+1|k) = H(x_est(k+1|k))
+            (H independent of u only), diag(C P(k+1|k) C')
+        "yk_pred" : y_est(k|k-1) = H(x_est(k|k-1), u(k))
+    with C the Jacobian dH/dx at the estimate. The output variances are
+    those of the errors of the estimates of the noise-free outputs
+    (without R).
+
+    dt : the filter's sample time (default: the model's).
     """
 
-    def __init__(self, A, B, C, D, Q, R, outputs, dt=None, name=None):
-        A, B, C, D, Q, R = (
-            as_casadi_matrix(value, name)
-            for value, name in zip((A, B, C, D, Q, R), "ABCDQR")
-        )
-        n, nu, ny = check_system_dimensions(A, B, C, D)
-        if "ykp1_est" in outputs and not D.is_zero():
-            raise ValueError(
-                "y_est(k+1|k) depends on u(k+1), which isn't known at time "
-                "k, unless D = 0"
+    def __init__(self, model, Q, R, outputs, dt=None, name=None):
+        if not is_ss_dt(model):
+            raise TypeError(
+                "model must be a discrete-time state-space model (convert a "
+                "continuous-time model first, e.g. with "
+                "StateSpaceModelDTFromCTRK4)"
             )
-        params = _symbolic_params(A, B, C, D, Q, R)
+        n, nu, ny = model.n, model.nu, model.ny
+        if dt is None:
+            dt = model.dt
+        Q, R = as_casadi_matrix(Q, "Q"), as_casadi_matrix(R, "R")
+        if Q.shape != (n, n):
+            raise ValueError(f"Q is {Q.shape}, not (n, n) = {(n, n)}")
+        if R.shape != (ny, ny):
+            raise ValueError(f"R is {R.shape}, not (ny, ny) = {(ny, ny)}")
+        F_model = _sx_function(model.F)
+        H_model = _sx_function(model.H)
+        model_params = _model_params(model, F_model)
+        params = _merge_params(model_params, _symbolic_params(Q, R))
+        p = list(model_params.values())
+
+        t = cas.SX.sym("t")
         uk = cas.SX.sym("uk", nu)
         yk = cas.SX.sym("yk", ny)
         # The filter's states at time k: x_est(k|k-1) and P(k|k-1)
         xk_pred = cas.SX.sym("xk_pred", n)
         Pk_pred = cas.SX.sym("Pk_pred", n, n)
-        xk_est, Pk, xkp1_est, Pkp1, yk_pred, _ = kf_update(
-            A, B, C, D, xk_pred, Pk_pred, Q, R, yk, uk=uk
+        xk_est, Pk, xkp1_est, Pkp1, yk_pred, _ = ekf_update(
+            F_model, H_model, xk_pred, Pk_pred, Q, R, yk, uk=uk, t=t, params=p
         )
+
+        if "ykp1_est" in outputs or "ykp1_est_var" in outputs:
+            y_next = H_model(t, xk_pred, uk, *p)
+            if "ykp1_est" in outputs and cas.depends_on(y_next, uk):
+                raise ValueError(
+                    "y_est(k+1|k) depends on u(k+1), which isn't known at "
+                    "time k, unless D = 0 (the output function doesn't "
+                    "depend on u)"
+                )
+            if cas.depends_on(y_next, t) and dt is None:
+                raise ValueError(
+                    "y_est(k+1|k): the output function depends on t, so "
+                    "the sample time dt is needed"
+                )
+        # Time at k + 1 (only used if H depends on t)
+        t_next = t if dt is None else t + dt
+        H_x = H_model.factory("H_x", H_model.name_in(), ["jac:yk:xk"])
 
         inputs = cas.vertcat(uk, yk)
         input_names = make_list_of_enumerated_names(
@@ -337,20 +486,27 @@ class _KF(StateSpaceModelDT):
         ) + make_list_of_enumerated_names("Pkp1", n * n, sep="_")
         states_next = cas.vertcat(xkp1_est, cas.vec(Pkp1))
 
+        def output_variance(Ck, P):
+            return cas.diag(Ck @ P @ Ck.T)
+
         # The possible output signals, as functions so that only those
         # included in outputs are computed (and added to the graph).
         # Each output's estimate and its error variance use the same
         # covariance: P(k|k) for y_est(k|k), P(k+1|k) for y_est(k+1|k).
         # (The SX graph keeps only the operations the diagonals need.)
+        # y_est(k+1|k) doesn't depend on u (checked above): u(k) is
+        # passed in place of u(k+1).
         signals = {
             "xk_est": lambda: xk_est,
             "xk_est_var": lambda: cas.diag(Pk),
-            "yk_est": lambda: linear_model_output(C, D, xk_est, uk),
-            "yk_est_var": lambda: cas.diag(C @ Pk @ C.T),
+            "yk_est": lambda: H_model(t, xk_est, uk, *p),
+            "yk_est_var": lambda: output_variance(H_x(t, xk_est, uk, *p), Pk),
             "xkp1_est": lambda: xkp1_est,
             "xkp1_est_var": lambda: cas.diag(Pkp1),
-            "ykp1_est": lambda: C @ xkp1_est,
-            "ykp1_est_var": lambda: cas.diag(C @ Pkp1 @ C.T),
+            "ykp1_est": lambda: H_model(t_next, xkp1_est, uk, *p),
+            "ykp1_est_var": lambda: output_variance(
+                H_x(t_next, xkp1_est, uk, *p), Pkp1
+            ),
             "yk_pred": lambda: yk_pred,
         }
         values = {signal: signals[signal]() for signal in outputs}
@@ -359,7 +515,6 @@ class _KF(StateSpaceModelDT):
         )
         y = cas.vertcat(cas.SX(0, 1), *values.values())
 
-        t = cas.SX.sym("t")
         arg_names = ["t", "xk", "uk", *params]
         F = cas.Function(
             "F",
@@ -388,6 +543,42 @@ class _KF(StateSpaceModelDT):
             state_names=state_names,
             output_names=output_names,
         )
+
+
+def _prediction_outputs(
+    state_estimates,
+    output_estimates,
+    state_variance,
+    output_variance,
+    output_predictions,
+):
+    return _output_list(
+        [
+            ("xkp1_est", state_estimates),
+            ("ykp1_est", output_estimates),
+            ("xkp1_est_var", state_variance),
+            ("ykp1_est_var", output_variance),
+            ("yk_pred", output_predictions),
+        ]
+    )
+
+
+def _filtering_outputs(
+    state_estimates,
+    output_estimates,
+    state_variance,
+    output_variance,
+    output_predictions,
+):
+    return _output_list(
+        [
+            ("xk_est", state_estimates),
+            ("yk_est", output_estimates),
+            ("xk_est_var", state_variance),
+            ("yk_est_var", output_variance),
+            ("yk_pred", output_predictions),
+        ]
+    )
 
 
 class KFP(_KF):
@@ -477,16 +668,15 @@ class KFP(_KF):
         include_output_variance=False,
         include_output_predictions=False,
     ):
-        outputs = _output_list(
-            [
-                ("xkp1_est", include_state_estimates),
-                ("ykp1_est", include_output_estimates),
-                ("xkp1_est_var", include_state_variance),
-                ("ykp1_est_var", include_output_variance),
-                ("yk_pred", include_output_predictions),
-            ]
+        outputs = _prediction_outputs(
+            include_state_estimates,
+            include_output_estimates,
+            include_state_variance,
+            include_output_variance,
+            include_output_predictions,
         )
-        super().__init__(A, B, C, D, Q, R, outputs, dt=dt, name=name)
+        model = StateSpaceModelDTFromABCD(A, B, C, D, dt=dt)
+        super().__init__(model, Q, R, outputs, dt=dt, name=name)
 
 
 class KFF(_KF):
@@ -563,16 +753,159 @@ class KFF(_KF):
         include_output_variance=False,
         include_output_predictions=False,
     ):
-        outputs = _output_list(
-            [
-                ("xk_est", include_state_estimates),
-                ("yk_est", include_output_estimates),
-                ("xk_est_var", include_state_variance),
-                ("yk_est_var", include_output_variance),
-                ("yk_pred", include_output_predictions),
-            ]
+        outputs = _filtering_outputs(
+            include_state_estimates,
+            include_output_estimates,
+            include_state_variance,
+            include_output_variance,
+            include_output_predictions,
         )
-        super().__init__(A, B, C, D, Q, R, outputs, dt=dt, name=name)
+        model = StateSpaceModelDTFromABCD(A, B, C, D, dt=dt)
+        super().__init__(model, Q, R, outputs, dt=dt, name=name)
+
+
+class EKFP(_KF):
+    """Extended Kalman filter in prediction form, which estimates the
+    states at the next time instant, x_est(k+1|k), given the data up to
+    time k.
+
+    The model of the plant is a discrete-time model, linear or not
+    (a StateSpaceModelDT: convert a continuous-time model first, e.g.
+    with StateSpaceModelDTFromCTRK4), with additive noises:
+
+        x(k+1) = F(t, x(k), u(k)) + w(k),  w(k) ~ N(0, Q)
+          y(k) = H(t, x(k), u(k)) + v(k),  v(k) ~ N(0, R)
+
+    Each time step, F and H are linearized about the latest estimates
+    (Jacobians by automatic differentiation, inside the filter's graph):
+    A(k) = dF/dx at (x_est(k|k), u(k)) and C(k) = dH/dx at
+    (x_est(k|k-1), u(k)) (see ekf_update). With a linear model, the
+    filter is KFP's. The model's parameters, and any SX symbols in Q and
+    R, become the filter's parameters (e.g. to fit them).
+
+    Filter system (inputs, states and outputs as KFP's):
+        inputs: [u(k); y(k)], names uk..., yk...
+        states: [x_est(k|k-1); vec(P(k|k-1))], names xkp1_est...,
+            Pkp1... (P is vectorized column-wise, n * n elements)
+        outputs (each optional, in this order):
+            x_est(k+1|k), names xkp1_est...
+            y_est(k+1|k) = H(x_est(k+1|k)), names ykp1_est...
+            diag(P(k+1|k)), names xkp1_est_var...
+            diag(C P(k+1|k) C'), C = dH/dx at x_est(k+1|k), names
+                ykp1_est_var...
+            y_est(k|k-1) = H(x_est(k|k-1), u(k)), names yk_pred...
+
+    As with KFP, the outputs depend directly on u(k) and y(k): see KFP's
+    docstring for which controllers it can be connected to.
+
+    Arguments:
+    model : StateSpaceModelDT
+        Discrete-time model of the plant.
+    Q : (n, n) matrix
+        State error covariance.
+    R : (ny, ny) matrix
+        Measurement error covariance.
+    dt : float, optional
+        Sample time (default: the model's). Needed for y_est(k+1|k) if
+        H depends on t (evaluated at t + dt).
+    name : str, optional
+        Name of the system.
+    include_state_estimates, include_output_estimates,
+    include_state_variance, include_output_variance,
+    include_output_predictions : bool
+        The outputs, as KFP's. y_est(k+1|k) requires an output function
+        that doesn't depend on u (D = 0).
+
+    Raises:
+    ValueError: if include_output_estimates is True and H depends on u.
+    """
+
+    def __init__(
+        self,
+        model,
+        Q,
+        R,
+        dt=None,
+        name=None,
+        include_state_estimates=True,
+        include_output_estimates=False,
+        include_state_variance=False,
+        include_output_variance=False,
+        include_output_predictions=False,
+    ):
+        outputs = _prediction_outputs(
+            include_state_estimates,
+            include_output_estimates,
+            include_state_variance,
+            include_output_variance,
+            include_output_predictions,
+        )
+        super().__init__(model, Q, R, outputs, dt=dt, name=name)
+
+
+class EKFF(_KF):
+    """Extended Kalman filter in filtering form, which estimates the
+    states at the current time instant, x_est(k|k), given the data up
+    to time k.
+
+    The model of the plant, its linearization and the filter's
+    parameters are as EKFP's (see its docstring); with a linear model,
+    the filter is KFF's.
+
+    Filter system (inputs, states and outputs as KFF's):
+        inputs: [u(k); y(k)], names uk..., yk...
+        states: [x_est(k|k-1); vec(P(k|k-1))], names xkp1_est...,
+            Pkp1... (P is vectorized column-wise, n * n elements)
+        outputs (each optional, in this order):
+            x_est(k|k), names xk_est...
+            y_est(k|k) = H(x_est(k|k), u(k)), names yk_est...
+            diag(P(k|k)), names xk_est_var...
+            diag(C P(k|k) C'), C = dH/dx at x_est(k|k), names
+                yk_est_var...
+            y_est(k|k-1) = H(x_est(k|k-1), u(k)), names yk_pred...
+
+    As with KFF, the outputs depend directly on y(k), and on u(k) only
+    if H does: see KFF's docstring for which controllers it can be
+    connected to.
+
+    Arguments:
+    model : StateSpaceModelDT
+        Discrete-time model of the plant.
+    Q : (n, n) matrix
+        State error covariance.
+    R : (ny, ny) matrix
+        Measurement error covariance.
+    dt : float, optional
+        Sample time (default: the model's).
+    name : str, optional
+        Name of the system.
+    include_state_estimates, include_output_estimates,
+    include_state_variance, include_output_variance,
+    include_output_predictions : bool
+        The outputs, as KFF's.
+    """
+
+    def __init__(
+        self,
+        model,
+        Q,
+        R,
+        dt=None,
+        name=None,
+        include_state_estimates=True,
+        include_output_estimates=False,
+        include_state_variance=False,
+        include_output_variance=False,
+        include_output_predictions=False,
+    ):
+        outputs = _filtering_outputs(
+            include_state_estimates,
+            include_output_estimates,
+            include_state_variance,
+            include_output_variance,
+            include_output_predictions,
+        )
+        super().__init__(model, Q, R, outputs, dt=dt, name=name)
 
 
 def _as_numeric_matrix(value, name):
