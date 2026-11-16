@@ -7,15 +7,19 @@ import pytest
 import scipy
 
 from cas_models.discrete_time.kalman import (
+    KFF,
+    KFFSS,
+    KFP,
+    KFPSS,
     kalman_predict_f,
     kalman_update_f,
     kf_update,
     linear_model_output,
     linear_model_state_transition,
-    make_KF_for_filtering_with_fixedABCDQR,
-    make_KF_for_prediction_with_fixedABCDQR,
-    make_steady_state_KF_for_filtering_with_fixedABCDQR,
-    make_steady_state_KF_for_prediction_with_fixedABCDQR,
+    make_KFF_with_fixedABCDQR,
+    make_KFP_with_fixedABCDQR,
+    make_steady_state_KFF_with_fixedABCDQR,
+    make_steady_state_KFP_with_fixedABCDQR,
     steady_state_kf_gain,
 )
 from cas_models.discrete_time.models import StateSpaceModelDTFromABCD
@@ -253,7 +257,7 @@ def _kf_test_point():
 
 def _check_KF_system(kf, est_name):
     """Checks common to both forms of the filter."""
-    assert kf.name == "KF"
+    assert kf.name is None
     assert kf.dt == 0.5
     assert (kf.n, kf.nu, kf.ny) == (6, 3, 8)
     assert kf.input_names == ["uk", "yk_1", "yk_2"]
@@ -289,16 +293,14 @@ def _check_KF_system(kf, est_name):
     np.testing.assert_array_equal(np.array(cas.DM(sp, 1))[4:], 0)
 
 
-def test_make_KF_for_prediction_with_fixedABCDQR():
+def test_make_KFP_with_fixedABCDQR():
     A, B, C, D, Q, R = _test_matrices()
     all_outputs = dict(
         include_output_estimates=True,
         include_state_variance=True,
         include_output_variance=True,
     )
-    kf = make_KF_for_prediction_with_fixedABCDQR(
-        A, B, C, D, Q, R, dt=0.5, **all_outputs
-    )
+    kf = make_KFP_with_fixedABCDQR(A, B, C, D, Q, R, dt=0.5, **all_outputs)
     _check_KF_system(kf, "kp1_est")
 
     # Outputs: x_est(k+1|k), C x_est(k+1|k), diag(P(k+1|k)),
@@ -320,9 +322,9 @@ def test_make_KF_for_prediction_with_fixedABCDQR():
     )
 
     # Default and selected outputs
-    kf = make_KF_for_prediction_with_fixedABCDQR(A, B, C, D, Q, R)
+    kf = make_KFP_with_fixedABCDQR(A, B, C, D, Q, R)
     assert kf.output_names == ["xkp1_est_1", "xkp1_est_2"]
-    kf = make_KF_for_prediction_with_fixedABCDQR(
+    kf = make_KFP_with_fixedABCDQR(
         A,
         B,
         C,
@@ -337,31 +339,29 @@ def test_make_KF_for_prediction_with_fixedABCDQR():
     # y_est(k+1|k) needs D = 0
     D1 = cas.DM([[0.0], [1.0]])
     with pytest.raises(ValueError, match="unless D = 0"):
-        make_KF_for_prediction_with_fixedABCDQR(
+        make_KFP_with_fixedABCDQR(
             A, B, C, D1, Q, R, include_output_estimates=True
         )
-    kf = make_KF_for_prediction_with_fixedABCDQR(
+    kf = make_KFP_with_fixedABCDQR(
         A, B, C, D1, Q, R, include_output_variance=True
     )
     assert kf.ny == 4
 
     # NumPy arrays are accepted
-    kf_np = make_KF_for_prediction_with_fixedABCDQR(
+    kf_np = make_KFP_with_fixedABCDQR(
         A_test, B_test, C_test, D_test, Q_test, R_test
     )
     np.testing.assert_allclose(kf_np.H(0.0, xk, uk), xkp1_est)
 
 
-def test_make_KF_for_filtering_with_fixedABCDQR():
+def test_make_KFF_with_fixedABCDQR():
     A, B, C, D, Q, R = _test_matrices()
     all_outputs = dict(
         include_output_estimates=True,
         include_state_variance=True,
         include_output_variance=True,
     )
-    kf = make_KF_for_filtering_with_fixedABCDQR(
-        A, B, C, D, Q, R, dt=0.5, **all_outputs
-    )
+    kf = make_KFF_with_fixedABCDQR(A, B, C, D, Q, R, dt=0.5, **all_outputs)
     _check_KF_system(kf, "k_est")
 
     # Outputs: x_est(k|k), y_est(k|k), diag(P(k|k)), diag(C P(k|k) C')
@@ -380,16 +380,16 @@ def test_make_KF_for_filtering_with_fixedABCDQR():
 
     # With D non-zero, they depend on u(k) too
     D1 = cas.DM([[0.0], [1.0]])
-    kf = make_KF_for_filtering_with_fixedABCDQR(
+    kf = make_KFF_with_fixedABCDQR(
         A, B, C, D1, Q, R, include_output_estimates=True
     )
     sp = kf.H.sparsity_jac("uk", "yk")
     np.testing.assert_array_equal(np.array(cas.DM(sp, 1))[:, 0], 1)
 
     # Default and selected outputs
-    kf = make_KF_for_filtering_with_fixedABCDQR(A, B, C, D, Q, R)
+    kf = make_KFF_with_fixedABCDQR(A, B, C, D, Q, R)
     assert kf.output_names == ["xk_est_1", "xk_est_2"]
-    kf = make_KF_for_filtering_with_fixedABCDQR(
+    kf = make_KFF_with_fixedABCDQR(
         A,
         B,
         C,
@@ -405,8 +405,8 @@ def test_make_KF_for_filtering_with_fixedABCDQR():
 KF_FORMS = {
     # form: (constructor, index of the state estimates in kf_update's
     # results, and of the plant states they estimate, relative to k)
-    "prediction": (make_KF_for_prediction_with_fixedABCDQR, 4, 1),
-    "filtering": (make_KF_for_filtering_with_fixedABCDQR, 0, 0),
+    "prediction": (make_KFP_with_fixedABCDQR, 4, 1),
+    "filtering": (make_KFF_with_fixedABCDQR, 0, 0),
 }
 
 
@@ -540,8 +540,8 @@ def test_make_KF_steady_state_variances():
     UY = np.random.default_rng(2).normal(size=(nT, 3))
     x0 = np.concatenate([np.zeros(2), np.eye(2).flatten(order="F")])
     for make_KF, P in [
-        (make_KF_for_prediction_with_fixedABCDQR, P_pred),
-        (make_KF_for_filtering_with_fixedABCDQR, P_filt),
+        (make_KFP_with_fixedABCDQR, P_pred),
+        (make_KFF_with_fixedABCDQR, P_filt),
     ]:
         kf = make_KF(
             A_test,
@@ -607,12 +607,12 @@ def _controller_with_delay():
     )
 
 
-def test_make_KF_for_prediction_closed_loop():
+def test_make_KFP_closed_loop():
     """The prediction form's outputs x_est(k+1|k) depend directly on
     u(k), so a controller with direct transmission from its inputs to
     its output u(k) forms an algebraic loop, but a controller with a
     one-step delay does not."""
-    make_KF = make_KF_for_prediction_with_fixedABCDQR
+    make_KF = make_KFP_with_fixedABCDQR
     with pytest.raises(ValueError, match="Algebraic loop"):
         _connect_plant_KF_controller(
             make_KF, "xkp1_est", _controller_with_direct_transmission()
@@ -623,11 +623,11 @@ def test_make_KF_for_prediction_closed_loop():
     assert (system.n, system.nu) == (2 + 6 + 1, 0)
 
 
-def test_make_KF_for_filtering_closed_loop():
+def test_make_KFF_closed_loop():
     """The filtering form's outputs x_est(k|k) don't depend directly on
     u(k) when D = 0, so a controller with direct transmission doesn't
     form an algebraic loop."""
-    make_KF = make_KF_for_filtering_with_fixedABCDQR
+    make_KF = make_KFF_with_fixedABCDQR
     system = _connect_plant_KF_controller(
         make_KF, "xk_est", _controller_with_direct_transmission()
     )
@@ -724,13 +724,13 @@ STEADY_STATE_KF_FORMS = {
     # form: (steady-state KF constructor, dynamic KF constructor,
     # output names prefix)
     "prediction": (
-        make_steady_state_KF_for_prediction_with_fixedABCDQR,
-        make_KF_for_prediction_with_fixedABCDQR,
+        make_steady_state_KFP_with_fixedABCDQR,
+        make_KFP_with_fixedABCDQR,
         "kp1_est",
     ),
     "filtering": (
-        make_steady_state_KF_for_filtering_with_fixedABCDQR,
-        make_KF_for_filtering_with_fixedABCDQR,
+        make_steady_state_KFF_with_fixedABCDQR,
+        make_KFF_with_fixedABCDQR,
         "k_est",
     ),
 }
@@ -742,7 +742,7 @@ def test_make_steady_state_KF(form):
     A, B, C, D, Q, R = _test_matrices()
     kf = make_KF_ss(A, B, C, D, Q, R, dt=0.5, include_output_estimates=True)
     assert isinstance(kf, StateSpaceModelDTFromABCD)
-    assert kf.name == "KF"
+    assert kf.name is None
     assert kf.dt == 0.5
     assert (kf.n, kf.nu, kf.ny) == (2, 3, 4)
     assert kf.input_names == ["uk", "yk_1", "yk_2"]
@@ -838,7 +838,7 @@ def test_make_steady_state_KF_closed_loop():
     """Feedthrough as in the dynamic filters: the prediction form forms
     an algebraic loop with a controller with direct transmission, the
     filtering form doesn't."""
-    make_KF = make_steady_state_KF_for_prediction_with_fixedABCDQR
+    make_KF = make_steady_state_KFP_with_fixedABCDQR
     with pytest.raises(ValueError, match="Algebraic loop"):
         _connect_plant_KF_controller(
             make_KF, "xkp1_est", _controller_with_direct_transmission()
@@ -848,8 +848,229 @@ def test_make_steady_state_KF_closed_loop():
     )
     assert (system.n, system.nu) == (2 + 2 + 1, 0)
 
-    make_KF = make_steady_state_KF_for_filtering_with_fixedABCDQR
+    make_KF = make_steady_state_KFF_with_fixedABCDQR
     system = _connect_plant_KF_controller(
         make_KF, "xk_est", _controller_with_direct_transmission()
     )
     assert (system.n, system.nu) == (2 + 2, 0)
+
+
+# Classes: KFP, KFF, KFPSS, KFFSS
+
+
+def _simulate(model, U, x0=None, params=()):
+    """Outputs of model simulated over the inputs U (rows), as an array
+    (rows: time steps, one more than U)."""
+    x = np.zeros(model.n) if x0 is None else np.asarray(x0, dtype=float)
+    Y = []
+    for u in U:
+        Y.append(np.asarray(model.H(0, x, u, *params)).ravel())
+        x = np.asarray(model.F(0, x, u, *params)).ravel()
+    return np.array(Y)
+
+
+@pytest.mark.parametrize(
+    "make, cls",
+    [
+        (make_KFP_with_fixedABCDQR, KFP),
+        (make_KFF_with_fixedABCDQR, KFF),
+        (make_steady_state_KFP_with_fixedABCDQR, KFPSS),
+        (make_steady_state_KFF_with_fixedABCDQR, KFFSS),
+    ],
+)
+def test_constructors_make_classes(make, cls):
+    """Each constructor function makes its class, unnamed unless given a
+    name (naming is left to the user)"""
+    kf = make(*_test_matrices(), dt=0.5)
+    assert type(kf) is cls
+    assert kf.name is None and kf.dt == 0.5
+    assert make(*_test_matrices(), name="observer").name == "observer"
+
+
+def test_KFPSS_symbolic_gain():
+    """A symbolic K becomes the filter's parameters; with values it is
+    the filter with that gain (here the optimal one)"""
+    A, B, C, D, Q, R = _test_matrices()
+    Kf, _, _, _ = steady_state_kf_gain(A, C, Q, R)
+    Kp = np.asarray(A) @ Kf
+    K = cas.SX.sym("K", 2, 2)
+    kf_sym = KFPSS(A, B, C, D, K, include_output_predictions=True)
+    # (a matrix symbol's elements, numbered column by column)
+    assert list(kf_sym.params) == ["K_0", "K_1", "K_2", "K_3"]
+    kf_num = make_steady_state_KFP_with_fixedABCDQR(
+        A, B, C, D, Q, R, include_output_predictions=True
+    )
+    rng = np.random.default_rng(0)
+    U = rng.normal(size=(20, 3))  # [u; y]
+    np.testing.assert_allclose(
+        _simulate(kf_sym, U, params=list(Kp.ravel(order="F"))),
+        _simulate(kf_num, U),
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize("cls", [KFPSS, KFFSS])
+def test_KFSS_output_predictions(cls):
+    """y_est(k|k-1) = C x_est(k|k-1) (D = 0): with the prediction form,
+    the previous step's y_est(k|k-1)'s successor y_est(k+1|k)"""
+    A, B, C, D, Q, R = _test_matrices()
+    K = np.array([[0.3, 0.1], [0.05, 0.4]])
+    kf = cls(A, B, C, D, K, include_output_predictions=True)
+    assert kf.output_names[-2:] == ["yk_pred_1", "yk_pred_2"]
+    rng = np.random.default_rng(1)
+    U = rng.normal(size=(15, 3))
+    x = np.zeros(2)
+    for u in U:
+        y = np.asarray(kf.H(0, x, u)).ravel()
+        np.testing.assert_allclose(y[-2:], np.asarray(C) @ x, atol=1e-14)
+        x = np.asarray(kf.F(0, x, u)).ravel()
+    if cls is KFPSS:
+        kf = KFPSS(
+            A,
+            B,
+            C,
+            D,
+            K,
+            include_state_estimates=False,
+            include_output_estimates=True,
+            include_output_predictions=True,
+        )
+        Y = _simulate(kf, U)
+        np.testing.assert_allclose(Y[1:, 2:], Y[:-1, :2], atol=1e-14)
+
+
+def test_KFPSS_innovations():
+    """Data from the innovations form x(k+1) = A x + B u + K e,
+    y = C x + e: the filter with that K, from the true initial state,
+    predicts y(k) with errors e(k), exactly"""
+    A, B, C, D, _, _ = _test_matrices()
+    A, B, C = (np.asarray(M) for M in (A, B, C))
+    K = np.array([[0.3, 0.1], [0.05, 0.4]])
+    rng = np.random.default_rng(2)
+    nT = 50
+    u, e = rng.normal(size=(nT, 1)), 0.1 * rng.normal(size=(nT, 2))
+    x, y = np.zeros(2), []
+    for k in range(nT):
+        y.append(C @ x + e[k])
+        x = A @ x + B @ u[k] + K @ e[k]
+    y = np.array(y)
+    kf = KFPSS(
+        A,
+        B,
+        C,
+        D,
+        K,
+        include_state_estimates=False,
+        include_output_predictions=True,
+    )
+    y_pred = _simulate(kf, np.hstack([u, y]))
+    np.testing.assert_allclose(y - y_pred, e, atol=1e-12)
+
+
+def test_KFPSS_prediction_error_fit():
+    """Prediction-error identification: the filter with a symbolic gain
+    fitted to the data (estimate_params on its output predictions)
+    recovers the gain of the innovations form that made them"""
+    from cas_models.discrete_time.estimate import estimate_params
+
+    # (a coupling strong enough for the output to inform both gains)
+    A = np.array([[0.8, 0.5], [0.0, 0.6]])
+    B = np.array([[0.0], [1.0]])
+    C = np.array([[1.0, 0.0]])
+    D = np.zeros((1, 1))
+    K_true = np.array([[0.5], [0.2]])
+    rng = np.random.default_rng(3)
+    nT = 2000
+    u, e = rng.normal(size=(nT, 1)), 0.1 * rng.normal(size=(nT, 1))
+    x, y = np.zeros(2), []
+    for k in range(nT):
+        y.append(C @ x + e[k])
+        x = A @ x + B @ u[k] + K_true @ e[k]
+    y = np.array(y)
+    K = cas.vertcat(cas.SX.sym("k_1"), cas.SX.sym("k_2"))
+    kf = KFPSS(
+        A,
+        B,
+        C,
+        D,
+        K,
+        dt=1.0,
+        include_state_estimates=False,
+        include_output_predictions=True,
+    )
+    t = np.arange(nT)
+    params_est, _, _ = estimate_params(
+        kf,
+        t,
+        np.hstack([u, y])[:-1],
+        y,
+        params_init={"k_1": 0.0, "k_2": 0.0},
+        solver_options={"print_level": 0},
+    )
+    K_est = [params_est["k_1"], params_est["k_2"]]
+    np.testing.assert_allclose(K_est, K_true.ravel(), atol=0.05)
+
+
+def test_KFP_symbolic_QR():
+    """Symbolic Q and R become the dynamic filter's parameters; with
+    values it is the filter with those covariances"""
+    A, B, C, D, Q, R = _test_matrices()
+    q, r = cas.SX.sym("q"), cas.SX.sym("r")
+    kf_sym = KFP(A, B, C, D, q * cas.DM.eye(2), r * cas.DM.eye(2))
+    assert list(kf_sym.params) == ["q", "r"]
+    kf_num = KFP(A, B, C, D, Q, R)
+    rng = np.random.default_rng(4)
+    U = rng.normal(size=(10, 3))
+    x0 = np.r_[0.0, 0.0, np.eye(2).ravel()]
+    np.testing.assert_allclose(
+        _simulate(kf_sym, U, x0, params=[0.01, 0.1]),
+        _simulate(kf_num, U, x0),
+        atol=1e-12,
+    )
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: KFPSS(A_test, B_test, C_test, D_test, np.ones((2, 2)) * 0.1),
+        lambda: KFFSS(A_test, B_test, C_test, D_test, np.ones((2, 2)) * 0.1),
+        lambda: KFP(A_test, B_test, C_test, D_test, Q_test, R_test),
+        lambda: make_steady_state_KFP_with_fixedABCDQR(
+            A_test,
+            B_test,
+            C_test,
+            D_test,
+            Q_test,
+            R_test,
+            dt=0.5,
+            include_output_predictions=True,
+        ),
+    ],
+)
+def test_save_load(make, tmp_path):
+    """The filters save as their class and arguments and load as the same
+    filter"""
+    from cas_models.yaml_utils import from_yaml, load_model
+
+    kf = make()
+    for loaded in (
+        from_yaml(kf.to_yaml()),
+        load_model(kf.save(tmp_path / "kf")),
+    ):
+        assert type(loaded) is type(kf)
+        assert (
+            loaded.name == kf.name and loaded.output_names == kf.output_names
+        )
+        rng = np.random.default_rng(5)
+        U = rng.normal(size=(5, kf.nu))
+        x0 = np.r_[0.0, 0.0, np.eye(2).ravel()][: kf.n]
+        np.testing.assert_allclose(
+            _simulate(loaded, U, x0), _simulate(kf, U, x0), atol=1e-14
+        )
+
+
+def test_KFSS_gain_shape():
+    with pytest.raises(ValueError, match="K is"):
+        KFPSS(A_test, B_test, C_test, D_test, np.ones((2, 1)))
+    with pytest.raises(ValueError, match="K is"):
+        KFFSS(A_test, B_test, C_test, D_test, np.ones((3, 2)))

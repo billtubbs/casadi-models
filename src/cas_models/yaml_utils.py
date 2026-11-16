@@ -748,6 +748,7 @@ MODEL_MODULES = [
     "cas_models.continuous_time.models",
     "cas_models.continuous_time.regulators",
     "cas_models.discrete_time.models",
+    "cas_models.discrete_time.kalman",
 ]
 
 

@@ -416,6 +416,52 @@ is a complete example.
 MATLAB's `arx` and `filter([zeros(1, nk) B], [1 A], u)`. Octave's `arx`
 counts the delay `nk` one less (see the class docstring).
 
+## Kalman Filters
+
+`cas_models.discrete_time.kalman` has linear Kalman filters as models
+(inputs `[u(k); y(k)]`), so they can be simulated, connected to
+controllers and plants, saved, or fitted:
+
+| Class | Filter | Built from |
+|---|---|---|
+| `KFP` | dynamic (time-varying gain), prediction form: x_est(k+1\|k) | A, B, C, D, Q, R |
+| `KFF` | dynamic, filtering form: x_est(k\|k) | A, B, C, D, Q, R |
+| `KFPSS` | steady-state (fixed gain), prediction form: the innovations form | A, B, C, D, K |
+| `KFFSS` | steady-state, filtering form | A, B, C, D, Kf |
+
+The class names are concise; the functions that make them say more: `make_KFP_with_fixedABCDQR`,
+`make_steady_state_KFP_with_fixedABCDQR` (the optimal gain, from the
+discrete algebraic Riccati equation), etc. Any matrix may be symbolic:
+its symbols become the filter's parameters. `KFP` and `KFF` are
+nonlinear in their states (the error covariance recursion);
+`KFPSS` and `KFFSS` are linear systems.
+
+With `include_output_predictions=True` a filter also outputs
+y_est(k|k-1), the prediction of y(k) before it is measured. Fitting a
+`KFPSS` with a symbolic gain to data by `estimate_params`, comparing
+these predictions with y, is prediction-error identification with the
+innovations form (Ljung, *System Identification*, 1999): the model and
+the gain K are estimated together, and output-error is the case K = 0.
+
+```python
+import casadi as cas
+import numpy as np
+from cas_models.discrete_time.kalman import KFPSS
+
+A = np.array([[0.8, 0.5], [0.0, 0.6]])
+B = np.array([[0.0], [1.0]])
+C = np.array([[1.0, 0.0]])
+D = np.zeros((1, 1))
+K = cas.vertcat(cas.SX.sym("k_1"), cas.SX.sym("k_2"))  # gain to fit
+
+predictor = KFPSS(
+    A, B, C, D, K, dt=1.0,
+    include_state_estimates=False, include_output_predictions=True,
+)
+print(predictor.output_names, list(predictor.params))
+# ['yk_pred'] ['k_1', 'k_2']
+```
+
 ## Saving and Reconstructing Models
 
 ### Model specs
@@ -624,6 +670,27 @@ the CasADi version.
 
 ## To do
 
+- **Kalman filters in identification (2026-11-16):**
+  - SISO versions of KFP and KFF for identification: with one output,
+    the gain's linear system is a scalar division, so the dynamic
+    filter with symbolic Q and R stays cheap (the cost is the n(n+1)/2
+    covariance states).
+  - Multi-step prediction-error objective: correct with the filter up to
+    time k, then simulate h steps without corrections, so a fit isn't
+    dominated by one-step-ahead accuracy (the slow dynamics matter for
+    control over minutes).
+  - Grey-box maximum likelihood of nonlinear stochastic models with an
+    extended Kalman filter inside the likelihood (Kristensen, Madsen
+    and Jorgensen, 2004, Automatica; CTSM); needs EKFP and EKFF.
+  - Estimating Q and R of an identified model from its innovations'
+    autocovariances (autocovariance least squares: Odelson, Rajamani
+    and Rawlings, 2006, Automatica; Rajamani and Rawlings for offset-free
+    MPC disturbance models). Check its limitations in practice.
+  - Later, maybe: subspace identification (N4SID, Van Overschee and De
+    Moor, 1996), estimating A, B, C, D and K without iteration (e.g. as
+    starts for a prediction-error fit).
+  - Maybe a common StateEstimator base (or mixin) once EKFs exist and
+    something needs the type.
 - **Estimation statistics in fitted models:** a model saved after
   `set_param_values(model, params_est)` holds its structure and the
   values, but nothing about how they were found (standard errors,
