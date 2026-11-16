@@ -28,7 +28,7 @@ from cas_models.continuous_time.models import (
 from cas_models.continuous_time.regulators import SSModelCTPIInt
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
-    StateSpaceModelDTARXSISO,
+    SSModelDTARXSISO,
 )
 from cas_models.recipes import recipe
 from cas_models.transformations import (
@@ -49,9 +49,9 @@ from cas_models.yaml_utils import (
 
 def test_class_recipe():
     """The class and the arguments given (not the defaults)"""
-    model = StateSpaceModelDTARXSISO(na=2, nb=1, dt=2.0)
+    model = SSModelDTARXSISO(na=2, nb=1, dt=2.0)
     assert recipe(model) == {
-        "class": StateSpaceModelDTARXSISO,
+        "class": SSModelDTARXSISO,
         "args": {"na": 2, "nb": 1, "dt": 2.0},
     }
 
@@ -183,9 +183,9 @@ def test_tuple_and_complex_values():
         "tuple": [1, {"tuple": [2.0, "a"]}, {"complex": [0.5, 0.25]}]
     }
     assert _decode(node, None) == value
-    model = StateSpaceModelDTARXSISO(poles=[0.8 + 0.3j, 0.8 - 0.3j], nb=1)
+    model = SSModelDTARXSISO(poles=[0.8 + 0.3j, 0.8 - 0.3j], nb=1)
     data = yaml.safe_load(to_yaml(model))
-    assert data["class"] == "StateSpaceModelDTARXSISO"
+    assert data["class"] == "SSModelDTARXSISO"
     assert_same_functions(from_yaml(to_yaml(model)), model)
 
 
@@ -212,7 +212,7 @@ def test_symbols_written():
 
 
 def test_symbols_vector_and_matrix():
-    model = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
+    model = SSModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
     data = yaml.safe_load(to_yaml(model))
     assert data["args"]["poles"] == {"symbol": "p", "shape": [2]}
     assert_same_functions(from_yaml(to_yaml(model)), model)
@@ -240,8 +240,8 @@ def test_symbols_element_of_vector_clash():
     """A scalar symbol named like an element of a vector symbol"""
     model = vstack_systems(
         [
-            StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1, name="a"),
-            StateSpaceModelDTARXSISO(
+            SSModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1, name="a"),
+            SSModelDTARXSISO(
                 poles=[cas.SX.sym("p_0")], nb=1, name="b"
             ),
         ]
@@ -388,7 +388,7 @@ def test_set_param_values_some_and_nested():
 
 def test_set_param_values_numpy_values():
     """Values as estimate_params() may give them (numpy numbers, arrays)"""
-    arx = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
+    arx = SSModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
     fitted = set_param_values(
         arx, {"p_0": np.float64(0.9), "b_1": np.array([0.2])}
     )
@@ -410,7 +410,7 @@ def test_set_param_values_ct_and_vector():
         np.asarray(fixed.f(0.0, x, u, 10.0)),
         np.asarray(model.f(0.0, x, u, 2.0, 10.0, 5.0)),
     )
-    arx = StateSpaceModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
+    arx = SSModelDTARXSISO(poles=cas.SX.sym("p", 2), nb=1)
     fixed = set_param_values(arx, {"p_0": 0.9})
     assert list(fixed.params) == ["p_1", "b_1"]
     np.testing.assert_allclose(

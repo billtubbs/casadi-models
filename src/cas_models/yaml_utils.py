@@ -57,9 +57,9 @@ set_param_values) from models given in the same way, to any depth:
     args:
       name: R11
       systems:
-      - class: StateSpaceModelDTARXSISO
+      - class: SSModelDTARXSISO
         args: {na: 2, nb: 2, dt: 2.0, name: CRAC1}
-      - class: StateSpaceModelDTARXSISO
+      - class: SSModelDTARXSISO
         args: {na: 1, nb: 1, dt: 2.0, name: CRAC2}
 
 Every model in the document is a mapping of a class or a function name

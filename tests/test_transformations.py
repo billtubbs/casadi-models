@@ -18,7 +18,7 @@ from cas_models.continuous_time.models import (
 from cas_models.continuous_time.regulators import SSModelCTPIInt
 from cas_models.discrete_time.models import (
     StateSpaceModelDT,
-    StateSpaceModelDTARXSISO,
+    SSModelDTARXSISO,
     StateSpaceModelDTFromABCD,
     StateSpaceModelDTFromCT,
     StateSpaceModelDTTFSISO,
@@ -1393,14 +1393,14 @@ def fixed_models(kind):
                 -1.0, [[1.0, 0.5]], 2.0, [[0.0, 0.1]], name="c"
             ),
         )
-    from cas_models.discrete_time.models import StateSpaceModelDTARXSISO
+    from cas_models.discrete_time.models import SSModelDTARXSISO
 
     return (
-        StateSpaceModelDTARXSISO(poles=[0.9], B=[0.2], dt=1.0, name="a"),
-        StateSpaceModelDTARXSISO(
+        SSModelDTARXSISO(poles=[0.9], B=[0.2], dt=1.0, name="a"),
+        SSModelDTARXSISO(
             poles=[0.8, 0.5], B=[0.1, -0.05], nk=0, dt=1.0, name="b"
         ),
-        StateSpaceModelDTARXSISO(poles=[0.7], B=[0.3], dt=1.0, name="c"),
+        SSModelDTARXSISO(poles=[0.7], B=[0.3], dt=1.0, name="c"),
     )
 
 
@@ -1443,10 +1443,10 @@ def test_hstack_systems(kind):
 def test_hstack_systems_output_names():
     """Summed outputs keep a name all the systems share, else are named
     after all of them (not after the first)"""
-    from cas_models.discrete_time.models import StateSpaceModelDTARXSISO
+    from cas_models.discrete_time.models import SSModelDTARXSISO
 
     def path(name, output_name):
-        return StateSpaceModelDTARXSISO(
+        return SSModelDTARXSISO(
             na=1,
             nb=1,
             input_name=f"{name}_flow",
@@ -1551,12 +1551,12 @@ def test_negate_symbolic_params():
 
 
 def test_infer_model_class():
-    from cas_models.discrete_time.models import StateSpaceModelDTARXSISO
+    from cas_models.discrete_time.models import SSModelDTARXSISO
     from cas_models.transformations import infer_model_class
 
     ct = [SSModelCTLinearFOSISO(), SSModelCTLinearFONoGainSISO()]
     dt = [
-        StateSpaceModelDTARXSISO(na=1, nb=1),
+        SSModelDTARXSISO(na=1, nb=1),
         StateSpaceModelDTTFSISO(num=[1], den=[1, -0.5]),
     ]
     assert infer_model_class(ct) is StateSpaceModelCT
@@ -1617,9 +1617,9 @@ def test_model_class_optional_connect_systems_and_negate(kind):
 
 
 def _arx(name, u, y):
-    from cas_models.discrete_time.models import StateSpaceModelDTARXSISO
+    from cas_models.discrete_time.models import SSModelDTARXSISO
 
-    return StateSpaceModelDTARXSISO(
+    return SSModelDTARXSISO(
         na=1, nb=1, input_name=u, output_name=y, name=name, dt=1.0
     )
 
@@ -1782,7 +1782,7 @@ def test_linearize_nonlinear_ct():
 
 def test_linearize_dt_arx():
     """An ARX model's matrices simulate as the model does."""
-    sys = StateSpaceModelDTARXSISO(A=[-1.5, 0.56], B=[0.3, 0.1], nk=1)
+    sys = SSModelDTARXSISO(A=[-1.5, 0.56], B=[0.3, 0.1], nk=1)
     A, B, C, D = linearize(sys)
     rng = np.random.default_rng(0)
     x = rng.normal(size=sys.n)

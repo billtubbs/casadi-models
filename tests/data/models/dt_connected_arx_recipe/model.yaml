@@ -2,9 +2,9 @@ cas_models_format: 1
 function: connect_systems
 args:
   systems:
-  - class: StateSpaceModelDTARXSISO
+  - class: SSModelDTARXSISO
     args: {na: 2, nb: 2, input_name: u, output_name: y}
-  - class: StateSpaceModelDTARXSISO
+  - class: SSModelDTARXSISO
     args: {na: 1, nb: 1, input_name: u, output_name: y}
   connections:
     CRAC1_flow_u: CRAC1_flow

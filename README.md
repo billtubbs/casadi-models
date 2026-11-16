@@ -412,7 +412,7 @@ CasADi expressions, for building your own estimation problem.
 [system_identification_example.ipynb](system_identification_example.ipynb)
 is a complete example.
 
-`StateSpaceModelDTARXSISO` is an ARX model with the same polynomials as
+`SSModelDTARXSISO` is an ARX model with the same polynomials as
 MATLAB's `arx` and `filter([zeros(1, nk) B], [1 A], u)`. Octave's `arx`
 counts the delay `nk` one less (see the class docstring).
 
@@ -520,9 +520,9 @@ cas_models_format: 1
 function: hstack_systems
 args:
   systems:
-  - class: StateSpaceModelDTARXSISO
+  - class: SSModelDTARXSISO
     args: {na: 2, nb: 2, dt: 2.0, name: CRAC1}
-  - class: StateSpaceModelDTARXSISO
+  - class: SSModelDTARXSISO
     args: {na: 1, nb: 1, dt: 2.0, name: CRAC2}
   name: R11
 ```

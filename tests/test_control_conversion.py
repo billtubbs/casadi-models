@@ -12,7 +12,7 @@ from cas_models.continuous_time.models import (
 )
 from cas_models.control_conversion import from_control, to_control
 from cas_models.discrete_time.models import (
-    StateSpaceModelDTARXSISO,
+    SSModelDTARXSISO,
     StateSpaceModelDTFromABCD,
 )
 from cas_models.recipes import recipe
@@ -140,7 +140,7 @@ def test_from_control_dt_none():
 def test_to_control_analysis():
     """python-control's analysis on a cas_models model (ARX: the poles
     are the roots of A(q))."""
-    sys = StateSpaceModelDTARXSISO(A=[-1.5, 0.56], B=[0.3, 0.1], nk=1, dt=1.0)
+    sys = SSModelDTARXSISO(A=[-1.5, 0.56], B=[0.3, 0.1], nk=1, dt=1.0)
     poles = np.sort(control.poles(to_control(sys)).real)
     np.testing.assert_allclose(poles[-2:], [0.7, 0.8])
 

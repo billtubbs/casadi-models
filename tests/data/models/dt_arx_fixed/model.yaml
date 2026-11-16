@@ -1,5 +1,5 @@
 cas_models_format: 1
-class: StateSpaceModelDTARXSISO
+class: SSModelDTARXSISO
 args:
   A:
     DM: [-1.62, 0.65]

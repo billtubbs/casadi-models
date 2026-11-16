@@ -4,11 +4,11 @@ arguments, to any depth, instead of its CasADi functions.
 
 Every model made by a model class's own __init__ (a subclass of
 StateSpaceModelCT or StateSpaceModelDT that defines one, e.g.
-StateSpaceModelDTARXSISO(na=2, nb=1)) or by a connection function of
+SSModelDTARXSISO(na=2, nb=1)) or by a connection function of
 cas_models.transformations (connect_systems, hstack_systems, ..., and
 so the operators *, +, - that call them) has a recipe, model._recipe:
 
-    {"class": StateSpaceModelDTARXSISO, "args": {"na": 2, "nb": 1}}
+    {"class": SSModelDTARXSISO, "args": {"na": 2, "nb": 1}}
     {"function": "connect_systems", "args": {"systems": [m1, m2], ...}}
 
 args are the arguments given (by name; defaults not given aren't

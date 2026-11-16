@@ -33,7 +33,7 @@ from cas_models.continuous_time.regulators import (
 from cas_models.discrete_time.models import (
     SSModelDTDirectTransmission,
     StateSpaceModelDT,
-    StateSpaceModelDTARXSISO,
+    SSModelDTARXSISO,
     StateSpaceModelDTDelay,
     StateSpaceModelDTFromCT,
     StateSpaceModelDTFromCTRK4,
@@ -139,8 +139,8 @@ def dt_connected_arx():
     """Two ARX paths summed, as in ffdtools.models.ARXPaths"""
     inputs = ["CRAC1", "CRAC2"]
     paths = [
-        StateSpaceModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
-        StateSpaceModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
+        SSModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
+        SSModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
     ]
     connections = {f"{name}_u": name for name in inputs}
     connections["R11"] = [f"{name}_y" for name in inputs]
@@ -178,12 +178,12 @@ MODELS = {
     "CT FO": (StateSpaceModelCT, SSModelCTLinearFOSISO, True),
     "DT ARX": (
         StateSpaceModelDT,
-        lambda: StateSpaceModelDTARXSISO(na=2, nb=1),
+        lambda: SSModelDTARXSISO(na=2, nb=1),
         True,
     ),
     "DT ARX symbolic poles and zeros": (
         StateSpaceModelDT,
-        lambda: StateSpaceModelDTARXSISO(
+        lambda: SSModelDTARXSISO(
             poles=[cas.SX.sym("p_1"), cas.SX.sym("p_2")],
             zeros=[cas.SX.sym("z_1")],
         ),
@@ -191,12 +191,12 @@ MODELS = {
     ),
     "DT ARX with dt": (
         StateSpaceModelDT,
-        lambda: StateSpaceModelDTARXSISO(na=2, nb=1, dt=2.0),
+        lambda: SSModelDTARXSISO(na=2, nb=1, dt=2.0),
         True,
     ),
     "DT ARX numeric poles and zeros": (
         StateSpaceModelDT,
-        lambda: StateSpaceModelDTARXSISO(
+        lambda: SSModelDTARXSISO(
             poles=[0.8 + 0.3j, 0.8 - 0.3j], zeros=[-0.4], b1=0.2, nk=2
         ),
         True,
@@ -234,7 +234,7 @@ def test_saved_files(tmp_path):
         "args": {
             "systems": [
                 {
-                    "class": "StateSpaceModelDTARXSISO",
+                    "class": "SSModelDTARXSISO",
                     "args": {
                         "na": 2,
                         "nb": 2,
@@ -243,7 +243,7 @@ def test_saved_files(tmp_path):
                     },
                 },
                 {
-                    "class": "StateSpaceModelDTARXSISO",
+                    "class": "SSModelDTARXSISO",
                     "args": {
                         "na": 1,
                         "nb": 1,
@@ -413,42 +413,42 @@ LOAD_CASES = {
         ),
     ),
     "ARX symbolic": (
-        "class: StateSpaceModelDTARXSISO\nargs: {na: 2, nb: 1}\n",
-        lambda: StateSpaceModelDTARXSISO(na=2, nb=1),
+        "class: SSModelDTARXSISO\nargs: {na: 2, nb: 1}\n",
+        lambda: SSModelDTARXSISO(na=2, nb=1),
     ),
     "ARX fixed": (
-        "class: StateSpaceModelDTARXSISO\n"
+        "class: SSModelDTARXSISO\n"
         "args:\n"
         "  A: {DM: [-1.62, 0.65]}\n"
         "  B: {DM: [0.012, 0.009]}\n",
-        lambda: StateSpaceModelDTARXSISO(
+        lambda: SSModelDTARXSISO(
             A=cas.DM([-1.62, 0.65]), B=cas.DM([0.012, 0.009])
         ),
     ),
     "ARX poles and zeros": (
-        "class: StateSpaceModelDTARXSISO\n"
+        "class: SSModelDTARXSISO\n"
         "args: {poles: [0.9, 0.5], zeros: [-0.4], b1: 0.2, nk: 2}\n",
-        lambda: StateSpaceModelDTARXSISO(
+        lambda: SSModelDTARXSISO(
             poles=[0.9, 0.5], zeros=[-0.4], b1=0.2, nk=2
         ),
     ),
     "ARX poles and zeros, DM": (
-        "class: StateSpaceModelDTARXSISO\n"
+        "class: SSModelDTARXSISO\n"
         "args:\n"
         "  poles: {DM: [0.9, 0.5]}\n"
         "  zeros: {DM: [-0.4]}\n"
         "  b1: 0.2\n",
-        lambda: StateSpaceModelDTARXSISO(
+        lambda: SSModelDTARXSISO(
             poles=[0.9, 0.5], zeros=[-0.4], b1=0.2
         ),
     ),
     "ARX with dt": (
-        "class: StateSpaceModelDTARXSISO\nargs: {na: 1, nb: 1, dt: 2.0}\n",
-        lambda: StateSpaceModelDTARXSISO(na=1, nb=1, dt=2.0),
+        "class: SSModelDTARXSISO\nargs: {na: 1, nb: 1, dt: 2.0}\n",
+        lambda: SSModelDTARXSISO(na=1, nb=1, dt=2.0),
     ),
     "ARX poles, symbolic B": (
-        "class: StateSpaceModelDTARXSISO\nargs: {poles: [0.9], nb: 2}\n",
-        lambda: StateSpaceModelDTARXSISO(poles=[0.9], nb=2),
+        "class: SSModelDTARXSISO\nargs: {poles: [0.9], nb: 2}\n",
+        lambda: SSModelDTARXSISO(poles=[0.9], nb=2),
     ),
     "TF": (
         "class: StateSpaceModelDTTFSISO\n"
@@ -502,8 +502,8 @@ def test_load_subclass_wrong_class(tmp_path):
     write_model_yaml(
         tmp_path / "model", "class: SSModelCTLinearO2SISO\nargs: {K: 2.0}\n"
     )
-    with pytest.raises(ValueError, match="isn't StateSpaceModelDTARXSISO"):
-        StateSpaceModelDTARXSISO.load(tmp_path / "model")
+    with pytest.raises(ValueError, match="isn't SSModelDTARXSISO"):
+        SSModelDTARXSISO.load(tmp_path / "model")
     with pytest.raises(ValueError, match="isn't StateSpaceModelDT"):
         StateSpaceModelDT.load(tmp_path / "model")
 
@@ -551,9 +551,9 @@ def test_load_wrong_class(tmp_path):
     with pytest.raises(ValueError, match="isn't StateSpaceModelCT"):
         StateSpaceModelCT.load(folder)
     # A subclass loads as itself, not as another subclass
-    StateSpaceModelDTARXSISO(na=1, nb=1).save(tmp_path / "arx")
-    assert type(StateSpaceModelDTARXSISO.load(tmp_path / "arx")) is (
-        StateSpaceModelDTARXSISO
+    SSModelDTARXSISO(na=1, nb=1).save(tmp_path / "arx")
+    assert type(SSModelDTARXSISO.load(tmp_path / "arx")) is (
+        SSModelDTARXSISO
     )
     with pytest.raises(ValueError, match="isn't StateSpaceModelDTTFSISO"):
         StateSpaceModelDTTFSISO.load(tmp_path / "arx")
@@ -790,8 +790,8 @@ def dt_connected_arx_flow():
     """As dt_connected_arx(), with the names of the four_racks_dr case"""
     inputs = ["CRAC1_flow", "CRAC2_flow"]
     paths = [
-        StateSpaceModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
-        StateSpaceModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
+        SSModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
+        SSModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
     ]
     connections = {f"{name}_u": name for name in inputs}
     connections["R11_intake"] = [f"{name}_y" for name in inputs]
@@ -842,8 +842,8 @@ MODEL_FILES = {
     "dt_direct": lambda: SSModelDTDirectTransmission(
         D=[[1.0, 1.0, 0.0], [0.0, 0.5, 2.0]], dt=2.0
     ),
-    "dt_arx_symbolic": lambda: StateSpaceModelDTARXSISO(na=2, nb=2),
-    "dt_arx_fixed": lambda: StateSpaceModelDTARXSISO(
+    "dt_arx_symbolic": lambda: SSModelDTARXSISO(na=2, nb=2),
+    "dt_arx_fixed": lambda: SSModelDTARXSISO(
         A=cas.DM([-1.62, 0.65]), B=cas.DM([0.012, 0.009])
     ),
     "dt_tf": lambda: StateSpaceModelDTTFSISO(
@@ -945,9 +945,9 @@ def test_to_yaml_text():
     assert SSModelCTLinearFOSISO().to_yaml() == (
         "cas_models_format: 1\nclass: SSModelCTLinearFOSISO\n"
     )
-    text = StateSpaceModelDTARXSISO(na=2, nb=1).to_yaml()
+    text = SSModelDTARXSISO(na=2, nb=1).to_yaml()
     assert text == (
-        "cas_models_format: 1\nclass: StateSpaceModelDTARXSISO\n"
+        "cas_models_format: 1\nclass: SSModelDTARXSISO\n"
         "args: {na: 2, nb: 1}\n"
     )
     data = yaml.safe_load(dt_custom().to_yaml())
@@ -1006,13 +1006,13 @@ def test_from_yaml_errors():
 
 
 def arx(na, nb, name, **kwargs):
-    return StateSpaceModelDTARXSISO(na=na, nb=nb, name=name, **kwargs)
+    return SSModelDTARXSISO(na=na, nb=nb, name=name, **kwargs)
 
 
 ARX_NODES = (
-    "  - class: StateSpaceModelDTARXSISO\n"
+    "  - class: SSModelDTARXSISO\n"
     "    args: {na: 2, nb: 2, dt: 2.0, name: CRAC1}\n"
-    "  - class: StateSpaceModelDTARXSISO\n"
+    "  - class: SSModelDTARXSISO\n"
     "    args: {na: 1, nb: 1, dt: 2.0, name: CRAC2}\n"
 )
 
@@ -1079,9 +1079,9 @@ FUNCTION_CASES = {
         "function: connect_systems\n"
         "args:\n"
         "  systems:\n"
-        "  - class: StateSpaceModelDTARXSISO\n"
+        "  - class: SSModelDTARXSISO\n"
         "    args: {na: 2, nb: 2, input_name: u, output_name: y}\n"
-        "  - class: StateSpaceModelDTARXSISO\n"
+        "  - class: SSModelDTARXSISO\n"
         "    args: {na: 1, nb: 1, input_name: u, output_name: y}\n"
         "  connections:\n"
         "    CRAC1_u: CRAC1\n"
@@ -1299,8 +1299,8 @@ def test_from_yaml_function_wrong_base():
         ValueError, match="makes a StateSpaceModelDT, which isn't"
     ):
         StateSpaceModelCT.from_yaml(text)
-    with pytest.raises(ValueError, match="isn't StateSpaceModelDTARXSISO"):
-        StateSpaceModelDTARXSISO.from_yaml(text)
+    with pytest.raises(ValueError, match="isn't SSModelDTARXSISO"):
+        SSModelDTARXSISO.from_yaml(text)
 
 
 def test_from_yaml_function_mixed_ct_dt():
@@ -1309,7 +1309,7 @@ def test_from_yaml_function_mixed_ct_dt():
         "cas_models_format: 1\nfunction: hstack_systems\nargs:\n"
         "  systems:\n"
         "  - {class: SSModelCTLinearFOSISO}\n"
-        "  - {class: StateSpaceModelDTARXSISO, args: {na: 1, nb: 1}}\n"
+        "  - {class: SSModelDTARXSISO, args: {na: 1, nb: 1}}\n"
     )
     with pytest.raises(
         ValueError, match="Cannot combine systems with different types"
@@ -1400,16 +1400,16 @@ def test_symbol_separate_models_get_separate_symbols():
     ],
 )
 def test_symbol_arx(args, params):
-    model = from_yaml(H + f"class: StateSpaceModelDTARXSISO\nargs: {args}\n")
+    model = from_yaml(H + f"class: SSModelDTARXSISO\nargs: {args}\n")
     assert list(model.params) == params
 
 
 def test_symbol_vector_matches_code():
     model = from_yaml(
-        H + "class: StateSpaceModelDTARXSISO\n"
+        H + "class: SSModelDTARXSISO\n"
         "args: {poles: {symbol: p, shape: [2]}, zeros: [{symbol: z}], b1: 0.5}\n"
     )
-    expected = StateSpaceModelDTARXSISO(
+    expected = SSModelDTARXSISO(
         poles=cas.SX.sym("p", 2), zeros=[cas.SX.sym("z")], b1=0.5
     )
     assert_same_functions(model, expected)
@@ -1450,13 +1450,13 @@ def test_symbol_errors(name):
     with pytest.raises(ValueError, match=match):
         from_yaml(
             H
-            + f"class: StateSpaceModelDTARXSISO\nargs: {{poles: {node}, nb: 1}}\n"
+            + f"class: SSModelDTARXSISO\nargs: {{poles: {node}, nb: 1}}\n"
         )
 
 
 def test_symbol_shape_must_agree():
     text = (
-        "class: StateSpaceModelDTARXSISO\n"
+        "class: SSModelDTARXSISO\n"
         "args: {poles: {symbol: p, shape: [2]}, B: [{symbol: p}]}\n"
     )
     with pytest.raises(
@@ -1475,7 +1475,7 @@ def test_symbol_vector_for_a_scalar_argument():
 def test_save_to_folder_named_after_model(tmp_path, monkeypatch):
     """Without a folder, save() uses one named after the model"""
     monkeypatch.chdir(tmp_path)
-    model = StateSpaceModelDTARXSISO(na=1, nb=1, name="R11_intake")
+    model = SSModelDTARXSISO(na=1, nb=1, name="R11_intake")
     folder = model.save()
     assert folder == Path("R11_intake")
     assert (tmp_path / "R11_intake" / "model.yaml").is_file()
@@ -1509,7 +1509,7 @@ def test_save_scrubbed_folder_name(tmp_path, monkeypatch, capsys):
     """A name that isn't a valid folder name is saved under a safe one;
     model.yaml keeps the name"""
     monkeypatch.chdir(tmp_path)
-    model = StateSpaceModelDTARXSISO(na=1, nb=1, name="R11/intake")
+    model = SSModelDTARXSISO(na=1, nb=1, name="R11/intake")
     assert model.save() == Path("R11_intake")
     assert "in folder 'R11_intake'" in capsys.readouterr().out
     assert load_model(tmp_path / "R11_intake").name == "R11/intake"
@@ -1526,7 +1526,7 @@ def test_save_scrubbed_folder_name(tmp_path, monkeypatch, capsys):
 )
 def test_save_without_folder_errors(name, match, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    model = StateSpaceModelDTARXSISO(na=1, nb=1, name=name)
+    model = SSModelDTARXSISO(na=1, nb=1, name=name)
     with pytest.raises(ValueError, match=match):
         model.save()
     assert list(tmp_path.iterdir()) == []

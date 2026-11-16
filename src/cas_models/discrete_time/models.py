@@ -18,7 +18,7 @@ StateSpaceModelDTTFSISO
     Discrete-time SISO model defined by a transfer function (num/den).
 StateSpaceModelDTDelay
     Discrete-time model with an explicit integer input or output delay.
-StateSpaceModelDTARXSISO
+SSModelDTARXSISO
     ARX (auto-regressive with exogenous input) SISO model.
 
 Functions
@@ -1219,7 +1219,7 @@ def poly_coefficients(roots):
 
     from the roots r_1, ..., r_n (numbers or CasADi SX scalars, e.g.
     symbols; real only, CasADi has no complex numbers). An empty list
-    gives []. StateSpaceModelDTARXSISO also takes complex numeric roots
+    gives []. SSModelDTARXSISO also takes complex numeric roots
     (in conjugate pairs)."""
     c = [1]
     for r in roots:
@@ -1282,8 +1282,10 @@ def _numbered_symbols(prefix, n):
     return cas.vertcat(*[cas.SX.sym(f"{prefix}_{i}") for i in range(1, n + 1)])
 
 
-class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
-    """A discrete-time ARX model of a dynamical system:
+class SSModelDTARXSISO(StateSpaceModelDTSISO):
+    """A discrete-time ARX model of a dynamical system (the class was
+    StateSpaceModelDTARXSISO before 2026-11-16, with parameters named
+    from 0, see Parameters below):
 
         A(q^-1) y(k) = B(q^-1) q^{-nk} u(k) + e(k)
 
@@ -1316,12 +1318,12 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
     Comparing with Matlab and Octave arx():
     - Matlab (System Identification Toolbox): same convention. nk is the
       number of leading zeros of B, so a model estimated with
-      arx(data, [na nb nk]) is StateSpaceModelDTARXSISO(A, B, nk=nk).
+      arx(data, [na nb nk]) is SSModelDTARXSISO(A, B, nk=nk).
     - Octave (control package, checked with version 4.1.1): nk is one
       less than here. Octave's arx() always delays the input one step
       and adds nk steps to that, so a model estimated with
       arx(dat, 'na', na, 'nb', nb, 'nk', nk) is
-      StateSpaceModelDTARXSISO(A, B, nk=nk + 1). Its default, nk = 0, is
+      SSModelDTARXSISO(A, B, nk=nk + 1). Its default, nk = 0, is
       the usual one-step delay, and it can't estimate a model with
       direct transmission (nk = 0 here). Its documentation doesn't say
       so.
@@ -1457,17 +1459,17 @@ class StateSpaceModelDTARXSISO(StateSpaceModelDTSISO):
 
         Example:
             >>> # Create ARX model with symbolic parameters
-            >>> model = StateSpaceModelDTARXSISO(na=2, nb=3, nk=1)
+            >>> model = SSModelDTARXSISO(na=2, nb=3, nk=1)
             >>> # Or with specific coefficient values
             >>> A = cas.DM([0.5, 0.3])
             >>> B = cas.DM([1.0, 0.5, 0.2])
-            >>> model = StateSpaceModelDTARXSISO(A=A, B=B, nk=1)
+            >>> model = SSModelDTARXSISO(A=A, B=B, nk=1)
             >>> # Or from poles and zeros (numeric or symbolic)
-            >>> model = StateSpaceModelDTARXSISO(
+            >>> model = SSModelDTARXSISO(
             ...     poles=[0.9, 0.5], zeros=[-0.4], b1=0.1
             ... )
             >>> p = [cas.SX.sym("p_1"), cas.SX.sym("p_2")]
-            >>> model = StateSpaceModelDTARXSISO(poles=p, nb=2)
+            >>> model = SSModelDTARXSISO(poles=p, nb=2)
 
         """
         if real_poles:

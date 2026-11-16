@@ -38,7 +38,7 @@ from cas_models.continuous_time.regulators import (
 from cas_models.discrete_time.models import (
     SSModelDTDirectTransmission,
     StateSpaceModelDT,
-    StateSpaceModelDTARXSISO,
+    SSModelDTARXSISO,
     StateSpaceModelDTDelay,
     StateSpaceModelDTFromCT,
     StateSpaceModelDTFromCTRK4,
@@ -192,7 +192,7 @@ def dt_tf_symbolic():
 def dt_arx_real_poles():
     """A an expression of the poles, as in ffdtools.models.ARXPaths"""
     p0, p1 = cas.SX.sym("p_0"), cas.SX.sym("p_1")
-    return StateSpaceModelDTARXSISO(
+    return SSModelDTARXSISO(
         A=cas.vertcat(-(p0 + p1), p0 * p1), nb=2, nk=1
     )
 
@@ -201,8 +201,8 @@ def dt_connected_arx():
     """Two ARX paths summed, as in ffdtools.models.ARXPaths"""
     inputs = ["CRAC1", "CRAC2"]
     paths = [
-        StateSpaceModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
-        StateSpaceModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
+        SSModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
+        SSModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
     ]
     connections = {f"{name}_u": name for name in inputs}
     connections["R11"] = [f"{name}_y" for name in inputs]
@@ -259,15 +259,15 @@ MODELS = {
     "DT delay": lambda: StateSpaceModelDTDelay(
         nk=3, nu=2, G=[[1.0, 0.5], [0.0, 2.0]]
     ),
-    "DT ARX symbolic": lambda: StateSpaceModelDTARXSISO(na=2, nb=2, nk=1),
-    "DT ARX fixed": lambda: StateSpaceModelDTARXSISO(
+    "DT ARX symbolic": lambda: SSModelDTARXSISO(na=2, nb=2, nk=1),
+    "DT ARX fixed": lambda: SSModelDTARXSISO(
         A=cas.DM([-1.2, 0.35]), B=cas.DM([0.5, 0.2]), nk=0
     ),
     "DT ARX real poles": dt_arx_real_poles,
     "DT connected ARX": dt_connected_arx,
     "DT sum": lambda: (
         StateSpaceModelDTTFSISO(num=[0, 1.0], den=[1, -0.5])
-        + StateSpaceModelDTARXSISO(na=1, nb=1)
+        + SSModelDTARXSISO(na=1, nb=1)
     ),
 }
 
