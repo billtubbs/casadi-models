@@ -147,17 +147,34 @@ models both ways.
   generic names become cas_models' defaults, and names given replace
   the system's.
 
-<!-- skip-test -->
+For example, reducing a fourth-order model (two second-order models in
+series) to second order by balanced truncation (`balred`, which, like
+`minreal`, needs slycot: see below):
+
 ```python
 import control
+from cas_models.continuous_time.models import SSModelCTLinearO2SISO
 from cas_models.control_conversion import from_control, to_control
 
-poles = control.poles(to_control(fitted_model))
+g1 = SSModelCTLinearO2SISO(K=2.0, T1=10.0, T2=0.5, name="g1")
+g2 = SSModelCTLinearO2SISO(K=1.0, T1=5.0, T2=0.2, name="g2")
+sys = g2 * g1  # u -> g1 -> g2 -> y
+print(sys.n, sys.input_names, sys.output_names)
+# 4 ['u'] ['y']
+
+ctsys_red = control.balred(to_control(sys), 2, method="matchdc")
+print(ctsys_red.input_labels, ctsys_red.output_labels)  # names lost
+# ['u[0]'] ['y[0]']
 sys_red = from_control(
-    control.balred(to_control(sys), 10),
+    ctsys_red,
+    name="sys_red",
     input_names=sys.input_names,
     output_names=sys.output_names,
 )
+print(sys_red.n, sys_red.input_names, sys_red.output_names)
+# 2 ['u'] ['y']
+print(round(control.dcgain(to_control(sys_red)), 6))  # as the original's
+# 2.0
 ```
 
 These are plain functions, outside the recipes: a model from
