@@ -118,6 +118,59 @@ from cas_models.transformations import linearize
 A, B, C, D = linearize(fitted_model)
 ```
 
+## Linear Analysis with python-control
+
+Numerical linear analysis (poles and zeros, minimal realizations,
+balanced truncation, Bode plots, `dcgain`, `lqr`, ...) is
+python-control's: `cas_models.control_conversion` converts linear
+models both ways.
+
+- `to_control(sys, params=None)`: a linear model (checked) as a
+  python-control `StateSpace`, with its name, input, output and state
+  names, and sample time (`dt` 0 for continuous time; a discrete-time
+  model's `dt`, or `True` if it has none). A model with parameters
+  needs their values.
+- `from_control(ctsys, name=None, input_names=None, state_names=None,
+  output_names=None)`: a python-control system (or a transfer function)
+  as a `StateSpaceModelCTFromABCD` or `StateSpaceModelDTFromABCD`.
+  python-control's functions mostly drop the names (`minreal`, `balred`
+  and `feedback` return `sys[k]`, `u[i]`, `y[i]`, `x[i]`): those
+  generic names become cas_models' defaults, and names given replace
+  the system's.
+
+```python
+import control
+from cas_models.control_conversion import from_control, to_control
+
+poles = control.poles(to_control(fitted_model))
+sys_red = from_control(
+    control.balred(to_control(sys), 10),
+    input_names=sys.input_names,
+    output_names=sys.output_names,
+)
+```
+
+These are plain functions, outside the recipes: a model from
+`from_control()` is saved by its matrices, not by redoing the
+python-control calls when it's loaded (numerical results, such as a
+minimal realization's states, can change with library versions).
+
+`minimal_realization(sys, tol=0.0, params=None, name=None)` (in
+`cas_models.transformations`) does that round trip with python-control's
+`minreal`, keeping the input and output names: it removes the
+uncontrollable and unobservable states that connecting models in
+series, parallel or feedback often leaves (a pole and a zero that
+cancel, or duplicates). python-control's `minreal` needs slycot
+(`pip install slycot`), which cas_models doesn't install. The results
+match Octave's `minreal` but not necessarily MATLAB's, which uses
+another algorithm (see the docstring).
+
+```python
+from cas_models.transformations import minimal_realization
+
+cloop_min = minimal_realization(cloop)  # MATLAB's example: 3 -> 2 states
+```
+
 ## Examples: Simulation
 
 ```python

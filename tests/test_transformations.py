@@ -1,11 +1,15 @@
 """Unit tests for src/cas_models/transformations.py module"""
 
+import importlib.util
+from pathlib import Path
+
 import casadi as cas
 import numpy as np
 import pytest
 
 from cas_models.continuous_time.models import (
     SSModelCTDirectTransmission,
+    SSModelCTFromABCDSISO,
     SSModelCTLinearFONoGainSISO,
     SSModelCTLinearFOSISO,
     StateSpaceModelCT,
@@ -30,6 +34,7 @@ from cas_models.transformations import (
     connect_systems_in_series,
     hstack_systems,
     linearize,
+    minimal_realization,
     negate_system,
     vstack_systems,
 )
@@ -1799,3 +1804,233 @@ def test_linearize_params():
 def test_linearize_not_a_model():
     with pytest.raises(TypeError):
         linearize("not a model")
+
+
+# minimal_realization
+
+requires_slycot = pytest.mark.skipif(
+    importlib.util.find_spec("slycot") is None, reason="needs slycot"
+)
+
+
+def freq_resp(A, B, C, D, points):
+    """The transfer matrices C (sI - A)^-1 B + D at the given points s
+    (or z)."""
+    n = A.shape[0]
+    return [C @ np.linalg.solve(s * np.eye(n) - A, B) + D for s in points]
+
+
+def check_same_tf(sys, sys_min, params=None):
+    """sys and its minimal realization have the same transfer function."""
+    points = [0.3j, 1.0 + 2.0j, -0.2 + 0.7j, 5.0]
+    for G, G_min in zip(
+        freq_resp(*linearize(sys, params=params), points),
+        freq_resp(*linearize(sys_min), points),
+    ):
+        np.testing.assert_allclose(G_min, G, rtol=1e-10, atol=1e-12)
+
+
+def check_same_as_python_control(sys, sys_min, params=None):
+    """The same matrices as python-control's minreal (it calls the same
+    SLICOT routine)."""
+    import control as ct
+
+    ct_min = ct.ss(*linearize(sys, params=params)).minreal()
+    for M, M_ct in zip(
+        linearize(sys_min), (ct_min.A, ct_min.B, ct_min.C, ct_min.D)
+    ):
+        np.testing.assert_allclose(M, M_ct, rtol=1e-12, atol=1e-14)
+
+
+def matlab_minreal_example():
+    """MATLAB's minreal example (help page of dynamicsystem.minreal):
+    g = zpk([],1,1); h = tf([2 1],[1 0]); cloop = inv(1+g*h) * g, built
+    from state-space models so the pole and zero at 1 don't cancel: 3
+    states (poles 1, -0.5 +- 0.866j). MATLAB's minreal(cloop) removes 1:
+    s / (s^2 + s + 1)."""
+    g = SSModelCTFromABCDSISO(1.0, 1.0, 1.0, 0.0, name="g")  # 1 / (s - 1)
+    h = SSModelCTFromABCDSISO(0.0, 1.0, 1.0, 2.0, name="h")  # 2 + 1/s
+    gh = connect_systems_in_series([h, g], name="gh")
+    T = connect_feedback_system(gh, name="T")  # gh / (1 + gh)
+    one = SSModelCTDirectTransmission(nu=1, name="one")
+    S = connect_systems_in_parallel(  # 1 - gh / (1 + gh) = (1 + gh)^-1
+        [one, negate_system(T)], input_names=["r"], name="S"
+    )
+    return connect_systems_in_series([S, g], verbose_names=True, name="cloop")
+
+
+@requires_slycot
+@pytest.mark.parametrize(
+    "model_class", [StateSpaceModelCTFromABCD, StateSpaceModelDTFromABCD]
+)
+def test_minimal_realization_uncontrollable(model_class):
+    """A second state that the input doesn't reach is removed, CT or DT
+    (DT keeps dt)."""
+    kwargs = {"dt": 0.5} if model_class is StateSpaceModelDTFromABCD else {}
+    A = [[-1.0, 0.0], [0.0, -2.0]]
+    if kwargs:
+        A = [[0.5, 0.0], [0.0, 0.2]]
+    sys = model_class(
+        A,
+        [[1.0], [0.0]],
+        [[1.0, 1.0]],
+        [[0.0]],
+        name="sys",
+        input_names=["u1"],
+        output_names=["y1"],
+        **kwargs,
+    )
+    sys_min = minimal_realization(sys)
+    assert isinstance(sys_min, model_class)
+    assert sys_min.n == 1
+    assert sys_min.name == "sys"
+    assert sys_min.input_names == ["u1"] and sys_min.output_names == ["y1"]
+    if kwargs:
+        assert sys_min.dt == 0.5
+    np.testing.assert_allclose(linearize(sys_min)[0], [[A[0][0]]])
+    check_same_tf(sys, sys_min)
+    check_same_as_python_control(sys, sys_min)
+
+
+@requires_slycot
+def test_minimal_realization_matlab_example():
+    """MATLAB's example: 3 states to 2, s / (s^2 + s + 1)."""
+    cloop = matlab_minreal_example()
+    assert cloop.n == 3
+    np.testing.assert_allclose(
+        np.sort_complex(np.linalg.eigvals(linearize(cloop)[0])),
+        np.sort_complex([1.0, -0.5 - 0.75**0.5 * 1j, -0.5 + 0.75**0.5 * 1j]),
+    )
+    cloop_min = minimal_realization(cloop, name="cloopmin")
+    assert cloop_min.n == 2
+    assert cloop_min.name == "cloopmin"
+    A, B, C, D = linearize(cloop_min)
+    np.testing.assert_allclose(
+        np.sort_complex(np.linalg.eigvals(A)),
+        np.sort_complex([-0.5 - 0.75**0.5 * 1j, -0.5 + 0.75**0.5 * 1j]),
+    )
+    # s / (s^2 + s + 1) at a few points
+    for s, G in zip(
+        [0.3j, 1.0 + 2.0j, 5.0], freq_resp(A, B, C, D, [0.3j, 1.0 + 2.0j, 5.0])
+    ):
+        np.testing.assert_allclose(G, [[s / (s**2 + s + 1)]], rtol=1e-12)
+    check_same_tf(cloop, cloop_min)
+    check_same_as_python_control(cloop, cloop_min)
+
+
+@requires_slycot
+@pytest.mark.parametrize("stack", [vstack_systems, hstack_systems])
+def test_minimal_realization_mimo(stack):
+    """The same 2-state model twice, with a shared input and two outputs
+    (vstack: ny > nu) or two inputs and summed outputs (hstack: nu > ny),
+    has 4 states, 2 of them redundant (TB01PD's workspace padding)."""
+    systems = [
+        StateSpaceModelDTFromABCD(
+            [[0.9, 0.1], [0.0, 0.8]],
+            [[1.0], [0.5]],
+            [[1.0, 0.0]],
+            [[0.0]],
+            dt=1.0,
+            name=name,
+            input_names=["u"],
+            output_names=["y"],
+        )
+        for name in ("a", "b")
+    ]
+    if stack is vstack_systems:
+        sys = stack(systems, output_names=["y1", "y2"])
+    else:
+        sys = stack(systems, input_names=["u1", "u2"])
+    assert sys.n == 4
+    sys_min = minimal_realization(sys)
+    assert sys_min.n == 2
+    assert (sys_min.nu, sys_min.ny) == (sys.nu, sys.ny)
+    assert sys_min.input_names == sys.input_names
+    assert sys_min.output_names == sys.output_names
+    check_same_tf(sys, sys_min)
+    check_same_as_python_control(sys, sys_min)
+
+
+@requires_slycot
+def test_minimal_realization_already_minimal():
+    sys = StateSpaceModelCTFromABCD(LIN_A - 1.0, LIN_B, LIN_C, LIN_D)
+    sys_min = minimal_realization(sys)
+    assert sys_min.n == 2
+    check_same_tf(sys, sys_min)
+    check_same_as_python_control(sys, sys_min)
+
+
+@requires_slycot
+def test_minimal_realization_static():
+    """No states: the same gain."""
+    sys = SSModelCTDirectTransmission(D=[[1.0, 2.0]])
+    sys_min = minimal_realization(sys)
+    assert sys_min.n == 0
+    np.testing.assert_allclose(linearize(sys_min)[3], [[1.0, 2.0]])
+
+
+@requires_slycot
+def test_minimal_realization_params():
+    """A model with parameters needs their values; the result is numeric."""
+    K, T1 = cas.SX.sym("K"), cas.SX.sym("T1")
+    sys = StateSpaceModelCTFromABCD(
+        [[-1 / T1, 0.0], [0.0, -2.0]], [[K / T1], [0.0]], [[1.0, 1.0]], [[0.0]]
+    )
+    with pytest.raises(ValueError, match="values needed"):
+        minimal_realization(sys)
+    params = {"K": 2.0, "T1": 4.0}
+    sys_min = minimal_realization(sys, params=params)
+    assert sys_min.n == 1 and not sys_min.params
+    check_same_tf(sys, sys_min, params=params)
+
+
+@requires_slycot
+def test_minimal_realization_nonlinear():
+    t = cas.SX.sym("t")
+    x = cas.SX.sym("x", 1)
+    u = cas.SX.sym("u")
+    f = cas.Function("f", [t, x, u], [-x + u**2], ["t", "x", "u"], ["rhs"])
+    h = cas.Function("h", [t, x, u], [x], ["t", "x", "u"], ["y"])
+    with pytest.raises(ValueError, match="isn't linear"):
+        minimal_realization(StateSpaceModelCT(f, h, n=1))
+    # An offset isn't linear either
+    f = cas.Function("f", [t, x, u], [-x + u + 1.0], ["t", "x", "u"], ["rhs"])
+    with pytest.raises(ValueError, match="isn't linear"):
+        minimal_realization(StateSpaceModelCT(f, h, n=1))
+
+
+@requires_slycot
+def test_minimal_realization_gasf35unst():
+    """MathWorks' 25-state example model gasf35unst (minreal help page;
+    its matrices A, B, C, D from reduce.mat's ss object, and Am, Bm, Cm,
+    Dm of MATLAB's minreal(gasf35unst): 14 states, "11 states removed";
+    saved from MATLAB with ssdata, converted to .npz, exactly). Badly scaled
+    (|A| ~ 8e8) with ten poles near -0.0568, equal to 7-8 digits.
+
+    Exact reductions keep the frequency response: SLICOT's default
+    tolerance (python-control's too) removes 6 states, tol 1e-8 (or any
+    from 1e-12 to 3e-8) 8. Octave's minreal (control package) gives the
+    same, 19 and 17 states (at sqrt(eps)), errors 2.3e-10 and 1.5e-10.
+    The reference is python-control, not MATLAB:
+    MATLAB's minreal uses its own algorithm, with a tolerance that isn't
+    comparable with TB01PD's (sqrt(eps) here gives 17 states). Its
+    reduction to 14 states is approximate: its low-frequency gain is 4x
+    the original's (7587 against 1837). That's checked below only to
+    record the difference, not as a target."""
+    data = np.load(Path(__file__).parent / "data" / "gasf35unst.npz")
+    sys = StateSpaceModelCTFromABCD(data["A"], data["B"], data["C"], data["D"])
+    w = np.logspace(-5, 3, 41)
+    s = 1j * w
+    H = np.array(freq_resp(data["A"], data["B"], data["C"], data["D"], s))
+    H_matlab = np.array(
+        freq_resp(data["Am"], data["Bm"], data["Cm"], data["Dm"], s)
+    )
+    assert data["Am"].shape == (14, 14)
+    assert np.max(np.abs(H_matlab[:, 0, 0] / H[:, 0, 0] - 1)) > 1.0
+
+    for tol, n in [(0.0, 19), (1e-8, 17)]:
+        sys_min = minimal_realization(sys, tol=tol)
+        assert sys_min.n == n
+        H_min = np.array(freq_resp(*linearize(sys_min), s))
+        assert np.max(np.abs(H_min[:, 0, 0] / H[:, 0, 0] - 1)) < 1e-8
+    check_same_as_python_control(sys, minimal_realization(sys))

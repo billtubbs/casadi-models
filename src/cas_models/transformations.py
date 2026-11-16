@@ -36,6 +36,9 @@ block_diag
 linearize
     The state-space matrices (A, B, C, D) of a model linearized about an
     operating point (exact for a linear model).
+minimal_realization
+    A linear model with its uncontrollable and unobservable states
+    removed (python-control's minreal; needs slycot).
 
 Before 2026-11, connect_systems_in_parallel was the block-diagonal
 combination (now block_diag_systems) and sum_systems the parallel one
@@ -1953,4 +1956,91 @@ def linearize(sys, x=None, u=None, t=0.0, params=None):
     )
     return tuple(
         np.array(M, dtype=float).reshape(M.shape) for M in jacobians(t, x0, u0)
+    )
+
+
+def check_linear(sys, A, B, C, D, params, n_points=3, rtol=1e-9):
+    """Raise ValueError unless the model's state and output functions are
+    x' = A x + B u, y = C x + D u (no offsets, nonlinear terms or
+    dependence on time), checked at a few random (t, x, u)."""
+    if is_ss_ct(sys):
+        state_func, output_func = sys.f, sys.h
+    else:
+        state_func, output_func = sys.F, sys.H
+    param_values = [params[name] for name in sys.params] if sys.params else []
+    rng = np.random.default_rng(0)
+    for _ in range(n_points):
+        t = rng.uniform(0.0, 10.0)
+        x = rng.normal(size=sys.n)
+        u = rng.normal(size=sys.nu)
+        xf = np.array(state_func(t, x, u, *param_values), dtype=float).ravel()
+        y = np.array(output_func(t, x, u, *param_values), dtype=float).ravel()
+        for got, expected in ((xf, A @ x + B @ u), (y, C @ x + D @ u)):
+            scale = max(1.0, np.max(np.abs(expected), initial=0.0))
+            if np.max(np.abs(got - expected), initial=0.0) > rtol * scale:
+                raise ValueError(
+                    "the model isn't linear (x' = A x + B u, y = C x + D u): "
+                    "a minimal realization is only defined for linear "
+                    "models (use linearize() first)"
+                )
+
+
+def minimal_realization(sys, tol=0.0, params=None, name=None):
+    """A minimal realization of a linear model: the same input-output
+    behaviour (transfer function) with its uncontrollable and
+    unobservable states removed, like MATLAB's and python-control's
+    minreal() for state-space models.
+
+    Works for continuous-time and discrete-time models alike (it only
+    depends on A, B and C): returns a StateSpaceModelCTFromABCD, or a
+    StateSpaceModelDTFromABCD with sys's dt, with numeric matrices. The
+    states are new ones (orthogonal transformations of the original
+    states, A in upper block Hessenberg form), so they get default names;
+    the input and output names are sys's. name is the new model's name,
+    else sys's.
+
+    Uses python-control's minreal (through to_control() and
+    from_control(), cas_models.control_conversion), which calls SLICOT's
+    TB01PD (slycot.tb01pd: the matrices are balanced, i.e. scaled by a
+    diagonal matrix, then reduced to staircase forms). tol is its
+    rank-decision tolerance: below it a direction counts as
+    uncontrollable or unobservable. tol <= 0 (default) uses SLICOT's
+    default, based on the matrices' size, norms and the machine
+    precision; a larger tol also removes nearly uncontrollable or
+    unobservable states (an approximate reduction). On badly scaled
+    models the number of states removed depends on tol.
+
+    The results are python-control's and, on the example below, Octave's
+    (control package, also TB01PD), not necessarily MATLAB's: MATLAB's
+    minreal for state-space models uses its own algorithm, and its tol
+    (default sqrt(eps)) isn't comparable with TB01PD's. Don't expect the same number of states on badly scaled
+    models: for MathWorks' example gasf35unst (25 states) the default
+    here gives 19 and tol 1e-8 gives 17, both exact, while MATLAB gives
+    14, with a low-frequency gain 4x the original's. The result's matrices
+    can differ from the exact ones by rounding errors (about 1e-16
+    relative), e.g. a zero of the transfer function at -5e-17 instead of
+    0.
+
+    sys must be linear (its state and output functions are checked at a
+    few random points; a nonlinear model raises ValueError: linearize it
+    first). A model with parameters needs their values, params ({name:
+    value}), as for linearize(). Needs slycot (pip install slycot), which
+    python-control's minreal uses and cas_models doesn't install.
+    """
+    from cas_models.control_conversion import from_control, to_control
+
+    ctsys = to_control(sys, params=params)  # also checks it's linear
+    try:
+        ctsys_min = ctsys.minreal(tol=tol) if ctsys.nstates else ctsys
+    except (ImportError, TypeError) as err:  # python-control: TypeError
+        if "slycot" in str(err).lower():
+            raise ImportError(
+                "minimal_realization needs slycot (pip install slycot)"
+            ) from err
+        raise
+    return from_control(
+        ctsys_min,
+        name=sys.name if name is None else name,
+        input_names=sys.input_names,
+        output_names=sys.output_names,
     )
