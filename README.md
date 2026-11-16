@@ -18,7 +18,7 @@ for use in nonlinear modelling, dynamic optimization and control.
 
 Add linear dynamical systems to a nonlinear model to introduce simple identifiable dynamics.
 
-Use nonlinear constrained optimization to identify the parameters of linear dynamic systems
+Use nonlinear constrained optimization to identify linear model parameters
 (see [Examples: Parameter Estimation](#examples-parameter-estimation)).
 
 Easily construct and evaluate different model structures.
@@ -35,7 +35,6 @@ implemented.
 from cas_models.continuous_time.models import (
     StateSpaceModelCT, SSModelCTLinearFOSISO, SSModelCTLinearO2NoGainSISO
 )
-from cas_models.transformations import connect_systems_in_series
 
 # First order, single-input single-output (SISO), continuous-time (CT)
 # state-space (SS) model with symbolic parameters
@@ -65,9 +64,13 @@ print(sys_model_2.h)
 # h:(t,x[2],u,T1,T2)->(y) SXFunction
 ```
 
+## Connecting Models
+
 ```python
-# Combine both systems by connecting in series
-sys = connect_systems_in_series([sys_model, sys_model_2], model_class=StateSpaceModelCT)
+from cas_models.transformations import connect_systems_in_series
+
+# Combine systems by connecting in series
+sys = connect_systems_in_series([sys_model, sys_model_2])
 print(sys.f)
 # f:(t,x[3],u,sys1_T1,sys2_T1,T2)->(rhs[3]) SXFunction
 print(sys.h)
@@ -77,42 +80,37 @@ print(sys.h)
 ```python
 # The '*' operator follows the matrix-multiplication convention:
 # the rightmost operand acts first on the input.
-# sys_model_2 * sys_model: u -> sys_model -> sys_model_2 -> y
+# u -> sys_model -> sys_model_2 -> y
 sys = sys_model_2 * sys_model
 ```
 
-## Connecting Models
-
-The functions in `cas_models.transformations` (for continuous-time and
-discrete-time models alike):
+Connection functions in `cas_models.transformations` (for both continuous-time and
+discrete-time models):
 
 | Function | Operator | Inputs | Outputs | Transfer matrix |
 |---|---|---|---|---|
-| `connect_systems_in_series` | `sys2 * sys1` | sys1's | sys2's | G2 G1 |
-| `connect_systems_in_parallel` | `sys1 + sys2` | shared | summed | G1 + G2 |
-| `hstack_systems` | | separate | summed | [G1, G2] |
-| `vstack_systems` | | shared | stacked | [G1; G2] |
-| `block_diag_systems` | | separate | stacked | [G1, 0; 0, G2] |
-| `connect_feedback_system` | | | | feedback loop |
-| `connect_systems` | | named signal connections, the most general | | |
-| `negate_system` | `-sys` | | negated | -G |
+| `connect_systems_in_series([sys1, ... sysn])` | `sysn * ... * sys1` | sys1's | sysN's | Gn * ... * G1 |
+| `connect_systems_in_parallel([sys1, ... sysn])` | `sys1 + ... + sysn` | shared | summed | G1 + ... + Gn |
+| `hstack_systems([sys1, ... sysn])` | | separate | summed | [G1, ... Gn] |
+| `vstack_systems([sys1, ... sysn])` | | shared | stacked | [G1; ... Gn] |
+| `block_diag_systems([sys1, ... sysn])` | | separate | stacked | [G1, 0, ... ; ... 0, Gn] |
+| `connect_feedback_system(sys1, sys2)` | | sys1's | sys1's | G / (1 + G*K) |
+| `connect_systems([sys1, ... sysn], connections)` | | any | any | |
+| `negate_system(sys)` | `-sys` | | negated | -G |
 
 `sys1 - sys2` is `sys1 + (-sys2)`. The names follow Matlab and
 python-control: `parallel()` there is `connect_systems_in_parallel`,
-`append()` is `block_diag_systems`. Before 2026-11,
-`connect_systems_in_parallel` was the block-diagonal combination and
-`sum_systems` the parallel one.
+`append()` is `block_diag_systems`.
 
 ## Linearizing Models
 
-`linearize(sys, x=None, u=None, t=0.0, params=None)` (also in
-`cas_models.transformations`) gives a model's state-space matrices
-`A, B, C, D` as numpy arrays: the Jacobians of its state and output
-functions at the state `x` and input `u` (zeros by default). For a
-continuous-time model they are those of dx/dt = Ax + Bu, for a
-discrete-time one of x(k+1) = Ax(k) + Bu(k); for a linear model they are
-exact at any operating point. A model with parameters needs their values
-(`params`, or `set_param_values` first).
+`linearize(sys, x=None, u=None, t=0.0, params=None)` in
+`cas_models.transformations` returns a set of linear model state-space matrices
+`A, B, C, D` as numpy arrays, i.e. the Jacobians of its state and output
+functions at the state `x` and input `u` (zeros by default). For a continuous-time model,
+`dx/dt = Ax + Bu`, for a discrete-time model, `x(k+1) = Ax(k) + Bu(k)`. For a linear 
+model they are exact at any operating point. All parameter values must be provided
+(using either `params`, or by calling `set_param_values` first).
 
 <!-- skip-test -->
 ```python
@@ -285,7 +283,7 @@ sys1.describe()
 
 ```python
 # Negative feedback loop: reference -> ctrl -> plant -> (feedback) -> ctrl
-sys_cl = connect_feedback_system(sys1, model_class=StateSpaceModelCT)
+sys_cl = connect_feedback_system(sys1)
 sys_cl.describe()
 # StateSpaceModelCT:
 #   Name: fbk_ctrl_plant
@@ -418,16 +416,21 @@ is a complete example.
 MATLAB's `arx` and `filter([zeros(1, nk) B], [1 A], u)`. Octave's `arx`
 counts the delay `nk` one less (see the class docstring).
 
-## Saving and Loading Models
+## Saving and Reconstructing Models
 
 ### Model specs
 
 A model spec is a human-readable YAML description of how to build a
-model: its class and the arguments given to it, or the transformation
-function (see below) and its arguments, to any depth. Every model records
-how it was made (its recipe, see `cas_models/recipes.py`), and `save()`
-and `to_yaml()` write that as its spec; `load_model()` and `from_yaml()`
-build the model from a spec again.
+model, including its class and the arguments used to initialize it, or in
+the case of models connected together, the transformation functions used
+and their arguments, recursively to any depth.
+
+The model spec is automatically generated as models are defined and 
+connected and attached to the model like a recipe (see `cas_models/recipes.py`).
+
+The `save()` and `to_yaml()` methods turn this recipe into spec in [Yaml](https://pyyaml.org/wiki/PyYAMLDocumentation)
+format. The `load_model()` and `from_yaml()` functions can then be used to
+re-construct an identical model from the spec.
 
 <!-- skip-test -->
 ```python
@@ -450,15 +453,22 @@ characters a folder name can't have replaced by `_`
 
 The spec of a model made by a class holds the class and the arguments
 given, leaving out those equal to their defaults (here `T1` and `T2`, so
-they are symbolic), and loads as that class:
+they are symbolic), and loads as that class.  For example:
 
+```
+from cas_models.continuous_time.models import SSModelCTLinearO2SISO
+model = SSModelCTLinearO2SISO(K=2.5, name="G2")
+model.save()
+```
+
+G2/model.yaml
 ```yaml
 cas_models_format: 1
 class: SSModelCTLinearO2SISO
-args: {K: 2.0}
+args: {K: 2.5, name: G2}
 ```
 
-A model with no arguments given is just its class
+A model instantiated with no arguments is defined simply by its class name
 (`class: SSModelCTLinearFOSISO`). A model given as an argument, such as
 the `model_ct` of `StateSpaceModelDTFromCTRK4`, is a nested
 `{class: ..., args: ...}`.
@@ -488,21 +498,23 @@ constructors sparsify their matrices). Tuples are written as
 `{tuple: [...]}` and complex numbers (e.g. ARX poles) as
 `{complex: [re, im]}`.
 
-### Models built from others
+### Models built from other models
 
-The spec of a model built by a transformation function of
+The spec of a model built by a transformation function from
 `cas_models.transformations` is the function and its arguments, with the
-models it takes given in the same way, to any depth:
+models it takes given in the same way, to any depth. The following
+functions can be used in model construction:
 
-- `connect_systems`: arbitrary named signal connections
-- `connect_systems_in_series` (`sys2 * sys1`)
-- `connect_systems_in_parallel` (`sys1 + sys2`; `sys1 - sys2` is
-  `sys1 + (-sys2)`)
+- `connect_systems`
+- `connect_systems_in_series` or `sys2 * sys1`
+- `connect_systems_in_parallel` or `sys1 + sys2`
+- `sys1 - sys2` is `sys1 + (-sys2)`
 - `connect_feedback_system`
 - `block_diag_systems`, `hstack_systems`, `vstack_systems`
 - `negate_system` (`-sys`)
 - `set_param_values` (see [Fitted models](#fitted-models))
 
+Example:
 ```yaml
 cas_models_format: 1
 function: hstack_systems
