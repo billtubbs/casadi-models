@@ -11,12 +11,11 @@ import casadi as cas
 import numpy as np
 import pytest
 import yaml
+from models_for_tests import dt_connected_arx, dt_custom
 from test_yaml_utils import (
     FUNCTION_CASES,
     assert_same_connected,
     assert_same_functions,
-    dt_connected_arx,
-    dt_custom,
 )
 
 from cas_models.continuous_time.models import (

@@ -780,6 +780,15 @@ the CasADi version.
     starts for a prediction-error fit).
   - Maybe a common StateEstimator base (or mixin) once something needs
     the type.
+- **AR models for unmeasured disturbances (2026-11-16):**
+  `SSModelDTARXSISO` needs na >= 1 and nb >= 1 (as `idarx`; MATLAB's
+  `arx` also allows na = 0, FIR, or nb = 0, AR). An AR model,
+  y(k) = e(k) / A(q^-1), driven by its noise e(k) as the input, could
+  model an unmeasured disturbance, e.g. as the noise part of an
+  innovations-form model or a disturbance model for the Kalman filter.
+  Probably a separate class, since its input would be the noise rather
+  than u. FIR models and pure gains aren't planned (FIR models have too
+  many parameters to identify with these methods).
 - **Estimation statistics in fitted models:** a model saved after
   `set_param_values(model, params_est)` holds its structure and the
   values, but nothing about how they were found (standard errors,

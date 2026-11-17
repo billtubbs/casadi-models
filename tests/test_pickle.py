@@ -18,6 +18,13 @@ import pytest
 from sympy import Matrix, symbols
 from sympy.physics.control.lti import StateSpace
 
+from models_for_tests import (
+    ct_custom,
+    ct_pi_feedback,
+    dt_connected_arx,
+    dt_custom,
+)
+
 from cas_models.continuous_time.models import (
     SSModelCTDirectTransmission,
     SSModelCTFromSympySS,
@@ -43,10 +50,6 @@ from cas_models.discrete_time.models import (
     StateSpaceModelDTFromCT,
     StateSpaceModelDTFromCTRK4,
     StateSpaceModelDTTFSISO,
-)
-from cas_models.transformations import (
-    connect_feedback_system,
-    connect_systems,
 )
 
 CASADI_TYPES = (cas.SX, cas.MX, cas.DM)
@@ -119,18 +122,6 @@ def round_trip(obj):
 # Models to test, one function each, so every test gets new symbols
 
 
-def ct_custom():
-    """Nonlinear, with a vector parameter p"""
-    t = cas.SX.sym("t")
-    x = cas.SX.sym("x", 2)
-    u = cas.SX.sym("u")
-    p = cas.SX.sym("p", 2)
-    rhs = cas.vertcat(-p[0] * x[0] ** 2 + u, x[0] - p[1] * x[1])
-    f = cas.Function("f", [t, x, u, p], [rhs], ["t", "x", "u", "p"], ["rhs"])
-    h = cas.Function("h", [t, x, u, p], [x[1]], ["t", "x", "u", "p"], ["y"])
-    return StateSpaceModelCT(f, h, n=2, params={"p": p}, name="custom")
-
-
 def ct_static_nonlinearity():
     t = cas.SX.sym("t")
     x = cas.SX.sym("x", 0)
@@ -161,27 +152,6 @@ def ct_from_sympy():
     return SSModelCTFromSympySS(sys, name="RLC")
 
 
-def ct_pi_feedback():
-    plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
-    ctrl = SSModelCTPIInt(name="ctrl")
-    return connect_feedback_system(plant * ctrl, model_class=StateSpaceModelCT)
-
-
-def dt_custom():
-    t = cas.SX.sym("t")
-    xk = cas.SX.sym("xk", 2)
-    uk = cas.SX.sym("uk")
-    a = cas.SX.sym("a")
-    xkp1 = cas.vertcat(a * xk[0] + uk, cas.sin(xk[0]) + 0.5 * xk[1])
-    F = cas.Function(
-        "F", [t, xk, uk, a], [xkp1], ["t", "xk", "uk", "a"], ["xkp1"]
-    )
-    H = cas.Function(
-        "H", [t, xk, uk, a], [xk[1]], ["t", "xk", "uk", "a"], ["yk"]
-    )
-    return StateSpaceModelDT(F, H, n=2, dt=0.5, params={"a": a})
-
-
 def dt_tf_symbolic():
     b0, a1 = cas.SX.sym("b0"), cas.SX.sym("a1")
     return StateSpaceModelDTTFSISO(
@@ -194,27 +164,6 @@ def dt_arx_real_poles():
     p0, p1 = cas.SX.sym("p_0"), cas.SX.sym("p_1")
     return SSModelDTARXSISO(
         A=cas.vertcat(-(p0 + p1), p0 * p1), nb=2, nk=1
-    )
-
-
-def dt_connected_arx():
-    """Two ARX paths summed, as in ffdtools.models.ARXPaths"""
-    inputs = ["CRAC1", "CRAC2"]
-    paths = [
-        SSModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
-        SSModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
-    ]
-    connections = {f"{name}_u": name for name in inputs}
-    connections["R11"] = [f"{name}_y" for name in inputs]
-    return connect_systems(
-        paths,
-        connections,
-        StateSpaceModelDT,
-        input_names=inputs,
-        output_names=["R11"],
-        keys=inputs,
-        verbose_names=True,
-        name="R11",
     )
 
 

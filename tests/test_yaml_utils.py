@@ -17,6 +17,13 @@ import numpy as np
 import pytest
 import yaml
 
+from models_for_tests import (
+    ct_custom,
+    ct_pi_feedback,
+    dt_connected_arx,
+    dt_custom,
+)
+
 from cas_models.continuous_time.models import (
     SSModelCTDirectTransmission,
     SSModelCTLinearFOSISO,
@@ -41,12 +48,9 @@ from cas_models.discrete_time.models import (
 )
 from cas_models.transformations import (
     block_diag_systems,
-    connect_feedback_system,
-    connect_systems,
     connect_systems_in_parallel,
     connect_systems_in_series,
     hstack_systems,
-    negate_system,
     set_param_values,
     vstack_systems,
 )
@@ -104,62 +108,6 @@ def read_model_yaml(folder):
 
 
 # Models
-
-
-def ct_custom():
-    """Nonlinear, with a vector parameter p"""
-    t = cas.SX.sym("t")
-    x = cas.SX.sym("x", 2)
-    u = cas.SX.sym("u")
-    p = cas.SX.sym("p", 2)
-    rhs = cas.vertcat(-p[0] * x[0] ** 2 + u, x[0] - p[1] * x[1])
-    f = cas.Function("f", [t, x, u, p], [rhs], ["t", "x", "u", "p"], ["rhs"])
-    h = cas.Function("h", [t, x, u, p], [x[1]], ["t", "x", "u", "p"], ["y"])
-    return StateSpaceModelCT(
-        f, h, n=2, params={"p": p}, name="custom", state_names=["x", "z"]
-    )
-
-
-def dt_custom():
-    t = cas.SX.sym("t")
-    xk = cas.SX.sym("xk", 2)
-    uk = cas.SX.sym("uk")
-    a = cas.SX.sym("a")
-    xkp1 = cas.vertcat(a * xk[0] + uk, cas.sin(xk[0]) + 0.5 * xk[1])
-    F = cas.Function(
-        "F", [t, xk, uk, a], [xkp1], ["t", "xk", "uk", "a"], ["xkp1"]
-    )
-    H = cas.Function(
-        "H", [t, xk, uk, a], [xk[1]], ["t", "xk", "uk", "a"], ["yk"]
-    )
-    return StateSpaceModelDT(F, H, n=2, dt=0.5, params={"a": a})
-
-
-def dt_connected_arx():
-    """Two ARX paths summed, as in ffdtools.models.ARXPaths"""
-    inputs = ["CRAC1", "CRAC2"]
-    paths = [
-        SSModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
-        SSModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
-    ]
-    connections = {f"{name}_u": name for name in inputs}
-    connections["R11"] = [f"{name}_y" for name in inputs]
-    return connect_systems(
-        paths,
-        connections,
-        StateSpaceModelDT,
-        input_names=inputs,
-        output_names=["R11"],
-        keys=inputs,
-        verbose_names=True,
-        name="R11",
-    )
-
-
-def ct_pi_feedback():
-    plant = SSModelCTLinearFOSISO(K=1, T1=2, name="plant")
-    ctrl = SSModelCTPIInt(name="ctrl")
-    return connect_feedback_system(plant * ctrl, model_class=StateSpaceModelCT)
 
 
 # (base class, make model, Functions compared exactly)
@@ -786,24 +734,10 @@ def test_load_imports_model_modules(tmp_path):
 MODELS_DIR = Path(__file__).parent / "data" / "models"
 
 
-def dt_connected_arx_flow():
+def dt_connected_arx_flow(**kwargs):
     """As dt_connected_arx(), with the names of the four_racks_dr case"""
-    inputs = ["CRAC1_flow", "CRAC2_flow"]
-    paths = [
-        SSModelDTARXSISO(na=2, nb=2, input_name="u", output_name="y"),
-        SSModelDTARXSISO(na=1, nb=1, input_name="u", output_name="y"),
-    ]
-    connections = {f"{name}_u": name for name in inputs}
-    connections["R11_intake"] = [f"{name}_y" for name in inputs]
-    return connect_systems(
-        paths,
-        connections,
-        StateSpaceModelDT,
-        input_names=inputs,
-        output_names=["R11_intake"],
-        keys=inputs,
-        verbose_names=True,
-        name="R11_intake",
+    return dt_connected_arx(
+        ["CRAC1_flow", "CRAC2_flow"], "R11_intake", **kwargs
     )
 
 
@@ -858,7 +792,8 @@ MODEL_FILES = {
     "dt_from_ct_cvodes": lambda: StateSpaceModelDTFromCT(
         SSModelCTLinearFOSISO(), 1.0, integrator_opts={"abstol": 1e-10}
     ),
-    "dt_connected_arx": dt_connected_arx_flow,
+    # Saved when the shift register was the only ARX realization
+    "dt_connected_arx": lambda: dt_connected_arx_flow(realization="shift"),
     "ct_pi_feedback_recipe": ct_pi_feedback,
     "dt_connected_arx_recipe": dt_connected_arx_flow,
 }

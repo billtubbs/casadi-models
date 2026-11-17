@@ -359,13 +359,14 @@ def test_StateSpaceModelDTTFSISO(
 
 
 def test_SSModelDTARXSISO(data_TP04_Q1a_ss):
+    """The shift-register realization: states are past signals."""
     # ARX model with the coefficients estimated by Octave's arx() with
     # na = 2, nb = 2, nk = 1. Octave's arx() (control package) delays the
     # input one step more than Matlab's arx() and filter(): its model is
     # filter([0 0 B], [1 A], u), which is nk = 2 in Matlab's convention.
     A = [-1.40429502, 0.69767633]
     B = [0.18669536, 0.16536220]
-    model = SSModelDTARXSISO(A=A, B=B, nk=2)
+    model = SSModelDTARXSISO(A=A, B=B, nk=2, realization="shift")
 
     assert str(model) == (
         "SSModelDTARXSISO("
@@ -428,7 +429,7 @@ def test_SSModelDTARXSISO(data_TP04_Q1a_ss):
     # Same model with symbolic coefficients
     na = 2
     nb = 2
-    model = SSModelDTARXSISO(na=na, nb=nb, nk=2)
+    model = SSModelDTARXSISO(na=na, nb=nb, nk=2, realization="shift")
 
     assert str(model) == (
         "SSModelDTARXSISO("
@@ -513,17 +514,28 @@ def test_SSModelDTARXSISO(data_TP04_Q1a_ss):
         ([-1.5, 0.7], [1.0, 0.5], 3),
         ([-0.5], [1.0, 0.5, 0.25], 1),
         ([-1.5, 0.7], [1.0, 0.5], 0),
-        ([], [2.0], 1),  # na = 0, n = 1: a pure delay
+        ([-0.5], [2.0, 1.0], 0),  # direct transmission, na > nb - 1
     ],
 )
-def test_SSModelDTARXSISO_matches_filter(A, B, nk):
+@pytest.mark.parametrize("realization", ["minimal", "shift"])
+def test_SSModelDTARXSISO_matches_filter(A, B, nk, realization):
     """The output equals Matlab's filter([zeros(1, nk) B], [1 A], u),
-    computed here with the ARX difference equation."""
+    computed here with the ARX difference equation, in both
+    realizations; the minimal one is controllable and observable."""
     model = SSModelDTARXSISO(
-        A=np.reshape(A, (-1, 1)), B=np.c_[B], nk=nk
+        A=np.reshape(A, (-1, 1)), B=np.c_[B], nk=nk, realization=realization
     )
     na, nb = len(A), len(B)
-    assert model.n == na + nk + nb - 1
+    if realization == "minimal":
+        assert model.n == max(na, nk + nb - 1)
+        A_ss, B_ss, C_ss, _ = linearize(model)
+        powers = [np.linalg.matrix_power(A_ss, i) for i in range(model.n)]
+        ctrb = np.hstack([Ai @ B_ss for Ai in powers])
+        obsv = np.vstack([C_ss @ Ai for Ai in powers])
+        assert np.linalg.matrix_rank(ctrb) == model.n
+        assert np.linalg.matrix_rank(obsv) == model.n
+    else:
+        assert model.n == na + nk + nb - 1
 
     rng = np.random.default_rng(0)
     nT = 50
@@ -579,7 +591,6 @@ def assert_same_arx(model, expected, params=()):
         ([0.9], [], 0.1, 1),
         ([0.9, 0.5], [-0.4], 0.2, 2),
         ([0.8 + 0.3j, 0.8 - 0.3j, 0.5], [0.3, -0.2], 1.5, 0),
-        ([], [0.5], 2.0, 1),
     ],
 )
 def test_SSModelDTARXSISO_poles_zeros(poles, zeros, b1, nk):
@@ -616,6 +627,21 @@ def test_SSModelDTARXSISO_poles_zeros(poles, zeros, b1, nk):
     assert_same_arx(model, expected)
 
 
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"A": [], "B": [1.0]}, "na must be at least 1"),
+        ({"na": 0, "nb": 1}, "na must be at least 1"),
+        ({"na": 1, "nb": 0}, "nb must be at least 1"),
+        ({"na": 1, "nb": 1, "nk": -1}, "nk must be at least 0"),
+        ({"na": 1, "nb": 1, "realization": "x"}, "realization must be"),
+    ],
+)
+def test_SSModelDTARXSISO_orders(kwargs, message):
+    with pytest.raises((AssertionError, ValueError), match=message):
+        SSModelDTARXSISO(**kwargs)
+
+
 def test_SSModelDTARXSISO_symbolic_poles_zeros():
     """Symbolic poles, zeros and b1 become the model's parameters"""
     p = [cas.SX.sym("p_1"), cas.SX.sym("p_2")]
@@ -623,7 +649,7 @@ def test_SSModelDTARXSISO_symbolic_poles_zeros():
     K = cas.SX.sym("K")
     model = SSModelDTARXSISO(poles=p, zeros=z, b1=K)
     assert sorted(model.params) == ["K", "p_1", "p_2", "z_1"]
-    assert model.na == 2 and model.nb == 2 and model.n == 4
+    assert model.na == 2 and model.nb == 2 and model.n == 2
     values = {"p_1": 0.9, "p_2": 0.6, "z_1": -0.3, "K": 0.5}
     A, B = arx_coefficients([0.9, 0.6], [-0.3], 0.5)
     expected = SSModelDTARXSISO(A=cas.DM(A), B=cas.DM(B))

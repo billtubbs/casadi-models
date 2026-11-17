@@ -1290,6 +1290,26 @@ def _numbered_symbols(prefix, n):
     return cas.vertcat(*[cas.SX.sym(f"{prefix}_{i}") for i in range(1, n + 1)])
 
 
+def arx_tf_coefficients(A, B, nk):
+    """The transfer function in z of the ARX model y = q^-nk B / A u
+    (A = [a_1, ..., a_na], B = [b_1, ..., b_nb], numbers or SX):
+
+                  num[0] z^N + ... + num[N]
+        G(z) = --------------------------------,  N = max(na, nk + nb - 1)
+                z^N + a_1 z^(N-1) + ... + a_N
+
+    found by multiplying numerator and denominator by z^N. Returns
+    (num, den), SX columns of length N + 1 (descending powers of z):
+    den = [1, a_1, ..., a_na, 0, ...], num = [0] * nk + [b_1, ...,
+    b_nb] + [0, ...]."""
+    A, B = as_sx_vector(A, "A"), as_sx_vector(B, "B")
+    na, nb = A.shape[0], B.shape[0]
+    N = max(na, nk + nb - 1)
+    den = cas.vertcat(1, A, cas.SX.zeros(N - na, 1))
+    num = cas.vertcat(cas.SX.zeros(nk, 1), B, cas.SX.zeros(N + 1 - nk - nb, 1))
+    return num, den
+
+
 class SSModelDTARXSISO(StateSpaceModelDTSISO):
     """A discrete-time ARX model of a dynamical system (the class was
     StateSpaceModelDTARXSISO before 2026-11-16, with parameters named
@@ -1314,14 +1334,33 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
 
         y = filter([zeros(1, nk), B], [1, A], u)
 
-    The model is simulated without the noise term, e(k) = 0, using the
-    past outputs and inputs as the states:
+    The model is simulated without the noise term, e(k) = 0, in one of
+    two state-space realizations of the same transfer function (the
+    same output from zero initial states; with nk = 0, u(k) acts on y(k)
+    directly, through D, in both):
 
-        x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb+1)]
+    - realization="minimal" (the default, since 2026-11-16): the
+      observable canonical form (tf_to_ss_obs_cas()) of the transfer
+      function in z (arx_tf_coefficients()), with
 
-    so there are n = na + nk + nb - 1 states (not a minimal realization
-    when nb + nk > 1, but the states are easy to interpret and to
-    initialize from data). With nk = 0, u(k) acts on y(k) directly.
+          n = max(na, nk + nb - 1)
+
+      states, controllable and observable unless A and B have a common
+      root (a pole-zero cancellation, which depends on the parameters'
+      values). The states aren't past signals, so an initial state has
+      to be estimated, but every part of it (and of a Kalman filter
+      gain) affects the output.
+    - realization="shift" (the only one before 2026-11-16): a shift
+      register of the past outputs and inputs,
+
+          x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb+1)]
+
+      with n = na + nk + nb - 1 states. The states are easy to
+      interpret and to initialize from data, but when nk + nb > 1 the
+      realization isn't minimal: extra poles at z = 0 that the output
+      doesn't show (unobservable), so an estimated initial state, or a
+      Kalman filter gain fitted to data, has combinations the data
+      can't determine.
 
     Comparing with Matlab and Octave arx():
     - Matlab (System Identification Toolbox): same convention. nk is the
@@ -1334,7 +1373,10 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
       SSModelDTARXSISO(A, B, nk=nk + 1). Its default, nk = 0, is
       the usual one-step delay, and it can't estimate a model with
       direct transmission (nk = 0 here). Its documentation doesn't say
-      so.
+      so. Its state-space model ([sys, x0] = arx(...)) is a minimal
+      realization (ss() of the transfer function, then prescale()), so
+      it has as many states as realization="minimal" here, but not the
+      same states.
     In both cases, A here is the estimated denominator without its
     leading 1, and B the numerator without its leading zeros.
 
@@ -1356,6 +1398,9 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
 
     which is the equation above. (Some texts leave the delay in B, as
     nk leading zero coefficients.)
+
+    na >= 1, nb >= 1 and nk >= 0 (as dynopt.sysid.idarx: no FIR
+    models, na = 0).
 
     Parameters: the symbols the model makes are numbered as the
     coefficients are, from 1 and always numbered (also when there is
@@ -1388,6 +1433,7 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
         b1=None,
         dt=None,
         real_poles=False,
+        realization="minimal",
     ):
         """Initialize a discrete-time ARX model:
 
@@ -1399,9 +1445,9 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
             B(q^-1) = b_1  + b_2 q^-1 + ... + b_nb q^{-nb+1}
             and q^-1 is the backward-in-time shift operator
 
-        This is internally represented as a state-space model with state
-        vector:
-            x(k) = [y(k-1), ..., y(k-na), u(k-1), ..., u(k-nk-nb+1)]
+        This is internally represented as a state-space model, a minimal
+        realization by default or a shift register of past outputs and
+        inputs (see realization below and the class docstring).
 
         Args:
             A (cas.SX, optional): Vector of the A polynomial's coefficients
@@ -1432,7 +1478,7 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
                 Numbers (complex ones in conjugate pairs) or real SX
                 symbols (e.g. [cas.SX.sym("p_1"), cas.SX.sym("p_2")]),
                 which become the model's parameters. A list, NumPy array
-                or CasADi vector; [] for na = 0.
+                or CasADi vector (na >= 1).
             zeros (list, optional): The roots z_1, ..., z_{nb-1} of B,
                 instead of B or nb, with b1:
 
@@ -1456,9 +1502,15 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
                 bounds on them (e.g. [exp(-dt / T_min), 0.999]) the
                 model can't oscillate, is stable and has no time
                 constant below T_min. Default: False.
+            realization (str, optional): "minimal" (default): the
+                observable canonical form, n = max(na, nk + nb - 1)
+                states. "shift": the states are the past outputs and
+                inputs, x(k) = [y(k-1), ..., y(k-na), u(k-1), ...,
+                u(k-nk-nb+1)], n = na + nk + nb - 1 (not minimal when
+                nk + nb > 1). The same model either way
+                apart from the states.
 
         Note:
-            The total number of states is n = na + nk + nb - 1.
             A model made from poles and zeros is the same model as the
             one made from the coefficients they give: only the
             parameters differ when they are symbolic. The arguments
@@ -1512,26 +1564,41 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
             B = as_sx_vector(B, "B")
             nb = B.shape[0]
         na, nb, nk = int(na), int(nb), int(nk)
-        assert na >= 0 and nb >= 1 and nk >= 0
+        assert na >= 1, f"na must be at least 1, not {na}"
+        assert nb >= 1, f"nb must be at least 1, not {nb}"
+        assert nk >= 0, f"nk must be at least 0, not {nk}"
+        if realization not in ("minimal", "shift"):
+            raise ValueError(
+                f"realization must be 'minimal' or 'shift', not {realization!r}"
+            )
 
-        # States: na past outputs, then m past inputs
-        m = nk + nb - 1  # largest input lag
-        n = na + m
         t = cas.SX.sym("t")
-        xk = cas.SX.sym("xk", n)
         uk = cas.SX.sym("uk")
-        # (reshaped: CasADi returns 1 x 0, not 0 x 1, for an empty
-        # slice of a 1 x 1 vector, e.g. na = 0, n = 1)
-        y_past = cas.reshape(xk[0:na], na, 1)  # y(k-1), ..., y(k-na)
+        if realization == "minimal":
+            # Observable canonical form of the transfer function
+            num, den = arx_tf_coefficients(A, B, nk)
+            A_ss, B_ss, C_ss, D_ss = tf_to_ss_obs_cas(num, den)
+            n = A_ss.shape[0]
+            xk = cas.SX.sym("xk", n)
+            yk = C_ss @ xk + D_ss * uk
+            xkp1 = A_ss @ xk + B_ss * uk
+        else:
+            # States: na past outputs, then m past inputs
+            m = nk + nb - 1  # largest input lag
+            n = na + m
+            xk = cas.SX.sym("xk", n)
+            y_past = xk[0:na]  # y(k-1), ..., y(k-na)
 
-        # Inputs u(k), u(k-1), ..., u(k-m) and the output y(k)
-        u_lags = cas.vertcat(uk, xk[na:n])
-        yk = -cas.dot(A, y_past) + cas.dot(B, u_lags[nk : nk + nb])
+            # Inputs u(k), u(k-1), ..., u(k-m) and the output y(k)
+            u_lags = cas.vertcat(uk, xk[na:n])
+            yk = -cas.dot(A, y_past) + cas.dot(B, u_lags[nk : nk + nb])
 
-        # Shift the past outputs and inputs by one time step:
-        # x(k+1) = [y(k), ..., y(k-na+1), u(k), ..., u(k-m+1)]
-        y_next = cas.vertcat(yk, xk[0 : na - 1]) if na > 0 else cas.SX(0, 1)
-        xkp1 = cas.vertcat(y_next, u_lags[0:m])
+            # Shift the past outputs and inputs by one time step:
+            # x(k+1) = [y(k), ..., y(k-na+1), u(k), ..., u(k-m+1)]
+            y_next = cas.vertcat(yk, xk[0 : na - 1])
+            # (reshaped: CasADi returns 1 x 0, not 0 x 1, for an empty
+            # slice of a 1 x 1 vector, m = 0)
+            xkp1 = cas.vertcat(y_next, cas.reshape(u_lags[0:m], m, 1))
 
         # Add any symbolic variables to params dictionary
         params = {v.name(): v for v in cas.symvar(A)}
@@ -1556,6 +1623,7 @@ class SSModelDTARXSISO(StateSpaceModelDTSISO):
         self.na = na
         self.nb = nb
         self.nk = nk
+        self.realization = realization
         self.poles = poles
         self.zeros = zeros
         self.b1 = b1 if zeros is not None else None
